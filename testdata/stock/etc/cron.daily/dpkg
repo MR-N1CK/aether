@@ -1,0 +1,7 @@
+#!/bin/sh
+# Standard dpkg daily cron
+cd /var/backups
+if [ -s dpkg.status.0 ]; then
+    cmp -s dpkg.status.0 /var/lib/dpkg/status || \
+    cp -p /var/lib/dpkg/status dpkg.status
+fi

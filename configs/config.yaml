@@ -1,0 +1,50 @@
+# Aether Threat Hunting Scanner Configuration
+# Default locations checked:
+# 1. ~/.config/aether/config.yaml
+# 2. /etc/aether/config.yaml
+
+scan:
+  # Target paths to inspect
+  paths:
+    - /bin
+    - /sbin
+    - /usr/bin
+    - /usr/sbin
+    - /usr/local/bin
+    - /tmp
+    - /dev/shm
+    - /var/tmp
+
+  # Paths to exclude from scanning.
+  # FORENSIC NOTE: /dev is intentionally NOT excluded wholesale.
+  # Attackers frequently place dropped binaries and payloads in /dev/shm or disguised in /dev.
+  # We exclude only virtual kernel filesystems and per-user session mounts.
+  excludes:
+    - /proc
+    - /sys
+    - /dev/pts
+    - /run/user
+
+  # Triage mode flags (quick and full are mutually exclusive)
+  quick: false
+  full: false
+
+  # Maximum file size to inspect in bytes (default: 50MB)
+  # Prevents hung workers on multi-GB core dumps, databases, or log files
+  max_filesize: 52428800
+
+  # Worker pool concurrency (0 = auto-detect runtime.NumCPU())
+  threads: 4
+
+  # Process CPU scheduling priority (-20 to 19, higher = lower priority)
+  # Setting nice >= 10 minimizes impact on production workloads
+  nice: 0
+
+  # Output destination for JSON report (leave empty for console only)
+  json_out: ""
+
+logging:
+  # Log level: "debug", "info", "warn", "error"
+  level: "info"
+  # Log format: "text" or "json"
+  format: "text"

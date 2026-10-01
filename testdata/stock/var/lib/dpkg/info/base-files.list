@@ -1,0 +1,13 @@
+/bin/bash
+/usr/bin/bash
+/etc/bash.bashrc
+/etc/profile
+/etc/crontab
+/etc/cron.daily/apt-compat
+/etc/cron.daily/dpkg
+/etc/cron.daily/logrotate
+/etc/cron.daily/man-db
+/etc/cron.daily/.placeholder
+/lib/systemd/system/stock.service
+/etc/systemd/system/stock.service
+/usr/lib/systemd/70-systemd-shell-extra.sh

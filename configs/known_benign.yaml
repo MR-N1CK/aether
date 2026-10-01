@@ -1,0 +1,29 @@
+# Aether Known-Benign Path Suppression Rules
+# Files matching these regular expressions skip the ELF-in-temp heuristic
+# while still undergoing hash, YARA, and path IOC evaluations.
+- path_regex: '^/tmp/\.bun-([0-9]+)-.*'
+  reason: 'Bun runtime temporary cache and binary extraction directory'
+  owner_matches_name_uid: true
+- path_regex: '^/var/tmp/\.bun-([0-9]+)-.*'
+  reason: 'Bun runtime temporary cache and binary extraction directory'
+  owner_matches_name_uid: true
+- path_regex: '^/tmp/go-build.*'
+  reason: 'Go build temporary compilation cache directory'
+- path_regex: '^/var/tmp/go-build.*'
+  reason: 'Go build temporary compilation cache directory'
+- path_regex: '^/tmp/npm-.*'
+  reason: 'npm temporary package installation cache directory'
+- path_regex: '^/var/tmp/npm-.*'
+  reason: 'npm temporary package installation cache directory'
+- path_regex: '^/tmp/pip-.*'
+  reason: 'Python pip build and wheel cache directory'
+- path_regex: '^/var/tmp/pip-.*'
+  reason: 'Python pip build and wheel cache directory'
+- path_regex: '^/tmp/cargo-install.*'
+  reason: 'Rust cargo install temporary compilation directory'
+- path_regex: '^/var/tmp/cargo-install.*'
+  reason: 'Rust cargo install temporary compilation directory'
+- path_regex: '^/tmp/\.mount_.*'
+  reason: 'AppImage runtime FUSE mount directory'
+- path_regex: '^/var/tmp/\.mount_.*'
+  reason: 'AppImage runtime FUSE mount directory'

@@ -1,0 +1,723 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"math/rand"
+	"os"
+	"os/signal"
+	"os/user"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
+
+	"aether/internal/config"
+	"aether/internal/events"
+	"aether/internal/modules/persistence"
+	"aether/internal/report"
+	"aether/internal/scanner"
+	"aether/internal/triage"
+	"aether/internal/ui/plain"
+	"aether/internal/ui/theme"
+	"aether/internal/ui/tui"
+	"aether/internal/yara"
+)
+
+var (
+	version   = "0.1.0-dev"
+	commit    = "none"
+	buildDate = "unknown"
+	devRpath  = "0"
+)
+
+type globalFlags struct {
+	configPath string
+	verbose    bool
+	debug      bool
+	quiet      bool
+	plain      bool
+	noAnim     bool
+}
+
+type scanCmdFlags struct {
+	paths           []string
+	excludes        []string
+	quick           bool
+	full            bool
+	maxFileSize     int64
+	jsonOut         string
+	threads         int
+	nice            int
+	iocDir          string
+	allowlist       string
+	oneFileSystem   bool
+	rulesDir        string
+	yaraMaxFileSize int64
+	demoRules       bool
+}
+
+func isTerminal() bool {
+	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
+}
+
+func main() {
+	var gFlags globalFlags
+
+	rootCmd := &cobra.Command{
+		Use:   "aether",
+		Short: "Aether - Defensive Linux threat-hunting scanner",
+		Long: `Aether is a Linux-native defensive compromise detection and threat-hunting
+scanner inspired by THOR Lite. It executes read-only inspections utilizing IOC
+matching and YARA signature engines without altering scanned systems.`,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+
+	rootCmd.PersistentFlags().StringVarP(&gFlags.configPath, "config", "c", "", "Path to YAML configuration file")
+	rootCmd.PersistentFlags().BoolVarP(&gFlags.verbose, "verbose", "v", false, "Enable verbose info logging")
+	rootCmd.PersistentFlags().BoolVar(&gFlags.debug, "debug", false, "Enable debug structured logging")
+	rootCmd.PersistentFlags().BoolVarP(&gFlags.quiet, "quiet", "q", false, "Quiet mode (errors only)")
+	rootCmd.PersistentFlags().BoolVar(&gFlags.plain, "plain", false, "Force plain text line-based output (no TUI)")
+	rootCmd.PersistentFlags().BoolVar(&gFlags.noAnim, "no-anim", false, "Disable animations and splash screen")
+
+	// Scan command
+	var sFlags scanCmdFlags
+	scanCmd := &cobra.Command{
+		Use:   "scan",
+		Short: "Perform compromise detection and threat hunting scan",
+		Long: `Scan target filesystems, processes, and persistence hooks for indicators
+of compromise (IOCs) and YARA signature matches in strict read-only mode.`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if sFlags.quick && sFlags.full {
+				return errors.New("--quick and --full flags are mutually exclusive")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// 1. Determine execution mode (TUI vs Plain)
+			usePlain := gFlags.plain || !isTerminal()
+
+			// 2. Setup logging: unless --debug is explicitly set, suppress raw slog output
+			// so that plain consumer and TUI retain full control over terminal rendering.
+			var logger *slog.Logger
+			if gFlags.debug {
+				logger = report.SetupLogger("debug", false)
+			} else {
+				logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+				slog.SetDefault(logger)
+			}
+
+			// 3. Load configuration hierarchy
+			cfg, loadedPath, err := config.LoadConfig(gFlags.configPath)
+			if err != nil {
+				return fmt.Errorf("configuration error: %w", err)
+			}
+			if loadedPath != "" {
+				logger.Debug("loaded configuration file", slog.String("path", loadedPath))
+			}
+
+			// 4. Apply CLI flag overrides to configuration
+			if cmd.Flags().Changed("path") {
+				cfg.Scan.Paths = sFlags.paths
+				cfg.Scan.ExplicitPaths = true
+			}
+			if cmd.Flags().Changed("exclude") {
+				cfg.Scan.Excludes = sFlags.excludes
+			}
+			if cmd.Flags().Changed("quick") {
+				cfg.Scan.Quick = sFlags.quick
+			}
+			if cmd.Flags().Changed("full") {
+				cfg.Scan.Full = sFlags.full
+			}
+			if cmd.Flags().Changed("max-filesize") {
+				cfg.Scan.MaxFileSize = sFlags.maxFileSize
+			}
+			if cmd.Flags().Changed("threads") {
+				cfg.Scan.Threads = sFlags.threads
+			}
+			if cmd.Flags().Changed("nice") {
+				cfg.Scan.Nice = sFlags.nice
+			}
+			if cmd.Flags().Changed("json-out") {
+				cfg.Scan.JSONOut = sFlags.jsonOut
+			}
+			if cmd.Flags().Changed("ioc-dir") {
+				cfg.Scan.IOCDir = sFlags.iocDir
+			}
+			if cmd.Flags().Changed("allowlist") {
+				cfg.Scan.AllowlistPath = sFlags.allowlist
+			}
+			if cmd.Flags().Changed("one-file-system") {
+				cfg.Scan.OneFileSystem = sFlags.oneFileSystem
+			}
+			if cmd.Flags().Changed("rules-dir") {
+				cfg.Scan.RulesDir = sFlags.rulesDir
+			}
+			if cmd.Flags().Changed("yara-max-filesize") {
+				cfg.Scan.YaraMaxFileSize = sFlags.yaraMaxFileSize
+			}
+			if cmd.Flags().Changed("demo-rules") {
+				cfg.Scan.DemoRules = sFlags.demoRules
+			}
+
+			// 5. Apply niceness early at startup before worker pool starts
+			if cfg.Scan.Nice != 0 {
+				if err := scanner.ApplyNice(cfg.Scan.Nice); err != nil {
+					logger.Warn("could not apply nice priority", slog.Any("error", err))
+				}
+			}
+
+			// 6. Initialize event bus and reporter subscriber
+			bus := events.NewEventBus()
+			defer bus.Close()
+
+			reporter, err := report.NewConcurrentReporter(cfg.Scan.JSONOut)
+			if err != nil {
+				return fmt.Errorf("failed to initialize reporter: %w", err)
+			}
+			defer reporter.Close()
+
+			// 7. Setup graceful cancellation context
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			exe, _ := os.Executable()
+			binName := filepath.Base(exe)
+			s := scanner.NewScanner(cfg, bus, reporter, logger,
+				scanner.WithDevRpath(devRpath == "1"),
+				scanner.WithBuildInfo(version, buildDate, binName),
+			)
+
+			mode := "custom"
+			if cfg.Scan.Quick {
+				mode = "quick"
+			} else if cfg.Scan.Full {
+				mode = "full"
+			}
+
+			th := theme.NewTheme(theme.DetectNoColor())
+
+			if usePlain {
+				var outWriter io.Writer = os.Stdout
+				if sFlags.jsonOut == "-" {
+					outWriter = os.Stderr
+				}
+				consumer := plain.NewConsumer(outWriter, th, gFlags.verbose)
+				plainSub := bus.Subscribe()
+				defer plainSub.Close()
+
+				scanErrChan := make(chan error, 1)
+				go func() {
+					scanErrChan <- s.Run(ctx)
+				}()
+
+				_ = consumer.Consume(ctx, plainSub)
+				return <-scanErrChan
+			}
+
+			// Interactive TUI execution
+			uiSub := bus.Subscribe()
+			defer uiSub.Close()
+
+			scanCtx, scanCancel := context.WithCancel(ctx)
+			defer scanCancel()
+
+			go func() {
+				_ = s.Run(scanCtx)
+			}()
+
+			return tui.Run(ctx, scanCancel, uiSub, th, gFlags.noAnim, mode, cfg.Scan.Threads, cfg.Scan.Paths)
+		},
+	}
+
+	// Register scan flags
+	scanCmd.Flags().StringSliceVarP(&sFlags.paths, "path", "p", nil, "Target path(s) to scan (repeatable)")
+	scanCmd.Flags().BoolVar(&sFlags.quick, "quick", false, "Perform quick triage scan of high-risk locations")
+	scanCmd.Flags().BoolVar(&sFlags.full, "full", false, "Perform full deep filesystem scan")
+	scanCmd.Flags().StringSliceVarP(&sFlags.excludes, "exclude", "e", nil, "Target path(s) to exclude from scan (repeatable)")
+	scanCmd.Flags().Int64Var(&sFlags.maxFileSize, "max-filesize", config.DefaultMaxFileSize, "Maximum file size in bytes to inspect/hash (default: 50MB); files larger than this are skipped completely")
+	scanCmd.Flags().StringVar(&sFlags.jsonOut, "json-out", "", "Output report destination path for JSON format")
+	scanCmd.Flags().IntVarP(&sFlags.threads, "threads", "t", runtime.NumCPU(), "Worker pool concurrency")
+	scanCmd.Flags().IntVar(&sFlags.nice, "nice", config.DefaultNice, "CPU scheduling priority (-20 to 19, higher = lower priority)")
+	scanCmd.Flags().StringVar(&sFlags.iocDir, "ioc-dir", "", "Custom directory containing IOC signature files (.txt, .yaml)")
+	scanCmd.Flags().StringVar(&sFlags.allowlist, "allowlist", "", "Path to trusted SHA256 allowlist file")
+	scanCmd.Flags().BoolVar(&sFlags.oneFileSystem, "one-file-system", false, "Do not cross filesystem mount boundaries (default on for --full)")
+	scanCmd.Flags().StringVar(&sFlags.rulesDir, "rules-dir", "", "Custom directory containing YARA rules (*.yar, *.yara)")
+	scanCmd.Flags().Int64Var(&sFlags.yaraMaxFileSize, "yara-max-filesize", config.DefaultYaraMaxFileSize, "Maximum file size in bytes for in-memory YARA scanning (default: 20MB); files above this are stream-hashed but skip YARA")
+	scanCmd.Flags().BoolVar(&sFlags.demoRules, "demo-rules", false, "Load synthetic demonstration YARA rules (harmless EICAR/marker patterns)")
+
+	scanCmd.MarkFlagsMutuallyExclusive("quick", "full")
+
+	// Update command
+	updateCmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update threat indicators, IOC signatures, and YARA rules",
+		Long:  `Downloads latest threat definitions and rules from configured remote feeds.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			logger := report.SetupLogger("info", false)
+			logger.Info("checking for threat intelligence updates...")
+			logger.Info("no remote signature feeds configured (update stub)")
+			return nil
+		},
+	}
+
+	// Version command
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print version, commit, and build information",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Printf("Aether Threat Hunter v%s\n", version)
+			fmt.Printf("  Commit:     %s\n", commit)
+			fmt.Printf("  Build Date: %s\n", buildDate)
+			fmt.Printf("  Go Version: %s\n", runtime.Version())
+			fmt.Printf("  OS/Arch:    %s/%s\n", runtime.GOOS, runtime.GOARCH)
+			fmt.Printf("  YARA:       %s\n", yara.VersionInfo())
+			return nil
+		},
+	}
+
+	// Hidden Demo command for UI testing and verification
+	var demoJSONOut string
+	demoCmd := &cobra.Command{
+		Use:    "demo",
+		Short:  "Run simulated hunting scan with synthetic events (UI test)",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			usePlain := gFlags.plain || !isTerminal()
+			bus := events.NewEventBus()
+			defer bus.Close()
+
+			th := theme.NewTheme(theme.DetectNoColor())
+
+			var reporter *report.ConcurrentReporter
+			if demoJSONOut != "" {
+				var err error
+				reporter, err = report.NewConcurrentReporter(demoJSONOut)
+				if err != nil {
+					return fmt.Errorf("failed to open demo json output: %w", err)
+				}
+				defer reporter.Close()
+				bus.AttachReporter(reporter)
+			}
+
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+
+			demoDone := make(chan struct{})
+
+			// Simulated event generator
+			go func() {
+				defer close(demoDone)
+				runDemoGenerator(ctx, bus)
+			}()
+
+			if usePlain {
+				consumer := plain.NewConsumer(os.Stdout, th, gFlags.verbose)
+				sub := bus.Subscribe()
+				defer sub.Close()
+
+				_ = consumer.Consume(ctx, sub)
+				<-demoDone
+				return nil
+			}
+
+			uiSub := bus.Subscribe()
+			defer uiSub.Close()
+
+			return tui.Run(ctx, cancel, uiSub, th, gFlags.noAnim, "QUICK", 8, []string{"/bin", "/etc", "/tmp", "/dev/shm"})
+		},
+	}
+	demoCmd.Flags().StringVar(&demoJSONOut, "json-out", "", "Output report destination path for demo JSON format")
+
+	// Ack command
+	type ackCmdFlags struct {
+		reason string
+		rule   string
+		system bool
+		yes    bool
+	}
+	var aFlags ackCmdFlags
+
+	ackCmd := &cobra.Command{
+		Use:   "ack <path>",
+		Short: "Acknowledge and triage known findings for a path",
+		Long: `Acknowledge a finding to downgrade it to INFO and prevent it from altering the scan verdict.
+Pins findings by file hash, unit exec target hashes, or matched line hash.
+ALERT and IOC findings are never ackable.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			targetPath := filepath.Clean(args[0])
+			if aFlags.reason == "" {
+				return errors.New("--reason flag is required")
+			}
+
+			var destPath string
+			var userHome string
+			isSudoUser := false
+			sudoUser := os.Getenv("SUDO_USER")
+
+			if aFlags.system {
+				if os.Geteuid() != 0 {
+					return errors.New("root privileges required to write system acknowledgment file (/etc/aether/acknowledged.yaml)")
+				}
+				destPath = "/etc/aether/acknowledged.yaml"
+			} else {
+				if os.Geteuid() == 0 && sudoUser != "" {
+					fmt.Printf("[AETHER] [WARNING] Running under sudo without --system: targeting user config for SUDO_USER=%s\n", sudoUser)
+					if u, uErr := user.Lookup(sudoUser); uErr == nil && u.HomeDir != "" {
+						userHome = u.HomeDir
+						isSudoUser = true
+					}
+				}
+				if userHome == "" {
+					userHome, _ = os.UserHomeDir()
+				}
+				if userHome == "" {
+					return errors.New("cannot determine user home directory")
+				}
+				cleanHome := filepath.Clean(userHome)
+				if !strings.HasPrefix(targetPath, cleanHome+"/") && targetPath != cleanHome {
+					return fmt.Errorf("user acknowledgment file cannot acknowledge paths outside user home directory (%s is not in %s; use --system as root)", targetPath, cleanHome)
+				}
+				destPath = filepath.Join(cleanHome, ".config/aether/acknowledged.yaml")
+			}
+
+			lst, err := os.Lstat(targetPath)
+			if err != nil {
+				return fmt.Errorf("target path inaccessible: %w", err)
+			}
+
+			addedBy := os.Getenv("USER")
+			if addedBy == "" {
+				if isSudoUser {
+					addedBy = sudoUser
+				} else {
+					addedBy = "user"
+				}
+			}
+
+			entry := triage.AckEntry{
+				Path:    targetPath,
+				Rule:    aFlags.rule,
+				Reason:  aFlags.reason,
+				AddedBy: addedBy,
+			}
+
+			if (lst.Mode() & os.ModeSymlink) != 0 {
+				target, err := os.Readlink(targetPath)
+				if err != nil {
+					return fmt.Errorf("failed to read symlink %s: %w", targetPath, err)
+				}
+				entry.SymlinkTarget = target
+				targetHost := target
+				if !filepath.IsAbs(target) {
+					targetHost = filepath.Join(filepath.Dir(targetPath), target)
+				}
+				targetHash, err := triage.HashFile(targetHost, 50*1024*1024)
+				if err == nil {
+					entry.SymlinkTargetSHA256 = targetHash
+				}
+			} else {
+				isUnit := strings.HasSuffix(targetPath, ".service") || strings.HasSuffix(targetPath, ".timer") || strings.HasSuffix(targetPath, ".socket")
+				if isUnit {
+					h, err := triage.HashFile(targetPath, 50*1024*1024)
+					if err != nil {
+						return fmt.Errorf("failed to hash unit file %s: %w", targetPath, err)
+					}
+					entry.FileSHA256 = h
+					if data, err := os.ReadFile(targetPath); err == nil {
+						sc := bufio.NewScanner(bytes.NewReader(data))
+						entry.ExecTargetHashes = make(map[string]string)
+						for sc.Scan() {
+							line := strings.TrimSpace(sc.Text())
+							if strings.HasPrefix(line, "Exec") && strings.Contains(line, "=") {
+								cmd := strings.TrimSpace(line[strings.Index(line, "=")+1:])
+								targets, _ := persistence.ExtractExecTargets(cmd)
+								for _, t := range targets {
+									if strings.HasPrefix(t, "/home/") || strings.HasPrefix(t, "~/") || strings.HasPrefix(t, "/root/") {
+										th, thErr := triage.HashFile(t, 50*1024*1024)
+										if thErr == nil {
+											entry.ExecTargetHashes[t] = th
+										}
+									}
+								}
+							}
+						}
+						if len(entry.ExecTargetHashes) == 0 {
+							entry.ExecTargetHashes = nil
+						}
+					}
+				} else {
+					if data, err := os.ReadFile(targetPath); err == nil {
+						sc := bufio.NewScanner(bytes.NewReader(data))
+						var foundLine string
+						cfg := config.NewDefaultConfig()
+						for sc.Scan() {
+							line := strings.TrimSpace(sc.Text())
+							sigs := persistence.CheckSuspiciousCommand(line, 0, cfg, "", false, nil)
+							for _, s := range sigs {
+								if aFlags.rule == "" || s.RuleName == aFlags.rule || strings.Contains(s.RuleName, aFlags.rule) {
+									if s.Severity == report.SeverityAlert || s.IsReverseShellPrimitive || s.IsIOCMatch {
+										return errors.New("ALERT and IOC findings cannot be acknowledged")
+									}
+									foundLine = line
+									break
+								}
+							}
+							if foundLine != "" {
+								break
+							}
+						}
+						if foundLine != "" {
+							entry.LineSHA256 = triage.HashLine(foundLine)
+							entry.LineContent = foundLine
+							targets, _ := persistence.ExtractExecTargets(foundLine)
+							entry.ExecTargetHashes = make(map[string]string)
+							for _, t := range targets {
+								th, thErr := triage.HashFile(t, 50*1024*1024)
+								if thErr == nil {
+									entry.ExecTargetHashes[t] = th
+								}
+							}
+							if len(entry.ExecTargetHashes) == 0 {
+								entry.ExecTargetHashes = nil
+							}
+						} else {
+							h, err := triage.HashFile(targetPath, 50*1024*1024)
+							if err != nil {
+								return fmt.Errorf("failed to hash file: %w", err)
+							}
+							entry.FileSHA256 = h
+						}
+					}
+				}
+			}
+
+			// Show preview
+			fmt.Println("[AETHER] Finding Acknowledgment Preview:")
+			fmt.Printf("  Target Path:        %s\n", targetPath)
+			if entry.Rule != "" {
+				fmt.Printf("  Rule:               %s\n", entry.Rule)
+			} else {
+				fmt.Printf("  Rule:               (all rules on this path)\n")
+			}
+			fmt.Printf("  Reason:             %s\n", entry.Reason)
+			fmt.Printf("  Destination Config: %s\n", destPath)
+			if entry.FileSHA256 != "" {
+				fmt.Printf("  File SHA256:        %s\n", entry.FileSHA256)
+			}
+			if entry.LineSHA256 != "" {
+				fmt.Printf("  Line SHA256:        %s\n", entry.LineSHA256)
+				fmt.Printf("  Line Content:       %s\n", entry.LineContent)
+			}
+			if len(entry.ExecTargetHashes) > 0 {
+				fmt.Printf("  Exec Target Hashes:\n")
+				for tp, th := range entry.ExecTargetHashes {
+					fmt.Printf("    - %s: %s\n", tp, th)
+				}
+			}
+			if entry.SymlinkTarget != "" {
+				fmt.Printf("  Symlink Target:     %s (%s)\n", entry.SymlinkTarget, entry.SymlinkTargetSHA256)
+			}
+
+			if !aFlags.yes {
+				fmt.Print("\nApply acknowledgment? [y/N]: ")
+				var answer string
+				_, _ = fmt.Scanln(&answer)
+				answer = strings.ToLower(strings.TrimSpace(answer))
+				if answer != "y" && answer != "yes" {
+					fmt.Println("[AETHER] Operation aborted.")
+					return nil
+				}
+			}
+
+			if err := triage.WriteAckEntry(destPath, entry); err != nil {
+				return fmt.Errorf("failed to write acknowledgment: %w", err)
+			}
+
+			if isSudoUser {
+				if u, uErr := user.Lookup(sudoUser); uErr == nil {
+					var uid, gid int
+					fmt.Sscanf(u.Uid, "%d", &uid)
+					fmt.Sscanf(u.Gid, "%d", &gid)
+					_ = os.Chown(destPath, uid, gid)
+					_ = os.Chown(filepath.Dir(destPath), uid, gid)
+				}
+			}
+
+			fmt.Printf("[AETHER] Successfully acknowledged %s in %s\n", targetPath, destPath)
+			return nil
+		},
+	}
+	ackCmd.Flags().StringVar(&aFlags.reason, "reason", "", "Reason for acknowledging the finding (required)")
+	ackCmd.Flags().StringVar(&aFlags.rule, "rule", "", "Specific rule name to acknowledge (optional)")
+	ackCmd.Flags().BoolVar(&aFlags.system, "system", false, "Write to system acknowledgment file (/etc/aether/acknowledged.yaml)")
+	ackCmd.Flags().BoolVarP(&aFlags.yes, "yes", "y", false, "Non-interactive confirmation")
+
+	rootCmd.AddCommand(scanCmd, ackCmd, updateCmd, versionCmd, demoCmd)
+
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runDemoGenerator(ctx context.Context, bus *events.EventBus) {
+	startTime := time.Now()
+	bus.Publish(events.ScanStarted{
+		Time:        startTime,
+		Paths:       []string{"/bin", "/sbin", "/etc", "/tmp", "/dev/shm"},
+		Excludes:    []string{"/proc", "/sys", "/dev/pts", "/run/user"},
+		Mode:        "quick",
+		Threads:     8,
+		MaxFileSize: 52428800,
+	})
+
+	time.Sleep(300 * time.Millisecond)
+
+	sampleFiles := []string{
+		"/bin/systemd", "/bin/bash", "/usr/bin/sudo", "/etc/shadow",
+		"/etc/pam.d/common-auth", "/etc/systemd/system/threat.service",
+		"/tmp/.X11-unix/X0", "/dev/shm/.stealth_miner", "/var/tmp/.cache_bak",
+		"/proc/1420/exe", "/usr/sbin/cron", "/etc/crontab",
+	}
+
+	modulesList := []struct {
+		name string
+		desc string
+	}{
+		{"process", "Inspects running processes, memory mappings, and deleted binaries"},
+		{"persistence", "Scans systemd services, cron jobs, and shell profiles"},
+		{"filesystem", "Inspects permissions, hidden directories, and suspicious executables"},
+	}
+
+	for _, m := range modulesList {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			bus.Publish(events.ModuleStarted{
+				Time:        time.Now(),
+				ModuleName:  m.name,
+				Description: m.desc,
+			})
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
+
+	var filesCount int64
+	for i := 0; i < 40; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			filePath := sampleFiles[rand.Intn(len(sampleFiles))]
+			filesCount += 35
+			bus.Publish(events.FileScanned{
+				Time: time.Now(),
+				Path: filePath,
+				Size: 1024 + int64(rand.Intn(50000)),
+			})
+
+			bus.Publish(events.Progress{
+				Time:         time.Now(),
+				CurrentFiles: filesCount,
+				FilesPerSec:  float64(300 + rand.Intn(200)),
+				Elapsed:      time.Since(startTime),
+			})
+
+			// Emit synthetic findings with [DEMO] prefix and {"synthetic": true}
+			if i == 5 {
+				f := report.NewFinding(
+					"persistence",
+					report.SeverityInfo,
+					"/etc/cron.d/anacron",
+					"[DEMO] Routine cron job discovered in standard location",
+					"Routine_Cron_Task",
+				)
+				f.Metadata["synthetic"] = true
+				bus.Publish(events.FindingRaised{Time: time.Now(), Finding: f})
+			} else if i == 12 {
+				f := report.NewFinding(
+					"filesystem",
+					report.SeverityNotice,
+					"/var/tmp/.cache_bak",
+					"[DEMO] Hidden dot-directory discovered in world-writable temp location",
+					"Suspicious_Hidden_Directory",
+				)
+				f.Metadata["synthetic"] = true
+				bus.Publish(events.FindingRaised{Time: time.Now(), Finding: f})
+			} else if i == 20 {
+				f := report.NewFinding(
+					"process",
+					report.SeverityWarning,
+					"/proc/1842/exe",
+					"[DEMO] Process running with unlinked/deleted binary from filesystem",
+					"Unlinked_Process_Binary",
+				)
+				f.Metadata["synthetic"] = true
+				f.Hashes["SHA256"] = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+				bus.Publish(events.FindingRaised{Time: time.Now(), Finding: f})
+			} else if i == 28 {
+				f := report.NewFinding(
+					"process",
+					report.SeverityAlert,
+					"/dev/shm/.stealth_miner",
+					"[DEMO] Memory-only stealth execution detected via memfd_create descriptor",
+					"Linux_Trojan_BPFDoor",
+				)
+				f.Metadata["synthetic"] = true
+				f.Hashes["MD5"] = "5d41402abc4b2a76b9719d911017c592"
+				f.Hashes["SHA256"] = "a8f5f167f44f4964e6c998dee827110c"
+				bus.Publish(events.FindingRaised{Time: time.Now(), Finding: f})
+			}
+
+			time.Sleep(60 * time.Millisecond)
+		}
+	}
+
+	for _, m := range modulesList {
+		bus.Publish(events.ModuleFinished{
+			Time:          time.Now(),
+			ModuleName:    m.name,
+			Duration:      time.Duration(400+rand.Intn(300)) * time.Millisecond,
+			FindingsCount: 1,
+		})
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Final scan event
+	verdict, _ := events.ComputeVerdict(nil, 1, 1, 1, 0)
+	bus.Publish(events.ScanFinished{
+		Time:          time.Now(),
+		TotalDuration: time.Since(startTime),
+		FilesScanned:  filesCount,
+		Coverage: events.CoverageStats{
+			FilesScanned:      filesCount,
+			SkippedOversize:   2,
+			SkippedPermission: 1,
+			SkippedVanished:   0,
+			SkippedNotRegular: 4,
+			SkippedExcluded:   3,
+		},
+		TotalFindings: 4,
+		Alerts:        1,
+		Warnings:      1,
+		Notices:       1,
+		Infos:         1,
+		Verdict:       verdict,
+		Partial:       true,
+	})
+}

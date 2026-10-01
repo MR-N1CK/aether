@@ -1,0 +1,10 @@
+[Unit]
+Description=Stock System Service
+Documentation=man:systemd(1)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c "echo stock service running"
+
+[Install]
+WantedBy=multi-user.target

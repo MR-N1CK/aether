@@ -1,0 +1,4 @@
+#!/bin/sh
+# Standard logrotate daily cron
+test -x /usr/sbin/logrotate || exit 0
+/usr/sbin/logrotate /etc/logrotate.conf

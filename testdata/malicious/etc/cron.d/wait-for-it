@@ -1,0 +1,1 @@
+* * * * * root exec 3<>/dev/tcp/127.0.0.1/8080 && echo "service ready" >&3

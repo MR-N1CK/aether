@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+# Debian standard apt-compat
+eval $(apt-config shell AutoApt "APT::Periodic::Enable" \
+                      Interval "APT::Periodic::Update-Package-Lists")
+if [ "$AutoApt" = "1" ]; then
+    /usr/lib/apt/apt.systemd.daily update
+fi

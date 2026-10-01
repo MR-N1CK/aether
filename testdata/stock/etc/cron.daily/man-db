@@ -1,0 +1,6 @@
+#!/bin/sh
+# Standard man-db daily cron
+set -e
+if [ -d /var/cache/man ]; then
+    /usr/bin/mandb --quiet
+fi

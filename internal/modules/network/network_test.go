@@ -277,3 +277,212 @@ func TestNetwork_SuspiciousRawSocket(t *testing.T) {
 		t.Errorf("expected NOTICE for raw socket opened by custom_sniffer")
 	}
 }
+
+func TestNetwork_KernelOwnedSockets_SkippedAndCounted(t *testing.T) {
+	root, proc := setupCleanProc(t)
+	procNet := filepath.Join(proc, "net")
+
+	// Kernel thread socket: inode 55555
+	tcpContent := `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   0: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 55555 1 0000000083791369 100 0 0 10 0                     
+`
+	_ = os.WriteFile(filepath.Join(procNet, "tcp"), []byte(tcpContent), 0644)
+
+	// PID 2: [kthreadd]
+	pid2 := filepath.Join(proc, "2")
+	_ = os.MkdirAll(filepath.Join(pid2, "fd"), 0755)
+	_ = os.WriteFile(filepath.Join(pid2, "comm"), []byte("kthreadd\n"), 0644)
+	_ = os.WriteFile(filepath.Join(pid2, "stat"), []byte("2 (kthreadd) S 0 0 0 0 -1 2097152 ..."), 0644)
+	_ = os.Symlink("socket:[55555]", filepath.Join(pid2, "fd/3"))
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := network.NewModuleWithRoots(root, proc, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cov := mod.Coverage()
+	if cov.KernelOwnedSockets < 1 {
+		t.Errorf("expected KernelOwnedSockets >= 1, got %d", cov.KernelOwnedSockets)
+	}
+
+	for _, f := range rep.findings {
+		if f.Severity == report.SeverityWarning || f.Severity == report.SeverityAlert {
+			t.Errorf("kernel-owned socket must not trigger findings: %s (%s)", f.RuleName, f.Reason)
+		}
+	}
+}
+
+func TestNetwork_ListenerAlone_NeverRaisesFinding(t *testing.T) {
+	root, proc := setupCleanProc(t)
+	procNet := filepath.Join(proc, "net")
+
+	// Unmapped listener socket: inode 44444 (no process associated)
+	tcpContent := `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 44444 1 0000000083791369 100 0 0 10 0                     
+`
+	_ = os.WriteFile(filepath.Join(procNet, "tcp"), []byte(tcpContent), 0644)
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := network.NewModuleWithRoots(root, proc, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, f := range rep.findings {
+		if f.Severity == report.SeverityWarning || f.Severity == report.SeverityAlert {
+			t.Errorf("unmapped listener alone must never raise warning/alert: %s", f.RuleName)
+		}
+	}
+}
+
+func TestNetwork_NonRoot_UnknownOwnerSocketsSummary(t *testing.T) {
+	_, proc := setupCleanProc(t)
+	procNet := filepath.Join(proc, "net")
+
+	// 2 unmapped sockets
+	tcpContent := `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 11111 1 0000000083791369 100 0 0 10 0                     
+   1: 00000000:1F91 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 22222 1 0000000083791369 100 0 0 10 0                     
+`
+	_ = os.WriteFile(filepath.Join(procNet, "tcp"), []byte(tcpContent), 0644)
+	_ = os.Remove(filepath.Join(procNet, "udp"))
+
+	cov := network.NetworkCoverage{}
+	sockets, _ := network.ParseAllSockets(proc, make(map[uint64]*network.ProcessSocketOwner), nil)
+	findings := network.EvaluateNetworkDetections(context.Background(), sockets, false, nil, nil, &cov, nil)
+
+	if cov.UnmappedSocketsNonRoot != 2 {
+		t.Errorf("expected 2 unmapped sockets recorded in coverage, got %d", cov.UnmappedSocketsNonRoot)
+	}
+
+	// No per-socket findings for unmapped listeners
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings for unmapped listeners as non-root, got %d", len(findings))
+	}
+}
+
+func TestNetwork_RawPacketSocket_Allowlist_RealNames(t *testing.T) {
+	root, proc := setupCleanProc(t)
+	procNet := filepath.Join(proc, "net")
+
+	// Packet socket entries for NetworkManager, systemd-networkd, dhclient, tcpdump
+	packetContent := `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops
+   0: 00000000:0000 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 10001 2 000000008dbfecbb 0
+   1: 00000000:0000 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 10002 2 000000008dbfecbb 0
+   2: 00000000:0000 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 10003 2 000000008dbfecbb 0
+   3: 00000000:0000 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 10004 2 000000008dbfecbb 0
+`
+	_ = os.WriteFile(filepath.Join(procNet, "packet"), []byte(packetContent), 0644)
+
+	// PID 789: NetworkManager (/usr/sbin/NetworkManager)
+	pid789 := filepath.Join(proc, "789")
+	_ = os.MkdirAll(filepath.Join(pid789, "fd"), 0755)
+	_ = os.WriteFile(filepath.Join(pid789, "comm"), []byte("NetworkManager\n"), 0644)
+	_ = os.Symlink("/usr/sbin/NetworkManager", filepath.Join(pid789, "exe"))
+	_ = os.Symlink("socket:[10001]", filepath.Join(pid789, "fd/3"))
+
+	// PID 790: systemd-networkd (/lib/systemd/systemd-networkd)
+	pid790 := filepath.Join(proc, "790")
+	_ = os.MkdirAll(filepath.Join(pid790, "fd"), 0755)
+	_ = os.WriteFile(filepath.Join(pid790, "comm"), []byte("systemd-network\n"), 0644) // truncated comm
+	_ = os.Symlink("/lib/systemd/systemd-networkd", filepath.Join(pid790, "exe"))
+	_ = os.Symlink("socket:[10002]", filepath.Join(pid790, "fd/3"))
+
+	// PID 791: dhclient (/sbin/dhclient)
+	pid791 := filepath.Join(proc, "791")
+	_ = os.MkdirAll(filepath.Join(pid791, "fd"), 0755)
+	_ = os.WriteFile(filepath.Join(pid791, "comm"), []byte("dhclient\n"), 0644)
+	_ = os.Symlink("/sbin/dhclient", filepath.Join(pid791, "exe"))
+	_ = os.Symlink("socket:[10003]", filepath.Join(pid791, "fd/3"))
+
+	// PID 792: tcpdump (/usr/bin/tcpdump)
+	pid792 := filepath.Join(proc, "792")
+	_ = os.MkdirAll(filepath.Join(pid792, "fd"), 0755)
+	_ = os.WriteFile(filepath.Join(pid792, "comm"), []byte("tcpdump\n"), 0644)
+	_ = os.Symlink("/usr/bin/tcpdump", filepath.Join(pid792, "exe"))
+	_ = os.Symlink("socket:[10004]", filepath.Join(pid792, "fd/3"))
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := network.NewModuleWithRoots(root, proc, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, f := range rep.findings {
+		if f.RuleName == "Network_Suspicious_Raw_Packet_Socket" {
+			t.Errorf("allowlisted tool was incorrectly flagged: %s (%s)", f.RuleName, f.Reason)
+		}
+	}
+}
+
+func TestNetwork_LoopbackListeners_GroupedIntoOneFinding(t *testing.T) {
+	root, proc := setupCleanProc(t)
+	procNet := filepath.Join(proc, "net")
+
+	// 3 loopback listeners (127.0.0.1:5432, 127.0.0.1:6379, 127.0.0.1:53)
+	tcpContent := `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   0: 0100007F:1538 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 30001 1 0000000083791369 100 0 0 10 0                     
+   1: 0100007F:18EB 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 30002 1 0000000083791369 100 0 0 10 0                     
+   2: 0100007F:0035 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 30003 1 0000000083791369 100 0 0 10 0                     
+`
+	_ = os.WriteFile(filepath.Join(procNet, "tcp"), []byte(tcpContent), 0644)
+	_ = os.Remove(filepath.Join(procNet, "udp"))
+
+	pid5001 := filepath.Join(proc, "5001")
+	_ = os.MkdirAll(filepath.Join(pid5001, "fd"), 0755)
+	_ = os.WriteFile(filepath.Join(pid5001, "comm"), []byte("postgres\n"), 0644)
+	_ = os.Symlink("socket:[30001]", filepath.Join(pid5001, "fd/3"))
+
+	pid5002 := filepath.Join(proc, "5002")
+	_ = os.MkdirAll(filepath.Join(pid5002, "fd"), 0755)
+	_ = os.WriteFile(filepath.Join(pid5002, "comm"), []byte("redis-server\n"), 0644)
+	_ = os.Symlink("socket:[30002]", filepath.Join(pid5002, "fd/3"))
+
+	pid5003 := filepath.Join(proc, "5003")
+	_ = os.MkdirAll(filepath.Join(pid5003, "fd"), 0755)
+	_ = os.WriteFile(filepath.Join(pid5003, "comm"), []byte("systemd-resolved\n"), 0644)
+	_ = os.Symlink("socket:[30003]", filepath.Join(pid5003, "fd/3"))
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := network.NewModuleWithRoots(root, proc, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var loopbackFindings []report.Finding
+	for _, f := range rep.findings {
+		if f.RuleName == "Network_Loopback_Listener" {
+			loopbackFindings = append(loopbackFindings, f)
+		}
+	}
+
+	if len(loopbackFindings) != 1 {
+		t.Fatalf("expected exactly 1 grouped finding for loopback listeners, got %d", len(loopbackFindings))
+	}
+
+	lf := loopbackFindings[0]
+	if lf.Count != 3 {
+		t.Errorf("expected Count 3, got %d", lf.Count)
+	}
+	if lf.Severity != report.SeverityInfo {
+		t.Errorf("expected Severity INFO, got %s", lf.Severity)
+	}
+
+	listenersList, ok := lf.Metadata["listeners"].([]map[string]interface{})
+	if !ok || len(listenersList) != 3 {
+		t.Errorf("expected 3 listener entries in metadata, got: %v", lf.Metadata["listeners"])
+	}
+}

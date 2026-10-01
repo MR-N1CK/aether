@@ -178,3 +178,20 @@ func TestLoadConfig_FallbackToDefaults(t *testing.T) {
 		t.Errorf("expected default paths to be set")
 	}
 }
+
+func TestConfig_UnknownModule_Rejected(t *testing.T) {
+	err := config.ValidateModules([]string{"filesystem", "unknown_module"})
+	if err == nil {
+		t.Fatal("expected error for unknown module name, got nil")
+	}
+	expectedSub := `unknown module "unknown_module"; valid modules are: filesystem, process, persistence, users, network, kernel`
+	if err.Error() != expectedSub {
+		t.Errorf("expected error %q, got %q", expectedSub, err.Error())
+	}
+
+	// Valid modules should pass
+	err = config.ValidateModules([]string{"filesystem", "process", "persistence", "users", "network", "kernel"})
+	if err != nil {
+		t.Errorf("expected all valid modules to pass validation, got: %v", err)
+	}
+}

@@ -162,3 +162,49 @@ func TestScanner_QuickRunsAllModules(t *testing.T) {
 		}
 	}
 }
+
+func TestScanner_ModuleFindingsCount_MatchesEmittedFindings(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.Quick = true
+	cfg.Scan.Threads = 2
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	s := scanner.NewScanner(cfg, bus, nil, nil)
+
+	moduleReportedCounts := make(map[string]int)
+	moduleEmittedCounts := make(map[string]int)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			switch e := ev.(type) {
+			case events.ModuleFinished:
+				moduleReportedCounts[e.ModuleName] = e.FindingsCount
+			case events.FindingRaised:
+				moduleEmittedCounts[e.Finding.Module]++
+			}
+		}
+	}()
+
+	err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected scan error: %v", err)
+	}
+
+	bus.Close()
+	<-done
+
+	for modName, reportedCount := range moduleReportedCounts {
+		emittedCount := moduleEmittedCounts[modName]
+		if reportedCount != emittedCount {
+			t.Errorf("module %q reported Findings: %d in ModuleFinished, but emitted %d FindingRaised events",
+				modName, reportedCount, emittedCount)
+		}
+	}
+}

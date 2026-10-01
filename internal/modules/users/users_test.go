@@ -428,3 +428,27 @@ lxd:x:999:charlie
 		t.Errorf("expected charlie to be flagged for docker/lxd membership")
 	}
 }
+
+func TestUsers_NonRoot_ShadowGapNote(t *testing.T) {
+	root := setupCleanEtc(t)
+	etc := filepath.Join(root, "etc")
+	// Make shadow unreadable (0000) simulating non-root lack of access
+	_ = os.Chmod(filepath.Join(etc, "shadow"), 0000)
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := users.NewModuleWithRoot(root, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cov := mod.Coverage()
+	if cov.ShadowReadable {
+		t.Errorf("expected ShadowReadable == false for unreadable shadow")
+	}
+	if !cov.ShadowGapNonRoot {
+		t.Errorf("expected ShadowGapNonRoot == true for unreadable shadow")
+	}
+}

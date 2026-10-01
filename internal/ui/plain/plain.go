@@ -123,6 +123,13 @@ func (c *Consumer) renderEvent(e events.Event) bool {
 			ev.Finding.Reason,
 			ev.Finding.RuleName,
 		)
+		if c.verbose && ev.Finding.RuleName == "Network_Loopback_Listener" {
+			if listeners, ok := ev.Finding.Metadata["listeners"].([]map[string]interface{}); ok {
+				for _, l := range listeners {
+					fmt.Fprintf(c.writer, "[AETHER]   - %v: port %v (%v)\n", l["process"], l["port"], l["protocol"])
+				}
+			}
+		}
 
 	case events.Error:
 		if ev.IsFatal {

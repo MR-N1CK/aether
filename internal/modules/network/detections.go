@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,12 +21,52 @@ var defaultRawSocketAllowlist = map[string]bool{
 	"tshark":           true,
 	"dumpcap":          true,
 	"dhclient":         true,
-	"NetworkManager":   true,
+	"networkmanager":   true,
 	"systemd-networkd": true,
 	"wpa_supplicant":   true,
 	"avahi-daemon":     true,
 	"lldpd":            true,
 	"arping":           true,
+}
+
+func isRawSocketAllowed(owner *ProcessSocketOwner) bool {
+	if owner == nil {
+		return false
+	}
+	if owner.IsKernel {
+		return true
+	}
+	comm := strings.ToLower(strings.TrimSpace(owner.Comm))
+	if defaultRawSocketAllowlist[comm] {
+		return true
+	}
+	if owner.ExePath != "" {
+		exeBase := strings.ToLower(filepath.Base(owner.ExePath))
+		if defaultRawSocketAllowlist[exeBase] {
+			return true
+		}
+	}
+	return false
+}
+
+func isListenerAllowed(owner *ProcessSocketOwner, allowlist map[string]bool) bool {
+	if owner == nil {
+		return false
+	}
+	if owner.IsKernel {
+		return true
+	}
+	comm := strings.ToLower(strings.TrimSpace(owner.Comm))
+	if allowlist[comm] {
+		return true
+	}
+	if owner.ExePath != "" {
+		exeBase := strings.ToLower(filepath.Base(owner.ExePath))
+		if allowlist[exeBase] {
+			return true
+		}
+	}
+	return false
 }
 
 // isWildcardIP checks if an IP is 0.0.0.0 or ::
@@ -50,6 +91,13 @@ func isLoopbackIP(ip net.IP) bool {
 	return ip.IsLoopback()
 }
 
+type loopbackListenerEntry struct {
+	process  string
+	port     int
+	protocol string
+	ip       string
+}
+
 // EvaluateNetworkDetections applies detection rules across parsed socket entries.
 func EvaluateNetworkDetections(
 	ctx context.Context,
@@ -61,6 +109,7 @@ func EvaluateNetworkDetections(
 	logger *slog.Logger,
 ) []report.Finding {
 	var findings []report.Finding
+	var loopbackListeners []loopbackListenerEntry
 
 	listenerAllowlist := make(map[string]bool)
 	if cfg != nil && len(cfg.Scan.ListenerAllowlist) > 0 {
@@ -151,27 +200,17 @@ func EvaluateNetworkDetections(
 			}
 		}
 
-		// 2. Loopback Listeners (INFO inventory)
+		// 2. Loopback Listeners (Grouped into one INFO finding)
 		if isListener && isLoopbackIP(s.LocalIP) {
 			procDesc := "system service"
 			if s.Owner != nil && s.Owner.Comm != "" {
 				procDesc = fmt.Sprintf("%s (PID %d)", s.Owner.Comm, s.Owner.PID)
 			}
-			findings = append(findings, report.Finding{
-				Timestamp: time.Now(),
-				Module:    "network",
-				Severity:  report.SeverityInfo,
-				Path:      fmt.Sprintf("/proc/net/%s", s.Protocol),
-				Reason:    fmt.Sprintf("Loopback-bound %s listener on %s:%d by %s", s.Protocol, s.LocalIP, s.LocalPort, procDesc),
-				RuleName:  "Network_Loopback_Listener",
-				Count:     1,
-				Paths:     []string{fmt.Sprintf("/proc/net/%s", s.Protocol)},
-				Metadata: map[string]interface{}{
-					"protocol":   s.Protocol,
-					"local_ip":   s.LocalIP.String(),
-					"local_port": s.LocalPort,
-					"score":      10,
-				},
+			loopbackListeners = append(loopbackListeners, loopbackListenerEntry{
+				process:  procDesc,
+				port:     s.LocalPort,
+				protocol: s.Protocol,
+				ip:       s.LocalIP.String(),
 			})
 			continue
 		}
@@ -179,8 +218,7 @@ func EvaluateNetworkDetections(
 		// 3. Wildcard Listeners:
 		// Rule: NOTICE only as root, ONLY when a process owns the socket and it is NOT in the allowlist; NEVER as non-root. Show process name in notice.
 		if isListener && isWildcardIP(s.LocalIP) && isRoot && s.Owner != nil && !s.Owner.IsKernel {
-			commLower := strings.ToLower(s.Owner.Comm)
-			if !listenerAllowlist[commLower] {
+			if !isListenerAllowed(s.Owner, listenerAllowlist) {
 				findings = append(findings, report.Finding{
 					Timestamp: time.Now(),
 					Module:    "network",
@@ -203,11 +241,10 @@ func EvaluateNetworkDetections(
 			}
 		}
 
-		// 4. Raw and Packet Socket Inspection
+		// 4. Raw and Packet Socket Inspection (match both comm and exe basename)
 		if s.Protocol == "raw" || s.Protocol == "raw6" || s.Protocol == "packet" {
 			if s.Owner != nil && !s.Owner.IsKernel {
-				commLower := strings.ToLower(s.Owner.Comm)
-				if !defaultRawSocketAllowlist[commLower] {
+				if !isRawSocketAllowed(s.Owner) {
 					findings = append(findings, report.Finding{
 						Timestamp: time.Now(),
 						Module:    "network",
@@ -228,6 +265,40 @@ func EvaluateNetworkDetections(
 				}
 			}
 		}
+	}
+
+	// Emit grouped loopback listeners finding if any were collected
+	if len(loopbackListeners) > 0 {
+		var listItems []map[string]interface{}
+		var descParts []string
+		for _, ll := range loopbackListeners {
+			listItems = append(listItems, map[string]interface{}{
+				"process":  ll.process,
+				"port":     ll.port,
+				"protocol": ll.protocol,
+				"ip":       ll.ip,
+			})
+			descParts = append(descParts, fmt.Sprintf("%s (port %d)", ll.process, ll.port))
+		}
+		sampleStr := strings.Join(descParts, ", ")
+		if len(descParts) > 3 {
+			sampleStr = fmt.Sprintf("%s, %s, %s (and %d more)", descParts[0], descParts[1], descParts[2], len(descParts)-3)
+		}
+		findings = append(findings, report.Finding{
+			Timestamp: time.Now(),
+			Module:    "network",
+			Severity:  report.SeverityInfo,
+			Path:      "/proc/net/tcp",
+			Reason:    fmt.Sprintf("Found %d loopback listener(s): %s", len(loopbackListeners), sampleStr),
+			RuleName:  "Network_Loopback_Listener",
+			Count:     len(loopbackListeners),
+			Paths:     []string{"/proc/net/tcp", "/proc/net/udp"},
+			Metadata: map[string]interface{}{
+				"count":     len(loopbackListeners),
+				"listeners": listItems,
+				"score":     10,
+			},
+		})
 	}
 
 	return findings

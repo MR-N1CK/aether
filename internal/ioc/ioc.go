@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -42,11 +43,13 @@ type Engine interface {
 	LoadAllowlist(path string) error
 	CheckHash(hashVal string) *MatchResult
 	CheckPath(path string) *MatchResult
+	CheckIP(ip net.IP) *IPMatchResult
 	IsAllowlisted(sha256Hash string) (bool, string)
 	IsKnownBenign(path string, ownerUID uint32) (bool, string)
 	HashRuleCount() int
 	PatternRuleCount() int
 	BenignRuleCount() int
+	IPRuleCount() int
 }
 
 // RealEngine implements high-performance O(1) hash matching and compiled regex path matching.
@@ -54,6 +57,7 @@ type RealEngine struct {
 	mu           sync.RWMutex
 	hashRules    map[string]HashRule // lowercase hash -> rule
 	patternRules []PatternRule
+	ipRules      []IPRule
 	benignRules  []BenignRule
 	allowlist    *Allowlist
 	logger       *slog.Logger
@@ -179,23 +183,45 @@ func (e *RealEngine) LoadDirectory(dir string) error {
 		}
 
 		switch ext {
-		case ".txt", ".hashes", ".ioc":
+		case ".ips":
 			f, err := os.Open(path)
 			if err != nil {
-				e.logger.Warn("cannot read hash IOC file", slog.String("path", path), slog.Any("error", err))
+				e.logger.Warn("cannot read IP IOC file", slog.String("path", path), slog.Any("error", err))
 				return nil
 			}
 			defer f.Close()
 
-			rules, err := ParseHashFile(f, filepath.Base(path))
+			ipRules, err := ParseIPFile(f, filepath.Base(path))
 			if err != nil {
-				e.logger.Warn("error parsing hash file", slog.String("path", path), slog.Any("error", err))
+				e.logger.Warn("error parsing IP file", slog.String("path", path), slog.Any("error", err))
 				return nil
 			}
+			e.ipRules = append(e.ipRules, ipRules...)
+			e.logger.Debug("loaded IP IOCs", slog.String("file", path), slog.Int("count", len(ipRules)))
+
+		case ".txt", ".hashes", ".ioc":
+			f, err := os.Open(path)
+			if err != nil {
+				e.logger.Warn("cannot read hash/IP IOC file", slog.String("path", path), slog.Any("error", err))
+				return nil
+			}
+			defer f.Close()
+
+			rules, _ := ParseHashFile(f, filepath.Base(path))
 			for _, r := range rules {
 				e.hashRules[r.Hash] = r
 			}
-			e.logger.Debug("loaded hash IOCs", slog.String("file", path), slog.Int("count", len(rules)))
+			if len(rules) > 0 {
+				e.logger.Debug("loaded hash IOCs", slog.String("file", path), slog.Int("count", len(rules)))
+			}
+
+			// Also attempt to parse IP rules from .txt / .ioc if not all lines were hashes
+			_, _ = f.Seek(0, 0)
+			ipRules, _ := ParseIPFile(f, filepath.Base(path))
+			if len(ipRules) > 0 {
+				e.ipRules = append(e.ipRules, ipRules...)
+				e.logger.Debug("loaded IP IOCs", slog.String("file", path), slog.Int("count", len(ipRules)))
+			}
 
 		case ".yaml", ".yml":
 			data, err := os.ReadFile(path)
@@ -307,6 +333,56 @@ func (e *RealEngine) IsKnownBenign(path string, ownerUID uint32) (bool, string) 
 	return false, ""
 }
 
+// CheckIP evaluates an IP against registered IP/CIDR IOC indicators.
+func (e *RealEngine) CheckIP(ip net.IP) *IPMatchResult {
+	if ip == nil {
+		return nil
+	}
+
+	isSpecial := IsSpecialIP(ip)
+
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	for _, rule := range e.ipRules {
+		// If connection IP is special (loopback, RFC1918, etc.), only match if the rule explicitly targeted it
+		if isSpecial && !rule.IsExplicitSpecial {
+			continue
+		}
+
+		matched := false
+		if rule.IP != nil && rule.IP.Equal(ip) {
+			matched = true
+		} else if rule.IPNet != nil && rule.IPNet.Contains(ip) {
+			matched = true
+		}
+
+		if matched {
+			score := 75 // STRONG
+			sev := report.SeverityWarning
+			isHigh := false
+			if rule.Confidence == "high" {
+				score = 90
+				sev = report.SeverityAlert
+				isHigh = true
+			}
+			ruleName := "Network_IOC_IP_Connection"
+			if rule.Comment != "" && !strings.Contains(rule.Comment, " ") && len(rule.Comment) < 32 {
+				ruleName = rule.Comment
+			}
+			return &IPMatchResult{
+				RuleName:   ruleName,
+				Reason:     fmt.Sprintf("Connection to known malicious IP indicator: %s (%s)", ip.String(), rule.Comment),
+				Score:      score,
+				Severity:   sev,
+				IsHighConf: isHigh,
+				Comment:    rule.Comment,
+			}
+		}
+	}
+	return nil
+}
+
 // HashRuleCount returns total registered hash signatures.
 func (e *RealEngine) HashRuleCount() int {
 	e.mu.RLock()
@@ -328,6 +404,13 @@ func (e *RealEngine) BenignRuleCount() int {
 	return len(e.benignRules)
 }
 
+// IPRuleCount returns total registered IP/CIDR rules.
+func (e *RealEngine) IPRuleCount() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return len(e.ipRules)
+}
+
 // StubEngine fallback for minimal testing.
 type StubEngine struct{}
 
@@ -337,9 +420,12 @@ func (s *StubEngine) LoadBuiltin() error { return nil }
 func (s *StubEngine) LoadAllowlist(path string) error { return nil }
 func (s *StubEngine) CheckHash(hashVal string) *MatchResult { return nil }
 func (s *StubEngine) CheckPath(path string) *MatchResult { return nil }
+func (s *StubEngine) CheckIP(ip net.IP) *IPMatchResult { return nil }
 func (s *StubEngine) IsAllowlisted(sha256Hash string) (bool, string) { return false, "" }
 func (s *StubEngine) IsKnownBenign(path string, ownerUID uint32) (bool, string) { return false, "" }
 func (s *StubEngine) HashRuleCount() int { return 0 }
 func (s *StubEngine) PatternRuleCount() int { return 0 }
 func (s *StubEngine) BenignRuleCount() int { return 0 }
+func (s *StubEngine) IPRuleCount() int { return 0 }
+
 

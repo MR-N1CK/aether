@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -104,6 +105,51 @@ var DefaultBuildOutputDirs = []string{
 	"dist",
 }
 
+// DefaultListenerAllowlist contains standard daemon process names expected to bind network listeners.
+var DefaultListenerAllowlist = []string{
+	"postgres",
+	"redis-server",
+	"openvpn",
+	"ollama",
+	"tor",
+	"sshd",
+	"nginx",
+	"apache2",
+	"cupsd",
+	"rpcbind",
+	"dnsmasq",
+	"named",
+	"systemd-resolved",
+}
+
+// ValidModules defines the recognized hunting modules for --modules flag.
+var ValidModules = []string{
+	"filesystem",
+	"process",
+	"persistence",
+	"users",
+	"network",
+	"kernel",
+}
+
+// ValidateModules validates that all specified module names are valid.
+func ValidateModules(mods []string) error {
+	validMap := make(map[string]bool)
+	for _, v := range ValidModules {
+		validMap[v] = true
+	}
+	for _, m := range mods {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			continue
+		}
+		if !validMap[m] {
+			return fmt.Errorf("unknown module %q; valid modules are: %s", m, strings.Join(ValidModules, ", "))
+		}
+	}
+	return nil
+}
+
 // Config represents the top-level configuration for the scanner.
 type Config struct {
 	Scan    ScanConfig    `yaml:"scan"`
@@ -112,18 +158,21 @@ type Config struct {
 
 // ScanConfig holds scan targets, exclusions, and resource governance limits.
 type ScanConfig struct {
-	Paths         []string `yaml:"paths"`
-	ExplicitPaths bool     `yaml:"-"` // Set to true when --path is explicitly provided by the user
-	Excludes      []string `yaml:"excludes"`
-	Quick         bool     `yaml:"quick"`
-	Full          bool     `yaml:"full"`
-	MaxFileSize   int64    `yaml:"max_filesize"`
-	Threads       int      `yaml:"threads"`
-	Nice          int      `yaml:"nice"`
-	JSONOut       string   `yaml:"json_out"`
-	IOCDir        string   `yaml:"ioc_dir"`
-	AllowlistPath string   `yaml:"allowlist"`
-	OneFileSystem bool     `yaml:"one_file_system"`
+	Paths              []string `yaml:"paths"`
+	ExplicitPaths      bool     `yaml:"-"` // Set to true when --path is explicitly provided by the user
+	Modules            []string `yaml:"modules"`
+	Excludes           []string `yaml:"excludes"`
+	Quick              bool     `yaml:"quick"`
+	Full               bool     `yaml:"full"`
+	MaxFileSize        int64    `yaml:"max_filesize"`
+	Threads            int      `yaml:"threads"`
+	Nice               int      `yaml:"nice"`
+	JSONOut            string   `yaml:"json_out"`
+	IOCDir             string   `yaml:"ioc_dir"`
+	AllowlistPath      string   `yaml:"allowlist"`
+	OneFileSystem      bool     `yaml:"one_file_system"`
+	DockerLXDAllowlist []string `yaml:"docker_lxd_allowlist"`
+	ListenerAllowlist  []string `yaml:"listener_allowlist"`
 
 	// Configurable heuristic detection scores
 	ScoreELFInTemp          int `yaml:"score_elf_in_temp"`
@@ -300,6 +349,8 @@ func NewDefaultConfig() *Config {
 			HomeDirs:                      []string{"/home", "/root"},
 			BuildMarkers:                  append([]string{}, DefaultBuildMarkers...),
 			BuildOutputDirs:               append([]string{}, DefaultBuildOutputDirs...),
+			DockerLXDAllowlist:            []string{},
+			ListenerAllowlist:             append([]string{}, DefaultListenerAllowlist...),
 			DemoRules:                 false,
 			RulesDir:                  "",
 			YaraMaxFileSize:           DefaultYaraMaxFileSize,

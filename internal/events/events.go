@@ -126,6 +126,42 @@ type PersistenceCoverageStats struct {
 	UnreadablePaths []UnreadablePersistencePath `json:"unreadable_paths,omitempty"`
 }
 
+// UsersCoverageStats captures metrics from the users inspection module.
+type UsersCoverageStats struct {
+	AccountsInspected      int64    `json:"accounts_inspected"`
+	SystemAccounts         int64    `json:"system_accounts"`
+	ShadowReadable         bool     `json:"shadow_readable"`
+	ShadowGapNonRoot       bool     `json:"shadow_gap_non_root"`
+	DuplicateUIDs          int64    `json:"duplicate_uids"`
+	PrivilegedGroupMembers []string `json:"privileged_group_members,omitempty"`
+	DockerLXDMembers       []string `json:"docker_lxd_members,omitempty"`
+	NonRootLimited         bool     `json:"non_root_limited"`
+}
+
+// NetworkCoverageStats captures metrics from the network inspection module.
+type NetworkCoverageStats struct {
+	SocketsInspected       int64  `json:"sockets_inspected"`
+	TCPListeners           int64  `json:"tcp_listeners"`
+	UDPListeners           int64  `json:"udp_listeners"`
+	EstablishedConnections int64  `json:"established_connections"`
+	RawPacketSockets       int64  `json:"raw_packet_sockets"`
+	KernelOwnedSockets     int64  `json:"kernel_owned_sockets"`
+	UnmappedSocketsNonRoot int64  `json:"unmapped_sockets_non_root"`
+	NonRootLimited         bool   `json:"non_root_limited"`
+	NamespaceNote          string `json:"namespace_note,omitempty"`
+}
+
+// KernelCoverageStats captures metrics from the kernel inspection module.
+type KernelCoverageStats struct {
+	LoadedModulesInspected int64    `json:"loaded_modules_inspected"`
+	SysfsLoadableEntries   int64    `json:"sysfs_loadable_entries"`
+	TaintValue             uint64   `json:"taint_value"`
+	TaintFlags             []string `json:"taint_flags,omitempty"`
+	TaintSeverity          string   `json:"taint_severity,omitempty"`
+	ModprobeFilesInspected int64    `json:"modprobe_files_inspected"`
+	GapsNote               string   `json:"gaps_note,omitempty"`
+}
+
 // YARACoverageStats captures metrics and rule compiler health from YARA-X scanning.
 type YARACoverageStats struct {
 	CompiledIn      bool     `json:"compiled_in"`
@@ -233,6 +269,9 @@ type ScanFinished struct {
 	StartupNotices       []string                  `json:"startup_notices,omitempty"`
 	ProcessCoverage      *ProcessCoverageStats     `json:"process_coverage,omitempty"`
 	PersistenceCoverage  *PersistenceCoverageStats `json:"persistence_coverage,omitempty"`
+	UsersCoverage        *UsersCoverageStats       `json:"users_coverage,omitempty"`
+	NetworkCoverage      *NetworkCoverageStats     `json:"network_coverage,omitempty"`
+	KernelCoverage       *KernelCoverageStats      `json:"kernel_coverage,omitempty"`
 	YARACoverage         *YARACoverageStats        `json:"yara_coverage,omitempty"`
 	AcknowledgedWarnings []report.Finding          `json:"acknowledged_warnings,omitempty"`
 }

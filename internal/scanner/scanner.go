@@ -23,8 +23,11 @@ import (
 	"aether/internal/events"
 	"aether/internal/ioc"
 	"aether/internal/modules"
+	"aether/internal/modules/kernel"
+	"aether/internal/modules/network"
 	"aether/internal/modules/persistence"
 	"aether/internal/modules/process"
+	"aether/internal/modules/users"
 	"aether/internal/report"
 	"aether/internal/safeopen"
 	"aether/internal/triage"
@@ -321,6 +324,37 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 
 	procMod := process.NewModule(iocEng, bus, logger)
 	persistMod := persistence.NewModule(iocEng, bus, logger)
+	usersMod := users.NewModule(iocEng, bus, logger)
+	netMod := network.NewModule(iocEng, bus, logger)
+	kernelMod := kernel.NewModule(iocEng, bus, logger)
+
+	isCustom := cfg.Scan.ExplicitPaths || (len(cfg.Scan.Paths) > 0 && !slicesEqual(cfg.Scan.Paths, config.DefaultScanPaths()))
+	if cfg.Scan.Quick || cfg.Scan.Full {
+		isCustom = false
+	}
+
+	var defaultMods []modules.Module
+	if len(cfg.Scan.Modules) > 0 {
+		for _, mName := range cfg.Scan.Modules {
+			switch mName {
+			case "process":
+				defaultMods = append(defaultMods, procMod)
+			case "persistence":
+				defaultMods = append(defaultMods, persistMod)
+			case "users":
+				defaultMods = append(defaultMods, usersMod)
+			case "network":
+				defaultMods = append(defaultMods, netMod)
+			case "kernel":
+				defaultMods = append(defaultMods, kernelMod)
+			}
+		}
+	} else if isCustom {
+		// With --path (custom mode), run only the filesystem module by default.
+		defaultMods = []modules.Module{}
+	} else {
+		defaultMods = []modules.Module{procMod, persistMod, usersMod, netMod, kernelMod}
+	}
 
 	s := &Scanner{
 		cfg:          cfg,
@@ -328,7 +362,7 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 		reporter:     rep,
 		bus:          bus,
 		iocEngine:    iocEng,
-		modules:      []modules.Module{procMod, persistMod},
+		modules:      defaultMods,
 		accumulator:  newFindingAccumulator(cfg),
 		memoryBudget: NewMemoryBudget(cfg.Scan.MemoryBudgetBytes),
 		devRpath:     false,
@@ -525,6 +559,12 @@ func (s *Scanner) Run(ctx context.Context) error {
 				inspectedCount = pMod.Coverage().Inspected
 			} else if permMod, ok := mod.(*persistence.Module); ok {
 				inspectedCount = permMod.Coverage().TotalInspected
+			} else if uMod, ok := mod.(*users.Module); ok {
+				inspectedCount = uMod.Coverage().AccountsInspected
+			} else if nMod, ok := mod.(*network.Module); ok {
+				inspectedCount = nMod.Coverage().SocketsInspected
+			} else if kMod, ok := mod.(*kernel.Module); ok {
+				inspectedCount = kMod.Coverage().LoadedModulesInspected
 			}
 
 			s.bus.Publish(events.ModuleFinished{
@@ -548,22 +588,37 @@ func (s *Scanner) Run(ctx context.Context) error {
 	var skippedExcluded atomic.Int64
 	var skippedSuppressed atomic.Int64
 
-	fsStart := time.Now()
-	s.bus.Publish(events.ModuleStarted{
-		Time:        fsStart,
-		ModuleName:  "filesystem",
-		Description: "Scans filesystem locations for suspicious scripts, web shells, and suid anomalies",
-	})
+	runFS := true
+	if len(s.cfg.Scan.Modules) > 0 {
+		runFS = false
+		for _, m := range s.cfg.Scan.Modules {
+			if m == "filesystem" {
+				runFS = true
+				break
+			}
+		}
+	}
 
-	fileChan := make(chan string, s.cfg.Scan.Threads*10)
-
-	// Worker pool for scanning files
+	var fsFindings []report.Finding
 	var (
 		dirMu          sync.Mutex
 		totalDirCounts = make(map[string]int64)
 		oversizeMu     sync.Mutex
 		oversizeFiles  []events.OversizeFile
+		walkErr        error
 	)
+
+	if runFS {
+		fsStart := time.Now()
+		s.bus.Publish(events.ModuleStarted{
+			Time:        fsStart,
+			ModuleName:  "filesystem",
+			Description: "Scans filesystem locations for suspicious scripts, web shells, and suid anomalies",
+		})
+
+		fileChan := make(chan string, s.cfg.Scan.Threads*10)
+
+		// Worker pool for scanning files
 
 	var wg sync.WaitGroup
 	for i := 0; i < s.cfg.Scan.Threads; i++ {
@@ -724,61 +779,61 @@ func (s *Scanner) Run(ctx context.Context) error {
 		}
 	}
 
-	close(fileChan)
-	wg.Wait()
+		close(fileChan)
+		wg.Wait()
 
-	// Flush and deduplicate filesystem findings
-	rawFSFindings := s.accumulator.Flush()
-	var fsFindings []report.Finding
-	for _, f := range rawFSFindings {
-		// Dedupe findings by (path, rule) across modules; persistence wins over filesystem
-		if f.Count <= 1 {
-			key := findingRuleKey{path: f.Path, rule: f.RuleName}
-			moduleRep.mu.Lock()
-			owningMod := moduleRep.findings[key]
-			moduleRep.mu.Unlock()
-			if owningMod == "persistence" {
-				continue // persistence wins over filesystem for the same file
-			}
-			fsFindings = append(fsFindings, f)
-		} else {
-			var filteredPaths []string
-			moduleRep.mu.Lock()
-			for _, p := range f.Paths {
-				key := findingRuleKey{path: p, rule: f.RuleName}
-				if moduleRep.findings[key] != "persistence" {
-					filteredPaths = append(filteredPaths, p)
+		// Flush and deduplicate filesystem findings
+		rawFSFindings := s.accumulator.Flush()
+		for _, f := range rawFSFindings {
+			// Dedupe findings by (path, rule) across modules; persistence wins over filesystem
+			if f.Count <= 1 {
+				key := findingRuleKey{path: f.Path, rule: f.RuleName}
+				moduleRep.mu.Lock()
+				owningMod := moduleRep.findings[key]
+				moduleRep.mu.Unlock()
+				if owningMod == "persistence" {
+					continue // persistence wins over filesystem for the same file
 				}
-			}
-			moduleRep.mu.Unlock()
+				fsFindings = append(fsFindings, f)
+			} else {
+				var filteredPaths []string
+				moduleRep.mu.Lock()
+				for _, p := range f.Paths {
+					key := findingRuleKey{path: p, rule: f.RuleName}
+					if moduleRep.findings[key] != "persistence" {
+						filteredPaths = append(filteredPaths, p)
+					}
+				}
+				moduleRep.mu.Unlock()
 
-			if len(filteredPaths) == 0 {
-				continue
+				if len(filteredPaths) == 0 {
+					continue
+				}
+				f.Paths = filteredPaths
+				f.Count = len(filteredPaths)
+				fsFindings = append(fsFindings, f)
 			}
-			f.Paths = filteredPaths
-			f.Count = len(filteredPaths)
-			fsFindings = append(fsFindings, f)
 		}
-	}
 
-	for _, f := range fsFindings {
-		if triageEng != nil {
-			triageEng.Evaluate(&f, "")
+		for _, f := range fsFindings {
+			if triageEng != nil {
+				triageEng.Evaluate(&f, "")
+			}
+			s.bus.Publish(events.FindingRaised{
+				Time:    time.Now(),
+				Finding: f,
+			})
 		}
-		s.bus.Publish(events.FindingRaised{
-			Time:    time.Now(),
-			Finding: f,
+
+		s.bus.Publish(events.ModuleFinished{
+			Time:           time.Now(),
+			ModuleName:     "filesystem",
+			Duration:       time.Since(fsStart),
+			FindingsCount:  len(fsFindings),
+			InspectedCount: filesScanned.Load(),
+			Status:         "OK",
 		})
 	}
-
-	s.bus.Publish(events.ModuleFinished{
-		Time:           time.Now(),
-		ModuleName:     "filesystem",
-		Duration:       time.Since(fsStart),
-		FindingsCount:  len(fsFindings),
-		InspectedCount: filesScanned.Load(),
-		Status:         "OK",
-	})
 
 	// 3. Final Summary & Verdict Calculation
 	totalDuration := time.Since(startTime)
@@ -934,6 +989,9 @@ func (s *Scanner) Run(ctx context.Context) error {
 
 	var procCov *events.ProcessCoverageStats
 	var persistCov *events.PersistenceCoverageStats
+	var usersCov *events.UsersCoverageStats
+	var netCov *events.NetworkCoverageStats
+	var kernelCov *events.KernelCoverageStats
 
 	for _, mod := range s.modules {
 		if pMod, ok := mod.(*process.Module); ok {
@@ -963,6 +1021,42 @@ func (s *Scanner) Run(ctx context.Context) error {
 				PkgDBAvailable:  c.PkgDBAvailable,
 				PkgDBNote:       c.PkgDBNote,
 				UnreadablePaths: c.UnreadablePaths,
+			}
+		} else if uMod, ok := mod.(*users.Module); ok {
+			c := uMod.Coverage()
+			usersCov = &events.UsersCoverageStats{
+				AccountsInspected:      c.AccountsInspected,
+				SystemAccounts:         c.SystemAccounts,
+				ShadowReadable:         c.ShadowReadable,
+				ShadowGapNonRoot:       c.ShadowGapNonRoot,
+				DuplicateUIDs:          c.DuplicateUIDs,
+				PrivilegedGroupMembers: c.PrivilegedGroupMembers,
+				DockerLXDMembers:       c.DockerLXDMembers,
+				NonRootLimited:         c.NonRootLimited,
+			}
+		} else if nMod, ok := mod.(*network.Module); ok {
+			c := nMod.Coverage()
+			netCov = &events.NetworkCoverageStats{
+				SocketsInspected:       c.SocketsInspected,
+				TCPListeners:           c.TCPListeners,
+				UDPListeners:           c.UDPListeners,
+				EstablishedConnections: c.EstablishedConnections,
+				RawPacketSockets:       c.RawPacketSockets,
+				KernelOwnedSockets:     c.KernelOwnedSockets,
+				UnmappedSocketsNonRoot: c.UnmappedSocketsNonRoot,
+				NonRootLimited:         c.NonRootLimited,
+				NamespaceNote:          c.NamespaceNote,
+			}
+		} else if kMod, ok := mod.(*kernel.Module); ok {
+			c := kMod.Coverage()
+			kernelCov = &events.KernelCoverageStats{
+				LoadedModulesInspected: c.LoadedModulesInspected,
+				SysfsLoadableEntries:   c.SysfsLoadableEntries,
+				TaintValue:             c.TaintValue,
+				TaintFlags:             c.TaintFlags,
+				TaintSeverity:          c.TaintSeverity,
+				ModprobeFilesInspected: c.ModprobeFilesInspected,
+				GapsNote:               c.GapsNote,
 			}
 		}
 	}
@@ -995,6 +1089,9 @@ func (s *Scanner) Run(ctx context.Context) error {
 		StartupNotices:       startupNotices,
 		ProcessCoverage:      procCov,
 		PersistenceCoverage:  persistCov,
+		UsersCoverage:        usersCov,
+		NetworkCoverage:      netCov,
+		KernelCoverage:       kernelCov,
 		YARACoverage:         &yCov,
 		AcknowledgedWarnings: acknowledgedWarnings,
 	})

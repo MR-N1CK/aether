@@ -64,6 +64,7 @@ type scanCmdFlags struct {
 	rulesDir        string
 	yaraMaxFileSize int64
 	demoRules       bool
+	modules         []string
 }
 
 func isTerminal() bool {
@@ -170,6 +171,12 @@ of compromise (IOCs) and YARA signature matches in strict read-only mode.`,
 			if cmd.Flags().Changed("demo-rules") {
 				cfg.Scan.DemoRules = sFlags.demoRules
 			}
+			if cmd.Flags().Changed("modules") {
+				if err := config.ValidateModules(sFlags.modules); err != nil {
+					return err
+				}
+				cfg.Scan.Modules = sFlags.modules
+			}
 
 			// 5. Apply niceness early at startup before worker pool starts
 			if cfg.Scan.Nice != 0 {
@@ -256,6 +263,7 @@ of compromise (IOCs) and YARA signature matches in strict read-only mode.`,
 	scanCmd.Flags().StringVar(&sFlags.rulesDir, "rules-dir", "", "Custom directory containing YARA rules (*.yar, *.yara)")
 	scanCmd.Flags().Int64Var(&sFlags.yaraMaxFileSize, "yara-max-filesize", config.DefaultYaraMaxFileSize, "Maximum file size in bytes for in-memory YARA scanning (default: 20MB); files above this are stream-hashed but skip YARA")
 	scanCmd.Flags().BoolVar(&sFlags.demoRules, "demo-rules", false, "Load synthetic demonstration YARA rules (harmless EICAR/marker patterns)")
+	scanCmd.Flags().StringSliceVar(&sFlags.modules, "modules", nil, "Comma-separated list of modules to run (filesystem, process, persistence, users, network, kernel)")
 
 	scanCmd.MarkFlagsMutuallyExclusive("quick", "full")
 

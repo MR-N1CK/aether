@@ -351,6 +351,28 @@ func (m Model) renderFinished() string {
 			stats += fmt.Sprintf("\nPersistence Coverage: Inspected: %d, Unreadable: %d, Masked: %d, Not Present: %d",
 				m.finishEvent.PersistenceCoverage.TotalInspected, m.finishEvent.PersistenceCoverage.TotalUnreadable, m.finishEvent.PersistenceCoverage.TotalMasked, m.finishEvent.PersistenceCoverage.NotPresent)
 		}
+		if m.finishEvent.UsersCoverage != nil {
+			shadowStatus := "readable"
+			if m.finishEvent.UsersCoverage.ShadowGapNonRoot {
+				shadowStatus = "unreadable (non-root)"
+			} else if !m.finishEvent.UsersCoverage.ShadowReadable {
+				shadowStatus = "unreadable"
+			}
+			stats += fmt.Sprintf("\nUsers Coverage: Accounts: %d (System: %d), Shadow: %s, Duplicate UIDs: %d",
+				m.finishEvent.UsersCoverage.AccountsInspected, m.finishEvent.UsersCoverage.SystemAccounts, shadowStatus, m.finishEvent.UsersCoverage.DuplicateUIDs)
+		}
+		if m.finishEvent.NetworkCoverage != nil {
+			stats += fmt.Sprintf("\nNetwork Coverage: Sockets: %d (TCP Listeners: %d, UDP Listeners: %d, Established: %d, Raw/Packet: %d)",
+				m.finishEvent.NetworkCoverage.SocketsInspected, m.finishEvent.NetworkCoverage.TCPListeners, m.finishEvent.NetworkCoverage.UDPListeners, m.finishEvent.NetworkCoverage.EstablishedConnections, m.finishEvent.NetworkCoverage.RawPacketSockets)
+		}
+		if m.finishEvent.KernelCoverage != nil {
+			taintFlagsStr := "clean"
+			if len(m.finishEvent.KernelCoverage.TaintFlags) > 0 {
+				taintFlagsStr = strings.Join(m.finishEvent.KernelCoverage.TaintFlags, "+")
+			}
+			stats += fmt.Sprintf("\nKernel Coverage: Loaded Modules: %d (Sysfs: %d), Taint: %d (%s, %s), Modprobe Files: %d",
+				m.finishEvent.KernelCoverage.LoadedModulesInspected, m.finishEvent.KernelCoverage.SysfsLoadableEntries, m.finishEvent.KernelCoverage.TaintValue, taintFlagsStr, m.finishEvent.KernelCoverage.TaintSeverity, m.finishEvent.KernelCoverage.ModprobeFilesInspected)
+		}
 		if m.finishEvent.YARACoverage != nil {
 			if m.finishEvent.YARACoverage.NotRunReason != "" {
 				stats += fmt.Sprintf("\nYARA Not Run: %s", m.finishEvent.YARACoverage.NotRunReason)

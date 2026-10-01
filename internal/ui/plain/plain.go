@@ -299,6 +299,71 @@ func (c *Consumer) renderEvent(e events.Event) bool {
 				}
 			}
 		}
+		if ev.UsersCoverage != nil {
+			shadowStatus := "readable"
+			if ev.UsersCoverage.ShadowGapNonRoot {
+				shadowStatus = "unreadable (non-root)"
+			} else if !ev.UsersCoverage.ShadowReadable {
+				shadowStatus = "unreadable"
+			}
+			fmt.Fprintf(c.writer, "[AETHER] Users Coverage: Accounts Inspected: %d (System: %d), Shadow: %s, Duplicate UIDs: %d\n",
+				ev.UsersCoverage.AccountsInspected,
+				ev.UsersCoverage.SystemAccounts,
+				shadowStatus,
+				ev.UsersCoverage.DuplicateUIDs,
+			)
+			if c.verbose && len(ev.UsersCoverage.PrivilegedGroupMembers) > 0 {
+				fmt.Fprintf(c.writer, "[AETHER] Users Privileged Group Members:\n")
+				for _, m := range ev.UsersCoverage.PrivilegedGroupMembers {
+					fmt.Fprintf(c.writer, "[AETHER]   - %s\n", m)
+				}
+			}
+			if c.verbose && len(ev.UsersCoverage.DockerLXDMembers) > 0 {
+				fmt.Fprintf(c.writer, "[AETHER] Users Docker/LXD Members:\n")
+				for _, m := range ev.UsersCoverage.DockerLXDMembers {
+					fmt.Fprintf(c.writer, "[AETHER]   - %s\n", m)
+				}
+			}
+		}
+		if ev.NetworkCoverage != nil {
+			unmappedStr := ""
+			if ev.NetworkCoverage.UnmappedSocketsNonRoot > 0 {
+				unmappedStr = fmt.Sprintf(", Unmapped (non-root): %d", ev.NetworkCoverage.UnmappedSocketsNonRoot)
+			}
+			kernelOwnedStr := ""
+			if ev.NetworkCoverage.KernelOwnedSockets > 0 {
+				kernelOwnedStr = fmt.Sprintf(", Kernel-owned: %d", ev.NetworkCoverage.KernelOwnedSockets)
+			}
+			fmt.Fprintf(c.writer, "[AETHER] Network Coverage: Sockets Inspected: %d (TCP Listeners: %d, UDP Listeners: %d, Established: %d, Raw/Packet: %d%s%s)\n",
+				ev.NetworkCoverage.SocketsInspected,
+				ev.NetworkCoverage.TCPListeners,
+				ev.NetworkCoverage.UDPListeners,
+				ev.NetworkCoverage.EstablishedConnections,
+				ev.NetworkCoverage.RawPacketSockets,
+				kernelOwnedStr,
+				unmappedStr,
+			)
+			if ev.NetworkCoverage.NamespaceNote != "" {
+				fmt.Fprintf(c.writer, "[AETHER] Network Note: %s\n", ev.NetworkCoverage.NamespaceNote)
+			}
+		}
+		if ev.KernelCoverage != nil {
+			taintFlagsStr := "clean"
+			if len(ev.KernelCoverage.TaintFlags) > 0 {
+				taintFlagsStr = strings.Join(ev.KernelCoverage.TaintFlags, "+")
+			}
+			fmt.Fprintf(c.writer, "[AETHER] Kernel Coverage: Loaded Modules: %d (Sysfs: %d), Taint: %d (%s, %s), Modprobe Files: %d\n",
+				ev.KernelCoverage.LoadedModulesInspected,
+				ev.KernelCoverage.SysfsLoadableEntries,
+				ev.KernelCoverage.TaintValue,
+				taintFlagsStr,
+				ev.KernelCoverage.TaintSeverity,
+				ev.KernelCoverage.ModprobeFilesInspected,
+			)
+			if ev.KernelCoverage.GapsNote != "" {
+				fmt.Fprintf(c.writer, "[AETHER] Kernel Note: %s\n", ev.KernelCoverage.GapsNote)
+			}
+		}
 		if ev.YARACoverage != nil {
 			if !ev.YARACoverage.CompiledIn {
 				fmt.Fprintf(c.writer, "[AETHER] YARA not run: %s\n", ev.YARACoverage.NotRunReason)

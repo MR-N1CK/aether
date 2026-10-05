@@ -17,3 +17,9 @@ func New(cfg *config.Config, logger *slog.Logger, devRpath bool) Engine {
 func VersionInfo() string {
 	return YaraXVersionInfo()
 }
+
+// ValidateRulesDir compiles all *.yar and *.yara files in dir and returns validation results.
+func ValidateRulesDir(dir string) (*ValidationResult, error) {
+	return YaraXValidateRulesDir(dir)
+}
+

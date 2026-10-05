@@ -1,0 +1,15 @@
+{
+  "id": "MAL-RANSOM-001",
+  "name": "Python Ransomware Directory Encryptor",
+  "category": "MALICIOUS",
+  "subcategory": "ransomware_lockers",
+  "target_path": "ransomware_fernet.py",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH",
+    "expected_rules": ["Script_Python_Ransomware_Encryptor"]
+  }
+}

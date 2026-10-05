@@ -12,6 +12,9 @@ import (
 // ErrNotImplemented is returned by module stubs that have not yet been implemented.
 var ErrNotImplemented = errors.New("module not implemented")
 
+// ErrNotApplicable is returned when a module requires a live system and cannot run in offline mode.
+var ErrNotApplicable = errors.New("not applicable (offline mode)")
+
 // Module represents a specialized threat-hunting inspection module.
 type Module interface {
 	Name() string

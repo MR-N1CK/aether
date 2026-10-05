@@ -32,33 +32,47 @@ type MapEntry struct {
 
 // ProcessInfo holds metadata gathered by reading /proc/<pid>/* read-only.
 type ProcessInfo struct {
-	PID      int
-	Exe      string
-	ExeStat  *unix.Stat_t
-	Cwd      string
-	Cmdline  []string
-	Comm     string
-	Uid      uint32
-	Euid     uint32
-	Gid      uint32
-	Egid     uint32
+	PID          int
+	Exe          string
+	ExeStat      *unix.Stat_t
+	Cwd          string
+	Cmdline      []string
+	Comm         string
+	Uid          uint32
+	Euid         uint32
+	Gid          uint32
+	Egid         uint32
 	PPid         int
 	Flags        uint32
 	IsKThread    bool
 	IsZombie     bool
 	ExeReadable  bool
+	ReadableExe  bool
 	CwdReadable  bool
 	CmdReadable  bool
 	MapsReadable bool
+	ReadableMaps bool
+	FDsReadable  bool
+	ReadableFDs  bool
 	MntNs        string
+	NetNs        string
 	Maps         []MapEntry
+	OpenSockets  []uint64
 	CoverageGaps []string
 }
 
 // ReadProcessInfo gathers metadata for a PID from /proc/<pid>.
-// It treats process disappearance or missing entries mid-read as non-fatal ErrProcessVanished.
 func ReadProcessInfo(pid int) (*ProcessInfo, error) {
-	procDir := fmt.Sprintf("/proc/%d", pid)
+	return ReadProcessInfoWithRoot("", pid)
+}
+
+// ReadProcessInfoWithRoot gathers metadata for a PID from custom proc root (or /proc).
+func ReadProcessInfoWithRoot(procRoot string, pid int) (*ProcessInfo, error) {
+	baseProc := "/proc"
+	if procRoot != "" {
+		baseProc = procRoot
+	}
+	procDir := filepath.Join(baseProc, strconv.Itoa(pid))
 
 	// Quick check if /proc/<pid> exists
 	if _, err := os.Stat(procDir); err != nil {
@@ -72,9 +86,11 @@ func ReadProcessInfo(pid int) (*ProcessInfo, error) {
 	}
 
 	info := &ProcessInfo{
-		PID:     pid,
-		Cmdline: make([]string, 0),
-		Maps:    make([]MapEntry, 0),
+		PID:          pid,
+		Cmdline:      make([]string, 0),
+		Maps:         make([]MapEntry, 0),
+		OpenSockets:  make([]uint64, 0),
+		CoverageGaps: make([]string, 0),
 	}
 
 	// 1. Read comm
@@ -83,6 +99,8 @@ func ReadProcessInfo(pid int) (*ProcessInfo, error) {
 		info.Comm = strings.TrimSpace(string(commBytes))
 	} else if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
 		return nil, ErrProcessVanished
+	} else if os.IsPermission(err) {
+		return nil, ErrPermissionDenied
 	}
 
 	// 2. Read status for Uid/Gid/PPid
@@ -91,6 +109,8 @@ func ReadProcessInfo(pid int) (*ProcessInfo, error) {
 		parseStatus(string(statusBytes), info)
 	} else if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
 		return nil, ErrProcessVanished
+	} else if os.IsPermission(err) {
+		return nil, ErrPermissionDenied
 	}
 
 	// 2b. Read stat for PF_KTHREAD flags
@@ -99,6 +119,8 @@ func ReadProcessInfo(pid int) (*ProcessInfo, error) {
 		parseStat(string(statBytes), info)
 	} else if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
 		return nil, ErrProcessVanished
+	} else if os.IsPermission(err) {
+		return nil, ErrPermissionDenied
 	}
 
 	// 3. Read cmdline (separated by null bytes)
@@ -121,11 +143,14 @@ func ReadProcessInfo(pid int) (*ProcessInfo, error) {
 	exeTarget, err := os.Readlink(filepath.Join(procDir, "exe"))
 	if err == nil {
 		info.ExeReadable = true
+		info.ReadableExe = true
 		info.Exe = exeTarget
 		var st unix.Stat_t
 		if sErr := unix.Stat(filepath.Join(procDir, "exe"), &st); sErr == nil {
 			info.ExeStat = &st
 		}
+	} else if os.IsPermission(err) {
+		info.CoverageGaps = append(info.CoverageGaps, fmt.Sprintf("exe permission denied for pid %d", pid))
 	}
 
 	// 5. Read cwd link
@@ -135,17 +160,42 @@ func ReadProcessInfo(pid int) (*ProcessInfo, error) {
 		info.Cwd = cwdTarget
 	}
 
-	// 6. Read mount namespace ID
+	// 6. Read mount and net namespace IDs
 	mntTarget, err := os.Readlink(filepath.Join(procDir, "ns", "mnt"))
 	if err == nil {
 		info.MntNs = mntTarget
+	}
+	netTarget, err := os.Readlink(filepath.Join(procDir, "ns", "net"))
+	if err == nil {
+		info.NetNs = netTarget
 	}
 
 	// 7. Read maps (ignore error if permission denied, but parse if available)
 	mapsBytes, err := os.ReadFile(filepath.Join(procDir, "maps"))
 	if err == nil {
 		info.MapsReadable = true
+		info.ReadableMaps = true
 		info.Maps = ParseMaps(string(mapsBytes))
+	} else if os.IsPermission(err) {
+		info.CoverageGaps = append(info.CoverageGaps, fmt.Sprintf("maps permission denied for pid %d", pid))
+	}
+
+	// 8. Read fd directory for open sockets
+	fdEntries, fdErr := os.ReadDir(filepath.Join(procDir, "fd"))
+	if fdErr == nil {
+		info.FDsReadable = true
+		info.ReadableFDs = true
+		for _, fdEntry := range fdEntries {
+			linkTarget, err := os.Readlink(filepath.Join(procDir, "fd", fdEntry.Name()))
+			if err == nil && strings.HasPrefix(linkTarget, "socket:[") && strings.HasSuffix(linkTarget, "]") {
+				inodeStr := linkTarget[8 : len(linkTarget)-1]
+				if inode, err := strconv.ParseUint(inodeStr, 10, 64); err == nil {
+					info.OpenSockets = append(info.OpenSockets, inode)
+				}
+			}
+		}
+	} else if os.IsPermission(fdErr) {
+		info.CoverageGaps = append(info.CoverageGaps, fmt.Sprintf("fd directory permission denied for pid %d", pid))
 	}
 
 	return info, nil
@@ -156,7 +206,7 @@ func (p *ProcessInfo) IsFullyReadable() bool {
 	if p == nil {
 		return false
 	}
-	return p.ExeReadable && p.CwdReadable && p.CmdReadable && p.MapsReadable
+	return (p.ExeReadable || p.ReadableExe) && p.CwdReadable && p.CmdReadable && (p.MapsReadable || p.ReadableMaps)
 }
 
 // IsKernelThread determines if the process is a kernel thread.

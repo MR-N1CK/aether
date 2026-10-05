@@ -2,6 +2,7 @@ package events
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -207,6 +208,7 @@ type Progress struct {
 	FilesPerSec   float64       `json:"files_per_sec"`
 	Elapsed       time.Duration `json:"elapsed"`
 	ActiveModules []string      `json:"active_modules"`
+	ActivePaths   []string      `json:"active_paths,omitempty"`
 }
 
 func (e Progress) Type() EventType     { return TypeProgress }
@@ -219,7 +221,7 @@ type DirCount struct {
 	Count int64  `json:"count"`
 }
 
-// OversizeFile tracks a file skipped because its size exceeded --max-filesize.
+// OversizeFile tracks a file skipped because its size exceeded limits or hashed oversize.
 type OversizeFile struct {
 	Path string `json:"path"`
 	Size int64  `json:"size"`
@@ -227,21 +229,24 @@ type OversizeFile struct {
 
 // CoverageStats tracks scan totals and skipped items for forensic transparency.
 type CoverageStats struct {
-	FilesScanned      int64          `json:"files_scanned"`
-	SkippedOversize   int64          `json:"skipped_oversize"`
-	SkippedPermission int64          `json:"skipped_permission"`
-	SkippedVanished   int64          `json:"skipped_vanished"`
-	SkippedNotRegular int64          `json:"skipped_not_regular"`
-	SkippedExcluded   int64          `json:"skipped_excluded"`
-	Suppressed        int64          `json:"suppressed"`
-	Acknowledged      int64          `json:"acknowledged"`
-	TopInspectedDirs  []DirCount     `json:"top_inspected_dirs,omitempty"`
-	OversizeFiles     []OversizeFile `json:"oversize_files,omitempty"`
+	FilesScanned        int64          `json:"files_scanned"`
+	SkippedOversize     int64          `json:"skipped_oversize"`
+	SkippedPermission   int64          `json:"skipped_permission"`
+	SkippedVanished     int64          `json:"skipped_vanished"`
+	SkippedNotRegular   int64          `json:"skipped_not_regular"`
+	SkippedExcluded     int64          `json:"skipped_excluded"`
+	SkippedTimeout      int64          `json:"skipped_timeout"`
+	HashedOversize      int64          `json:"hashed_oversize"`
+	Suppressed          int64          `json:"suppressed"`
+	Acknowledged        int64          `json:"acknowledged"`
+	TopInspectedDirs    []DirCount     `json:"top_inspected_dirs,omitempty"`
+	OversizeFiles       []OversizeFile `json:"oversize_files,omitempty"`
+	HashedOversizeFiles []OversizeFile `json:"hashed_oversize_files,omitempty"`
 }
 
 // TotalSkipped returns the aggregate number of files skipped during scanning.
 func (s CoverageStats) TotalSkipped() int64 {
-	return s.SkippedOversize + s.SkippedPermission + s.SkippedVanished + s.SkippedNotRegular + s.SkippedExcluded
+	return s.SkippedOversize + s.SkippedPermission + s.SkippedVanished + s.SkippedNotRegular + s.SkippedExcluded + s.SkippedTimeout
 }
 
 // HasPartialCoverage returns true if any files were skipped during scanning.
@@ -293,12 +298,55 @@ func (e Error) Type() EventType     { return TypeError }
 func (e Error) Timestamp() time.Time { return e.Time }
 func (e Error) IsCritical() bool    { return true }
 
+// isWeakFinding checks if a finding matches any of the weak rules.
+func isWeakFinding(f report.Finding, weakRules []string) bool {
+	if len(weakRules) == 0 {
+		return false
+	}
+	rules := strings.Split(f.RuleName, ",")
+	if len(rules) == 0 {
+		return false
+	}
+	for _, r := range rules {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		matched := false
+		for _, w := range weakRules {
+			w = strings.TrimSpace(w)
+			if w == "" {
+				continue
+			}
+			if r == w {
+				matched = true
+				break
+			}
+			if strings.Contains(w, "*") {
+				if ok, _ := filepath.Match(w, r); ok {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
 // ComputeVerdict calculates the overall verdict and explanation reason from findings.
 // - COMPROMISED requires >= 1 high-confidence indicator (IOC match, reverse shell primitive, symlink escape, or strong+strong ALERT).
 // - If alerts > 0 or warnings > 0: SUSPICIOUS with reason.
-// - If noticesThreshold > 0 and notices >= noticesThreshold: SUSPICIOUS with reason.
-// - Otherwise: CLEAN (with notice count annotation if notices > 0). NOTICE and INFO never trigger SUSPICIOUS by default.
-func ComputeVerdict(findings []report.Finding, alerts, warnings, notices, noticesThreshold int) (Verdict, string) {
+// - If noticesThreshold > 0 and non-weak notices >= noticesThreshold: SUSPICIOUS with reason.
+// - Otherwise: CLEAN (with notice count annotation if notices > 0). Weak notices never trigger SUSPICIOUS alone.
+func ComputeVerdict(findings []report.Finding, alerts, warnings, notices, noticesThreshold int, weakRulesOpt ...[]string) (Verdict, string) {
+	var weakRules []string
+	if len(weakRulesOpt) > 0 {
+		weakRules = weakRulesOpt[0]
+	}
+
 	hasHighConfidence := false
 	var highConfidenceRule string
 
@@ -309,11 +357,21 @@ func ComputeVerdict(findings []report.Finding, alerts, warnings, notices, notice
 				isHC = true
 			} else if conf, ok := f.Metadata["confidence"].(string); ok && strings.EqualFold(conf, "high") {
 				isHC = true
+			} else if f.Confidence == report.ConfidenceHigh {
+				isHC = true
 			} else if ioc, ok := f.Metadata["is_ioc_match"].(bool); ok && ioc {
 				isHC = true
 			} else if strings.Contains(f.RuleName, "IOC") ||
-				strings.Contains(f.RuleName, "Reverse_Shell_Primitive") ||
-				strings.Contains(f.RuleName, "Symlink_Escape") {
+				strings.Contains(f.RuleName, "Reverse_Shell") ||
+				strings.Contains(f.RuleName, "RevShell") ||
+				strings.Contains(f.RuleName, "OpenSSL") ||
+				strings.Contains(f.RuleName, "Socat") ||
+				strings.Contains(f.RuleName, "Netcat") ||
+				strings.Contains(f.RuleName, "RedTeam") ||
+				strings.Contains(f.RuleName, "GhostShell") ||
+				strings.Contains(f.RuleName, "Webshell") ||
+				strings.Contains(f.RuleName, "Symlink_Escape") ||
+				strings.Contains(f.RuleName, "LDPRELOAD") {
 				isHC = true
 			} else if strongCount, ok := f.Metadata["distinct_strong_classes"].(int); ok && strongCount >= 2 {
 				isHC = true
@@ -339,8 +397,21 @@ func ComputeVerdict(findings []report.Finding, alerts, warnings, notices, notice
 		return VerdictSuspicious, fmt.Sprintf("SUSPICIOUS: %d warnings, no high-confidence indicators", warnings)
 	}
 
-	if noticesThreshold > 0 && notices >= noticesThreshold {
-		return VerdictSuspicious, fmt.Sprintf("SUSPICIOUS: %d notices, threshold (%d) exceeded", notices, noticesThreshold)
+	nonWeakNotices := 0
+	if len(findings) > 0 {
+		for _, f := range findings {
+			if f.Severity == report.SeverityNotice {
+				if !isWeakFinding(f, weakRules) {
+					nonWeakNotices++
+				}
+			}
+		}
+	} else {
+		nonWeakNotices = notices
+	}
+
+	if noticesThreshold > 0 && nonWeakNotices >= noticesThreshold {
+		return VerdictSuspicious, fmt.Sprintf("SUSPICIOUS: %d notices (%d non-weak), threshold (%d) exceeded", notices, nonWeakNotices, noticesThreshold)
 	}
 
 	if notices > 0 {

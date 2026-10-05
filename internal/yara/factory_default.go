@@ -3,6 +3,7 @@
 package yara
 
 import (
+	"errors"
 	"log/slog"
 
 	"aether/internal/config"
@@ -16,5 +17,11 @@ func New(cfg *config.Config, logger *slog.Logger, devRpath bool) Engine {
 
 // VersionInfo returns YARA runtime version details.
 func VersionInfo() string {
-	return "not compiled in"
+	return "disabled (native heuristics only)"
 }
+
+// ValidateRulesDir returns an error indicating that YARA is not compiled in.
+func ValidateRulesDir(dir string) (*ValidationResult, error) {
+	return nil, errors.New("YARA engine is not compiled into this binary (compile with make build-yara-static or use -tags yara)")
+}
+

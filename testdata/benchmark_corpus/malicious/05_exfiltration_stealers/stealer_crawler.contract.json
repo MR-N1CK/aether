@@ -1,0 +1,15 @@
+{
+  "id": "MAL-STEAL-001",
+  "name": "Data Harvesting Exfiltration Stealer Script",
+  "category": "MALICIOUS",
+  "subcategory": "exfiltration_stealers",
+  "target_path": "/home/user/stealer_crawler.py",
+  "file_mode": 493,
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SUSPICIOUS",
+    "allowed_severities": ["WARNING", "ALERT"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "MEDIUM"
+  }
+}

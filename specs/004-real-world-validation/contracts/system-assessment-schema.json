@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ComprehensiveSystemAssessment",
+  "type": "object",
+  "required": [
+    "posture",
+    "summary_rationale",
+    "total_findings",
+    "alerts_count",
+    "warnings_count",
+    "notices_count",
+    "infos_count",
+    "unknowns_count",
+    "next_actions"
+  ],
+  "properties": {
+    "posture": {
+      "type": "string",
+      "enum": ["SAFE", "ATTENTION_REQUIRED", "HIGH_RISK", "LIMITED_VISIBILITY"]
+    },
+    "summary_rationale": { "type": "string" },
+    "total_findings": { "type": "integer", "minimum": 0 },
+    "alerts_count": { "type": "integer", "minimum": 0 },
+    "warnings_count": { "type": "integer", "minimum": 0 },
+    "notices_count": { "type": "integer", "minimum": 0 },
+    "infos_count": { "type": "integer", "minimum": 0 },
+    "unknowns_count": { "type": "integer", "minimum": 0 },
+    "critical_findings": { "type": "array" },
+    "suspicious_findings": { "type": "array" },
+    "visibility_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["subsystem", "target_path", "reason"],
+        "properties": {
+          "subsystem": { "type": "string" },
+          "target_path": { "type": "string" },
+          "reason": { "type": "string" },
+          "remediation": { "type": "string" }
+        }
+      }
+    },
+    "next_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["priority", "title", "description"],
+        "properties": {
+          "priority": { "type": "integer" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "command": { "type": "string" }
+        }
+      }
+    }
+  }
+}

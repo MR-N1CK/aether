@@ -616,3 +616,473 @@ func (b *busReporter) Findings() []report.Finding { return nil }
 func (b *busReporter) Summary() (int, int, int, int, int) { return 0, 0, 0, 0, 0 }
 func (b *busReporter) Close() error { return nil }
 
+func TestPersistence_RedactSnippet_NoOverRedaction(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{
+			input:    "/usr/local/sbin/set-grub-install-devices",
+			expected: "/usr/local/sbin/set-grub-install-devices",
+		},
+		{
+			input:    "ssh -i /root/.ssh/id_rsa user@host",
+			expected: "ssh -i [REDACTED_KEY] user@host",
+		},
+		{
+			input:    "/usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper &  # pam-xdg-install",
+			expected: "/usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper &  # pam-xdg-install",
+		},
+	}
+
+	for _, c := range cases {
+		out := persistence.RedactSnippet(c.input)
+		if out != c.expected {
+			t.Errorf("RedactSnippet(%q) = %q; want %q", c.input, out, c.expected)
+		}
+	}
+}
+
+func TestPersistence_HiddenSystemPathDetection(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	signals := persistence.CheckSuspiciousCommand(
+		"/usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper >/dev/null 2>&1",
+		1,
+		cfg,
+		"",
+		true,
+		nil,
+	)
+
+	hasHiddenPathWarning := false
+	for _, s := range signals {
+		if s.RuleName == "Persistence_Exec_From_Hidden_Path" && s.Severity == report.SeverityWarning {
+			hasHiddenPathWarning = true
+			break
+		}
+	}
+
+	if !hasHiddenPathWarning {
+		t.Errorf("expected Persistence_Exec_From_Hidden_Path warning for /usr/lib/.libpam-xdg-support/.update-helper, got: %+v", signals)
+	}
+}
+
+func TestPersistence_RedactSnippet_ScopedFlag(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{
+			input:    "grep -i foo /etc/shadow",
+			expected: "grep -i foo /etc/shadow",
+		},
+		{
+			input:    "sed -i 's/foo/bar/' /etc/hosts",
+			expected: "sed -i 's/foo/bar/' /etc/hosts",
+		},
+		{
+			input:    "ssh -i /root/.ssh/id_rsa user@host",
+			expected: "ssh -i [REDACTED_KEY] user@host",
+		},
+		{
+			input:    "scp -i /home/user/.ssh/id_ed25519 src user@host:/dest",
+			expected: "scp -i [REDACTED_KEY] src user@host:/dest",
+		},
+		{
+			input:    "sftp -i /root/.ssh/key remote:/path /local/path",
+			expected: "sftp -i [REDACTED_KEY] remote:/path /local/path",
+		},
+	}
+
+	for _, c := range cases {
+		out := persistence.RedactSnippet(c.input)
+		if out != c.expected {
+			t.Errorf("RedactSnippet(%q) = %q; want %q", c.input, out, c.expected)
+		}
+	}
+}
+
+func TestPersistence_BenignTwinDaemon_NoAlert(t *testing.T) {
+	root := t.TempDir()
+
+	// 1. Setup dpkg database owning /usr/sbin/cron-daemon
+	dpkgInfo := filepath.Join(root, "var/lib/dpkg/info")
+	_ = os.MkdirAll(dpkgInfo, 0755)
+	_ = os.WriteFile(filepath.Join(dpkgInfo, "cron.list"), []byte("/usr/sbin/cron-daemon\n"), 0644)
+
+	// Create the binary on disk
+	_ = os.MkdirAll(filepath.Join(root, "usr/sbin"), 0755)
+	_ = os.WriteFile(filepath.Join(root, "usr/sbin/cron-daemon"), []byte("#!/bin/sh\nexit 0\n"), 0755)
+
+	// 2. Reference by systemd unit
+	_ = os.MkdirAll(filepath.Join(root, "etc/systemd/system"), 0755)
+	systemdUnit := `[Unit]
+Description=Cron Daemon
+[Service]
+ExecStart=/usr/sbin/cron-daemon
+`
+	_ = os.WriteFile(filepath.Join(root, "etc/systemd/system/cron-daemon.service"), []byte(systemdUnit), 0644)
+
+	// 3. Reference by init.d script
+	_ = os.MkdirAll(filepath.Join(root, "etc/init.d"), 0755)
+	initScript := `#!/bin/sh
+/usr/sbin/cron-daemon &
+exit 0
+`
+	_ = os.WriteFile(filepath.Join(root, "etc/init.d/cron-daemon"), []byte(initScript), 0755)
+
+	// 4. Reference by cron.d
+	_ = os.MkdirAll(filepath.Join(root, "etc/cron.d"), 0755)
+	cronEntry := `* * * * * root /usr/sbin/cron-daemon
+`
+	_ = os.WriteFile(filepath.Join(root, "etc/cron.d/cron-daemon"), []byte(cronEntry), 0644)
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := persistence.NewModuleWithRoot(root, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error running persistence module: %v", err)
+	}
+
+	for _, f := range rep.findings {
+		if f.RuleName == "Persistence_Multi_Vector_Persistence" {
+			t.Errorf("expected NO Multi_Vector_Persistence alert for package-owned daemon, but got: %+v", f)
+		}
+		if f.Severity == report.SeverityAlert || f.Severity == report.SeverityWarning {
+			t.Errorf("expected 0 Alerts/Warnings for benign twin daemon, got %s finding: %+v", f.Severity, f)
+		}
+	}
+}
+
+func TestPersistence_HomeCachePath_InfoSeverity(t *testing.T) {
+	root := t.TempDir()
+
+	_ = os.MkdirAll(filepath.Join(root, "etc"), 0755)
+	passwd := `root:x:0:0:root:/root:/bin/bash
+alice:x:1000:1000:Alice:/home/alice:/bin/bash
+`
+	_ = os.WriteFile(filepath.Join(root, "etc/passwd"), []byte(passwd), 0644)
+
+	// Create executable in ~/.cache/
+	aliceCache := filepath.Join(root, "home/alice/.cache")
+	_ = os.MkdirAll(aliceCache, 0755)
+	_ = os.WriteFile(filepath.Join(aliceCache, "dropper.sh"), []byte("#!/bin/sh\necho hello\n"), 0755)
+
+	// Reference in ~/.bashrc
+	_ = os.WriteFile(filepath.Join(root, "home/alice/.bashrc"), []byte("/home/alice/.cache/dropper.sh\n"), 0644)
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := persistence.NewModuleWithRoot(root, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error running persistence module: %v", err)
+	}
+
+	foundCacheFinding := false
+	for _, f := range rep.findings {
+		if f.RuleName == "Persistence_Exec_From_Home_Cache_Path" {
+			foundCacheFinding = true
+			if f.Severity != report.SeverityInfo {
+				t.Errorf("expected INFO severity for home cache finding, got %s", f.Severity)
+			}
+		}
+	}
+
+	if !foundCacheFinding {
+		t.Errorf("expected Persistence_Exec_From_Home_Cache_Path finding for dropper in ~/.cache, got findings: %+v", rep.findings)
+	}
+}
+
+func TestPersistence_BenignToolDirs(t *testing.T) {
+	root := t.TempDir()
+
+	_ = os.MkdirAll(filepath.Join(root, "etc"), 0755)
+	passwd := `root:x:0:0:root:/root:/bin/bash
+bob:x:1001:1001:Bob:/home/bob:/bin/bash
+`
+	_ = os.WriteFile(filepath.Join(root, "etc/passwd"), []byte(passwd), 0644)
+
+	// Create benign tool directories with real files
+	venvBin := filepath.Join(root, "home/bob/.venv/bin")
+	_ = os.MkdirAll(venvBin, 0755)
+	_ = os.WriteFile(filepath.Join(venvBin, "python"), []byte("#!/bin/sh\nexit 0\n"), 0755)
+
+	cargoBin := filepath.Join(root, "home/bob/.cargo/bin")
+	_ = os.MkdirAll(cargoBin, 0755)
+	_ = os.WriteFile(filepath.Join(cargoBin, "cargo"), []byte("#!/bin/sh\nexit 0\n"), 0755)
+
+	// Reference in ~/.bashrc
+	bashrcContent := `/home/bob/.venv/bin/python -m app
+/home/bob/.cargo/bin/cargo build
+`
+	_ = os.WriteFile(filepath.Join(root, "home/bob/.bashrc"), []byte(bashrcContent), 0644)
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := persistence.NewModuleWithRoot(root, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error running persistence module: %v", err)
+	}
+
+	for _, f := range rep.findings {
+		if f.RuleName == "Persistence_Exec_From_Hidden_Path" {
+			t.Errorf("expected benign tool directories not to trigger Persistence_Exec_From_Hidden_Path, got: %+v", f)
+		}
+	}
+}
+
+func TestPersistence_CommandParser_Redirections(t *testing.T) {
+	testCases := []struct {
+		cmd             string
+		expectedTargets []string
+	}{
+		{
+			cmd:             "if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then",
+			expectedTargets: []string{"tput"},
+		},
+		{
+			cmd:             "cmd 2>&1",
+			expectedTargets: []string{"cmd"},
+		},
+		{
+			cmd:             "cmd &>/dev/null &",
+			expectedTargets: []string{"cmd"},
+		},
+		{
+			cmd:             "nohup /usr/bin/python3 /usr/lib/.system-cache/.sysupd &>/dev/null &",
+			expectedTargets: []string{"/usr/bin/python3", "/usr/lib/.system-cache/.sysupd"},
+		},
+		{
+			cmd:             "echo hi > /dev/null",
+			expectedTargets: nil, // echo is built-in/ignored
+		},
+		{
+			cmd:             "cmd |& grep error",
+			expectedTargets: []string{"cmd", "grep"},
+		},
+		{
+			cmd:             `cmd <<< "input"`,
+			expectedTargets: []string{"cmd"},
+		},
+		{
+			cmd:             "cmd << EOF\nsome data\nEOF",
+			expectedTargets: []string{"cmd"},
+		},
+	}
+
+	for _, tc := range testCases {
+		targets, _ := persistence.ExtractExecTargets(tc.cmd)
+		for _, exp := range tc.expectedTargets {
+			found := false
+			for _, act := range targets {
+				if act == exp {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("command %q: expected target %q not found in %v", tc.cmd, exp, targets)
+			}
+		}
+		// Ensure /dev/null is never returned as an exec target
+		for _, act := range targets {
+			if strings.HasPrefix(act, "/dev/") {
+				if act == "/dev/null" || act == "/dev/zero" || act == "/dev/stdin" || act == "/dev/stdout" || act == "/dev/stderr" {
+					t.Errorf("command %q: pseudo-file %q should not be an exec target", tc.cmd, act)
+				}
+			}
+		}
+	}
+}
+
+func TestPersistence_GuardedCommands(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// 1. Single line guarded command
+	sigs1 := persistence.CheckSuspiciousCommand("if [ -x /opt/missing_tool/bin ] && /opt/missing_tool/bin; then", 1, cfg, "", false, nil)
+	for _, s := range sigs1 {
+		if s.RuleName == "Persistence_Missing_Target_File" {
+			t.Errorf("guarded single-line command should not emit Persistence_Missing_Target_File, got: %+v", s)
+		}
+	}
+
+	// 2. Multiline guarded command with fileGuards
+	fileContent := `if [ -x /usr/lib/command-not-found ]; then
+    /usr/lib/command-not-found -- "$1"
+fi`
+	fileGuards := persistence.ExtractGuardedPaths(fileContent)
+	if !fileGuards["/usr/lib/command-not-found"] {
+		t.Fatalf("expected /usr/lib/command-not-found in fileGuards, got %v", fileGuards)
+	}
+
+	sigs2 := persistence.CheckSuspiciousCommand(`/usr/lib/command-not-found -- "$1"`, 2, cfg, "", false, nil, fileGuards)
+	for _, s := range sigs2 {
+		if s.RuleName == "Persistence_Missing_Target_File" {
+			t.Errorf("guarded multiline command should not emit Persistence_Missing_Target_File, got: %+v", s)
+		}
+	}
+
+	// 3. Hidden path guarded command should NOT be suppressed
+	hiddenGuarded := `[ -x /usr/lib/.hidden_payload/run ] && /usr/lib/.hidden_payload/run`
+	sigs3 := persistence.CheckSuspiciousCommand(hiddenGuarded, 3, cfg, "", false, nil)
+	hasHiddenFinding := false
+	for _, s := range sigs3 {
+		if s.RuleName == "Persistence_Exec_From_Hidden_Path" {
+			hasHiddenFinding = true
+		}
+	}
+	if !hasHiddenFinding {
+		t.Errorf("guarded hidden path command must still emit Persistence_Exec_From_Hidden_Path")
+	}
+}
+
+func TestPersistence_WeakRulesVerdictEscalation(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// 3 weak notice findings
+	weakFindings := []report.Finding{
+		report.NewFinding("persistence", report.SeverityNotice, "/etc/cron.d/test1", "missing target", "Persistence_Missing_Target_File"),
+		report.NewFinding("persistence", report.SeverityNotice, "/etc/systemd/system/test2.service", "unowned unit", "Persistence_Systemd_Unowned_Unit"),
+		report.NewFinding("persistence", report.SeverityNotice, "/etc/init.d/test3", "unowned script", "Persistence_InitD_Unowned_Script"),
+	}
+
+	verdict, _ := events.ComputeVerdict(weakFindings, 0, 0, len(weakFindings), cfg.Scan.VerdictNoticesThreshold, cfg.Scan.WeakRules)
+	if verdict != events.VerdictClean {
+		t.Errorf("3 weak notices should result in CLEAN verdict, got %s", verdict)
+	}
+
+	// 3 non-weak notice findings
+	nonWeakFindings := []report.Finding{
+		report.NewFinding("persistence", report.SeverityNotice, "/root/.bashrc", "home hidden path", "Persistence_Exec_From_Home_Hidden_Path"),
+		report.NewFinding("persistence", report.SeverityNotice, "/root/.bashrc", "home hidden path", "Persistence_Exec_From_Home_Hidden_Path"),
+		report.NewFinding("persistence", report.SeverityNotice, "/root/.bashrc", "home hidden path", "Persistence_Exec_From_Home_Hidden_Path"),
+	}
+
+	verdictNW, _ := events.ComputeVerdict(nonWeakFindings, 0, 0, len(nonWeakFindings), cfg.Scan.VerdictNoticesThreshold, cfg.Scan.WeakRules)
+	if verdictNW != events.VerdictSuspicious {
+		t.Errorf("3 non-weak notices should result in SUSPICIOUS verdict, got %s", verdictNW)
+	}
+}
+
+func TestPersistence_LDPreload_UnderRoot(t *testing.T) {
+	root := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(root, "etc"), 0755)
+	_ = os.MkdirAll(filepath.Join(root, "lib"), 0755)
+
+	// Create root preload library and /etc/ld.so.preload
+	_ = os.WriteFile(filepath.Join(root, "lib/custom_hook.so"), []byte("ELF_FAKE_BYTES"), 0644)
+	_ = os.WriteFile(filepath.Join(root, "etc/ld.so.preload"), []byte("/lib/custom_hook.so\n"), 0644)
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := persistence.NewModuleWithRoot(root, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error running persistence module: %v", err)
+	}
+
+	foundPreloadFinding := false
+	for _, f := range rep.findings {
+		if strings.Contains(f.RuleName, "Persistence_Loader_Preload") {
+			foundPreloadFinding = true
+			if f.Severity != report.SeverityWarning && f.Severity != report.SeverityAlert {
+				t.Errorf("expected at least WARNING severity for ld.so.preload finding, got %s", f.Severity)
+			}
+		}
+	}
+
+	if !foundPreloadFinding {
+		t.Errorf("expected Persistence_Loader_Preload finding under root, got findings: %+v", rep.findings)
+	}
+}
+
+func TestPersistence_DistroProfileScripts(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// 1. bash_completion.sh sourcing ${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion
+	bashCompLine := `. "${XDG_CONFIG_HOME:-$HOME/.config}/bash_completion"`
+	sigs1 := persistence.CheckSuspiciousCommand(bashCompLine, 1, cfg, "", true, nil)
+	for _, s := range sigs1 {
+		if s.RuleName == "Persistence_Exec_From_Hidden_Path" || s.RuleName == "Persistence_System_Exec_User_Hidden_Path" {
+			t.Errorf("bash_completion.sh must not trigger hidden path rule, got: %+v", s)
+		}
+	}
+
+	// 2. flatpak.sh referencing $HOME/.local/share/flatpak/exports/share
+	flatpakLine := `export XDG_DATA_DIRS="$HOME/.local/share/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"`
+	sigs2 := persistence.CheckSuspiciousCommand(flatpakLine, 2, cfg, "", true, nil)
+	for _, s := range sigs2 {
+		if s.RuleName == "Persistence_Exec_From_Hidden_Path" || s.RuleName == "Persistence_System_Exec_User_Hidden_Path" {
+			t.Errorf("flatpak.sh must not trigger hidden path rule, got: %+v", s)
+		}
+	}
+
+	// 3. User cache script $HOME/.cache/tracker
+	cacheLine := `. "$HOME/.cache/tracker"`
+	sigs3 := persistence.CheckSuspiciousCommand(cacheLine, 3, cfg, "", false, nil)
+	for _, s := range sigs3 {
+		if s.Severity >= report.SeverityWarning {
+			t.Errorf("user cache script should not trigger WARNING or higher, got: %+v", s)
+		}
+	}
+
+	// 4. Actual malicious hidden path under /usr/lib/.system-cache/.sysupd
+	malwareLine := `nohup python3 /usr/lib/.system-cache/.sysupd &>/dev/null &`
+	sigs4 := persistence.CheckSuspiciousCommand(malwareLine, 4, cfg, "", true, nil)
+	foundHiddenWarning := false
+	for _, s := range sigs4 {
+		if s.RuleName == "Persistence_Exec_From_Hidden_Path" && s.Severity == report.SeverityWarning {
+			foundHiddenWarning = true
+		}
+	}
+	if !foundHiddenWarning {
+		t.Errorf("expected Persistence_Exec_From_Hidden_Path warning for /usr/lib/.system-cache/.sysupd, got: %+v", sigs4)
+	}
+}
+
+func TestPersistence_SSHNonStandardKeyLocation(t *testing.T) {
+	root := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(root, "root/.ssh"), 0700)
+	_ = os.MkdirAll(filepath.Join(root, "etc"), 0755)
+
+	// Setup /etc/passwd
+	_ = os.WriteFile(filepath.Join(root, "etc/passwd"), []byte("root:x:0:0:root:/root:/bin/bash\n"), 0644)
+
+	// Setup authorized_keys with comment referencing /usr/lib/.system-cache/id_ed25519
+	keyLine := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGhostKeyPlantedTestCaseForAetherHunt root@/usr/lib/.system-cache/id_ed25519\n"
+	_ = os.WriteFile(filepath.Join(root, "root/.ssh/authorized_keys"), []byte(keyLine), 0600)
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := persistence.NewModuleWithRoot(root, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error running persistence module: %v", err)
+	}
+
+	foundNonStandardFinding := false
+	for _, f := range rep.findings {
+		if strings.Contains(f.RuleName, "Persistence_SSH_Key_Non_Standard_Location") {
+			foundNonStandardFinding = true
+			if f.Severity != report.SeverityWarning {
+				t.Errorf("expected WARNING for non-standard key location, got %s", f.Severity)
+			}
+		}
+	}
+
+	if !foundNonStandardFinding {
+		t.Errorf("expected Persistence_SSH_Key_Non_Standard_Location finding, got: %+v", rep.findings)
+	}
+}
+
+
+
+

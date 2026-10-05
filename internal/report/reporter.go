@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"sync"
 )
 
@@ -18,6 +19,19 @@ type Reporter interface {
 	Summary() (total int, alerts int, warnings int, notices int, infos int)
 	// Close flushes any pending writes and closes open file handles.
 	Close() error
+}
+
+// SortFindings sorts a slice of findings deterministically by (Path, LineNumber, RuleName).
+func SortFindings(findings []Finding) {
+	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].Path != findings[j].Path {
+			return findings[i].Path < findings[j].Path
+		}
+		if findings[i].LineNumber != findings[j].LineNumber {
+			return findings[i].LineNumber < findings[j].LineNumber
+		}
+		return findings[i].RuleName < findings[j].RuleName
+	})
 }
 
 // ConcurrentReporter is a thread-safe implementation of Reporter.
@@ -67,13 +81,14 @@ func (r *ConcurrentReporter) Report(f Finding) {
 	}
 }
 
-// Findings returns a shallow copy of all recorded findings.
+// Findings returns a deterministically sorted copy of all recorded findings.
 func (r *ConcurrentReporter) Findings() []Finding {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	copied := make([]Finding, len(r.findings))
 	copy(copied, r.findings)
+	SortFindings(copied)
 	return copied
 }
 
@@ -115,3 +130,45 @@ func (r *ConcurrentReporter) Close() error {
 	}
 	return nil
 }
+
+// FindingAccumulator collects findings during a scan sweep and provides post-scan correlation.
+type FindingAccumulator struct {
+	mu       sync.RWMutex
+	findings []Finding
+}
+
+// NewFindingAccumulator creates an initialized FindingAccumulator.
+func NewFindingAccumulator() *FindingAccumulator {
+	return &FindingAccumulator{
+		findings: make([]Finding, 0),
+	}
+}
+
+// Report safely appends a finding.
+func (a *FindingAccumulator) Report(f Finding) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.findings = append(a.findings, f)
+}
+
+// Findings returns a deterministically sorted snapshot of accumulated findings.
+func (a *FindingAccumulator) Findings() []Finding {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	copied := make([]Finding, len(a.findings))
+	copy(copied, a.findings)
+	SortFindings(copied)
+	return copied
+}
+
+// CorrelateAndGet executes the cross-domain correlation pass and returns the findings.
+func (a *FindingAccumulator) CorrelateAndGet() []Finding {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.findings = CorrelateFindings(a.findings)
+	copied := make([]Finding, len(a.findings))
+	copy(copied, a.findings)
+	SortFindings(copied)
+	return copied
+}
+

@@ -179,7 +179,7 @@ func TestValidateRulesDirTrust(t *testing.T) {
 
 	// 1. Root user check: /home/ user dir rejected
 	homeUserDir := "/home/testuser/.config/aether/rules"
-	trusted, reason := ValidateRulesDirTrust(homeUserDir, true, 0)
+	trusted, reason := ValidateRulesDirTrust(homeUserDir, true, 0, false)
 	if trusted {
 		t.Errorf("expected root to reject /home directory, but got trusted=true")
 	}
@@ -190,7 +190,7 @@ func TestValidateRulesDirTrust(t *testing.T) {
 	// 2. Normal directory owned by current user
 	_ = os.Chmod(tempDir, 0755)
 	uid := uint32(os.Getuid())
-	trusted, reason = ValidateRulesDirTrust(tempDir, false, uid)
+	trusted, reason = ValidateRulesDirTrust(tempDir, false, uid, false)
 	if !trusted {
 		t.Errorf("expected tempDir to be trusted for current UID, got false: %s", reason)
 	}
@@ -201,9 +201,15 @@ func TestValidateRulesDirTrust(t *testing.T) {
 		t.Fatalf("failed to create dir: %v", err)
 	}
 	_ = os.Chmod(insecureDir, 0777)
-	trusted, reason = ValidateRulesDirTrust(insecureDir, false, uid)
+	trusted, reason = ValidateRulesDirTrust(insecureDir, false, uid, false)
 	if trusted {
 		t.Errorf("expected 0777 directory to be rejected as insecure, got true")
+	}
+
+	// 4. trustRulesDir bypass check
+	trustedBypass, _ := ValidateRulesDirTrust(insecureDir, false, uid, true)
+	if !trustedBypass {
+		t.Errorf("expected trustRulesDir=true to bypass validation, got false")
 	}
 }
 
@@ -225,16 +231,56 @@ func TestDiscoverRuleFiles(t *testing.T) {
 		t.Fatalf("failed to write txtFile: %v", err)
 	}
 
+	// Nested subdirectory with rule
+	subDir := filepath.Join(tempDir, "subdir")
+	if err := os.Mkdir(subDir, 0755); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
+	}
+	rule3 := filepath.Join(subDir, "rule3.yar")
+	if err := os.WriteFile(rule3, []byte("rule Sub_Rule { condition: true }"), 0644); err != nil {
+		t.Fatalf("failed to write rule3: %v", err)
+	}
+
 	uid := uint32(os.Getuid())
-	files, warnings := DiscoverRuleFiles([]string{tempDir}, false, uid, nil)
+	files, warnings := DiscoverRuleFiles([]string{tempDir}, false, uid, false, nil)
 	if len(warnings) > 0 {
 		t.Errorf("unexpected warnings: %v", warnings)
 	}
-	if len(files) != 2 {
-		t.Fatalf("expected 2 rule files, got %d: %v", len(files), files)
+	if len(files) != 3 {
+		t.Fatalf("expected 3 rule files, got %d: %v", len(files), files)
 	}
-	if files[0] != rule1 || files[1] != rule2 {
+	if files[0] != rule1 || files[1] != rule2 || files[2] != rule3 {
 		t.Errorf("unexpected discovered files: %v", files)
+	}
+
+	// Test 1: Empty directory
+	emptyDir := filepath.Join(tempDir, "empty_rules")
+	_ = os.Mkdir(emptyDir, 0755)
+	emptyFiles, emptyWarnings := DiscoverRuleFiles([]string{emptyDir}, false, uid, false, nil)
+	if len(emptyWarnings) > 0 {
+		t.Errorf("unexpected warnings for empty dir: %v", emptyWarnings)
+	}
+	if len(emptyFiles) != 0 {
+		t.Errorf("expected 0 files from empty dir, got %d", len(emptyFiles))
+	}
+
+	// Test 2: Non-existent directory
+	nonExistentDir := filepath.Join(tempDir, "does_not_exist")
+	nonExistentFiles, nonExistentWarnings := DiscoverRuleFiles([]string{nonExistentDir}, false, uid, false, nil)
+	if len(nonExistentWarnings) > 0 {
+		t.Errorf("unexpected warnings for non-existent dir: %v", nonExistentWarnings)
+	}
+	if len(nonExistentFiles) != 0 {
+		t.Errorf("expected 0 files from non-existent dir, got %d", len(nonExistentFiles))
+	}
+
+	// Test 3: File passed instead of directory
+	fileAsDirFiles, fileAsDirWarnings := DiscoverRuleFiles([]string{rule1}, false, uid, false, nil)
+	if len(fileAsDirWarnings) == 0 {
+		t.Errorf("expected warning when file is passed as directory")
+	}
+	if len(fileAsDirFiles) != 0 {
+		t.Errorf("expected 0 files when passing file path as rules dir, got %d", len(fileAsDirFiles))
 	}
 }
 

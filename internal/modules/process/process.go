@@ -34,6 +34,8 @@ type ProcessCoverage struct {
 
 // Module implements the specialized Linux process threat hunting module.
 type Module struct {
+	rootFS    string
+	procRoot  string
 	iocEngine ioc.Engine
 	bus       *events.EventBus
 	logger    *slog.Logger
@@ -43,10 +45,17 @@ type Module struct {
 
 // NewModule creates an initialized process inspection module.
 func NewModule(iocEng ioc.Engine, bus *events.EventBus, logger *slog.Logger) *Module {
+	return NewModuleWithRoots("", "", iocEng, bus, logger)
+}
+
+// NewModuleWithRoots creates an initialized process inspection module with custom rootFS and procRoot for testing.
+func NewModuleWithRoots(rootFS, procRoot string, iocEng ioc.Engine, bus *events.EventBus, logger *slog.Logger) *Module {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Module{
+		rootFS:    rootFS,
+		procRoot:  procRoot,
 		iocEngine: iocEng,
 		bus:       bus,
 		logger:    logger,
@@ -123,9 +132,14 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 		)
 	}
 
-	entries, err := os.ReadDir("/proc")
+	baseProc := "/proc"
+	if m.procRoot != "" {
+		baseProc = m.procRoot
+	}
+
+	entries, err := os.ReadDir(baseProc)
 	if err != nil {
-		return fmt.Errorf("failed to enumerate /proc: %w", err)
+		return fmt.Errorf("failed to enumerate %s: %w", baseProc, err)
 	}
 
 	pids := make([]int, 0, len(entries))
@@ -156,11 +170,11 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 		default:
 		}
 
-		if pid == selfPID {
+		if pid == selfPID && m.procRoot == "" {
 			continue
 		}
 
-		info, err := ReadProcessInfo(pid)
+		info, err := ReadProcessInfoWithRoot(m.procRoot, pid)
 		if err != nil {
 			if err == ErrProcessVanished {
 				skippedVanished.Add(1)
@@ -249,7 +263,7 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 						procHashes = cached
 					} else {
 						hashStart := time.Now()
-						procExePath := filepath.Join(fmt.Sprintf("/proc/%d", pid), "exe")
+						procExePath := filepath.Join(baseProc, strconv.Itoa(pid), "exe")
 						f, oErr := os.Open(procExePath)
 						if oErr == nil {
 							hRes, hErr := hasher.StreamHashAndHeader(f)
@@ -304,7 +318,7 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 			cleanCwd := filepath.Clean(info.Cwd)
 
 			var mode uint32
-			if st, err := os.Stat(fmt.Sprintf("/proc/%d/exe", pid)); err == nil {
+			if st, err := os.Stat(filepath.Join(baseProc, strconv.Itoa(pid), "exe")); err == nil {
 				mode = uint32(st.Mode())
 			}
 			base := filepath.Base(cleanExe)
@@ -416,7 +430,7 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 	if cfg != nil {
 		fullScan = cfg.Scan.Full
 	}
-	hiddenPIDs, hasHidepid, hidepidReason, pass1Dur, pass2Dur, hErr := CheckHiddenPIDsWithTimings(ctx, "/proc", 0, fullScan)
+	hiddenPIDs, hasHidepid, hidepidReason, pass1Dur, pass2Dur, hErr := CheckHiddenPIDsWithTimings(ctx, baseProc, 0, fullScan)
 	if hErr != nil {
 		m.logger.Warn("hidden PID probe encountered error", slog.Any("error", hErr))
 	} else if hasHidepid {

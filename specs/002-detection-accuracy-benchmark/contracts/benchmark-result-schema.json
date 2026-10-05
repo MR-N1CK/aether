@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AetherBenchmarkReport",
+  "description": "Schema definition for aggregated detection accuracy and benchmark execution results",
+  "type": "object",
+  "required": [
+    "timestamp",
+    "version",
+    "metrics",
+    "results"
+  ],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "string"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "total_cases",
+        "true_positives",
+        "true_negatives",
+        "false_positives",
+        "false_negatives",
+        "precision",
+        "recall",
+        "f1_score",
+        "false_positive_rate",
+        "detection_coverage_index"
+      ],
+      "properties": {
+        "total_cases": { "type": "integer", "minimum": 0 },
+        "true_positives": { "type": "integer", "minimum": 0 },
+        "true_negatives": { "type": "integer", "minimum": 0 },
+        "false_positives": { "type": "integer", "minimum": 0 },
+        "false_negatives": { "type": "integer", "minimum": 0 },
+        "precision": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "recall": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "f1_score": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "false_positive_rate": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "detection_coverage_index": { "type": "number", "minimum": 0.0, "maximum": 100.0 },
+        "suspicious_triage_accuracy": { "type": "number", "minimum": 0.0, "maximum": 100.0 },
+        "abstention_accuracy": { "type": "number", "minimum": 0.0, "maximum": 100.0 },
+        "evasion_resilience_score": { "type": "number", "minimum": 0.0, "maximum": 100.0 }
+      },
+      "additionalProperties": false
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "case_id",
+          "passed",
+          "actual_verdict",
+          "actual_severity",
+          "duration_ms"
+        ],
+        "properties": {
+          "case_id": { "type": "string" },
+          "passed": { "type": "boolean" },
+          "normalized_path": { "type": "string" },
+          "actual_verdict": { "type": "string", "enum": ["MALICIOUS", "SUSPICIOUS", "SAFE", "UNKNOWN"] },
+          "actual_severity": { "type": "string", "enum": ["ALERT", "WARNING", "NOTICE", "INFO"] },
+          "actual_strength": { "type": "string" },
+          "actual_confidence": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] },
+          "actual_rules": { "type": "array", "items": { "type": "string" } },
+          "actual_corroboration": { "type": "array", "items": { "type": "string" } },
+          "actual_rationale": { "type": "string" },
+          "failure_reason": { "type": "string" },
+          "duration_ms": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

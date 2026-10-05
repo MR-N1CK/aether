@@ -1,0 +1,29 @@
+.TH AETHER-RULES 1 "October 2026" "Aether 1.0.0" "User Commands"
+.SH NAME
+aether-rules \- inspect, validate, and test custom YARA threat detection rules
+.SH SYNOPSIS
+.B aether rules
+\fISUBCOMMAND\fR [\fIOPTIONS\fR]
+.SH DESCRIPTION
+The \fBrules\fR subcommand provides management and validation utilities for custom YARA signatures. When Aether is compiled with YARA-X support, it loads rules from system and user directories in addition to its embedded core ruleset.
+.SH SUBCOMMANDS
+.TP
+.B list
+List all currently loaded embedded and custom YARA rules, including rule identifiers, severity, and MITRE ATT&CK mappings.
+.TP
+.B validate \fIPATH\fR
+Compile and validate YARA rules located in the specified file or directory. Checks syntax, variable definitions, and regular expression safety without executing scans.
+.TP
+.B test \fIPATH\fR \fITARGET\fR
+Execute a dry-run test of rule compilation and matching against a designated target file.
+.SH RULE DIRECTORIES
+.TP
+.I /etc/aether/rules/
+System-wide directory for administrator-provided \fI*.yar\fR and \fI*.yara\fR rule files.
+.TP
+.I ~/.config/aether/rules/
+User-specific directory for custom YARA rules in unprivileged mode.
+.SH SEE ALSO
+\fBaether\fR(1), \fBaether-scan\fR(1), \fBaether-ack\fR(1)
+.SH AUTHORS
+Aether Security Engineering Team.

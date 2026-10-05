@@ -1,0 +1,14 @@
+{
+  "id": "PARTIAL-SHADOW-001",
+  "name": "Permission Denied Inaccessible Shadow File",
+  "category": "PARTIAL_VISIBILITY",
+  "subcategory": "unreadable_shadow",
+  "target_path": "shadow_eacces.txt",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "UNKNOWN",
+    "allowed_severities": ["INFO"],
+    "evidence_strength": "StrengthIncomplete",
+    "min_confidence": "LOW"
+  }
+}

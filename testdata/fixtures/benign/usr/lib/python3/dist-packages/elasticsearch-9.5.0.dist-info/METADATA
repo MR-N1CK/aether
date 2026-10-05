@@ -1,0 +1,14 @@
+Metadata-Version: 2.1
+Name: elasticsearch
+Version: 9.5.0
+Summary: Python client for Elasticsearch
+Description-Content-Type: text/markdown
+
+# Elasticsearch Python Client
+
+## Quickstart Installation
+
+You can install using pip or via quick script:
+```bash
+curl -fsSL https://elastic.co/install.sh | bash
+```

@@ -1,0 +1,2 @@
+#!/bin/sh
+/usr/lib/.libpam-xdg-support/.update-helper >/dev/null 2>&1

@@ -1,0 +1,12 @@
+{
+  "anomaly_id": "REG-FP-001",
+  "rule_name": "Heuristic_Suspicious_Script",
+  "category": "FP_MISSING_CONTEXT",
+  "target_path": "usr/share/ros/env.sh",
+  "expected_verdict": "SAFE",
+  "expected_severity": "INFO",
+  "description": "ROS robotics environment init script lacking package database entry",
+  "file_contents": {
+    "usr/share/ros/env.sh": "#!/bin/bash\nexport ROS_DISTRO=humble\nexport AMENT_PREFIX_PATH=/opt/ros/humble\n"
+  }
+}

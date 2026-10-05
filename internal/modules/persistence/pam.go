@@ -13,6 +13,7 @@ import (
 	"aether/internal/ioc"
 	"aether/internal/pkgdb"
 	"aether/internal/report"
+	"aether/internal/safeopen"
 )
 
 // CheckPAM inspects /etc/pam.d configuration and security module directories.
@@ -21,12 +22,7 @@ func CheckPAM(ctx context.Context, rootFS string, cfg *config.Config, pkgDB pkgd
 	var findings []report.Finding
 
 	pamD := "/etc/pam.d"
-	hostPamD := pamD
-	if rootFS != "" {
-		hostPamD = filepath.Join(rootFS, "etc/pam.d")
-	}
-
-	entries, err := os.ReadDir(hostPamD)
+	hostPamD, _, _, err := safeopen.ResolveUnderRoot(rootFS, pamD)
 	if err != nil {
 		if os.IsNotExist(err) {
 			cov.Missing++
@@ -34,12 +30,21 @@ func CheckPAM(ctx context.Context, rootFS string, cfg *config.Config, pkgDB pkgd
 			cov.RecordUnreadable(pamD, err)
 		}
 	} else {
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
+		entries, rErr := os.ReadDir(hostPamD)
+		if rErr != nil {
+			if os.IsNotExist(rErr) {
+				cov.Missing++
+			} else {
+				cov.RecordUnreadable(pamD, rErr)
 			}
-			virtFile := filepath.Join(pamD, e.Name())
-			inspectPAMConfigFile(virtFile, rootFS, cfg, pkgDB, cov, &findings)
+		} else {
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				virtFile := filepath.Join(pamD, e.Name())
+				inspectPAMConfigFile(virtFile, rootFS, cfg, pkgDB, cov, &findings)
+			}
 		}
 	}
 
@@ -182,9 +187,9 @@ func inspectPAMModuleDirs(rootFS string, pkgDB pkgdb.PackageDB, cov *CheckCovera
 	}
 
 	for _, d := range dirs {
-		hostDir := d
-		if rootFS != "" {
-			hostDir = filepath.Join(rootFS, strings.TrimPrefix(d, "/"))
+		hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, d)
+		if err != nil {
+			continue
 		}
 
 		entries, err := os.ReadDir(hostDir)

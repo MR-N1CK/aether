@@ -1,0 +1,16 @@
+{
+  "profile_id": "upgraded-pending",
+  "version": "1.0.0",
+  "expected_status": "ATTENTION_REQUIRED",
+  "max_acceptable_alerts": 0,
+  "max_acceptable_warnings": 2,
+  "acceptable_findings": [
+    {
+      "rule_name": "Process_Deleted_Binary_Replaced",
+      "path_pattern": "/proc/*/exe",
+      "expected_severity": "NOTICE",
+      "expected_verdict": "SUSPICIOUS",
+      "reason": "Daemon holds replaced unlinked binary in memory post-upgrade"
+    }
+  ]
+}

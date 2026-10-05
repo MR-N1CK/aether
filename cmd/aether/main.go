@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"os/exec"
 	"os/signal"
 	"os/user"
 	"path/filepath"
@@ -18,23 +19,28 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	"aether/internal/config"
 	"aether/internal/events"
 	"aether/internal/modules/persistence"
+	"aether/internal/realworld"
 	"aether/internal/report"
+	htmlreport "aether/internal/report/html"
 	"aether/internal/scanner"
+	"aether/internal/setup"
 	"aether/internal/triage"
 	"aether/internal/ui/plain"
 	"aether/internal/ui/theme"
 	"aether/internal/ui/tui"
+	appversion "aether/internal/version"
 	"aether/internal/yara"
 )
 
 var (
-	version   = "0.1.0-dev"
+	version   = "1.0.0"
 	commit    = "none"
 	buildDate = "unknown"
 	devRpath  = "0"
@@ -50,38 +56,429 @@ type globalFlags struct {
 }
 
 type scanCmdFlags struct {
-	paths           []string
-	excludes        []string
-	quick           bool
-	full            bool
+	paths             []string
+	root              string
+	excludes          []string
+	quick             bool
+	full              bool
 	maxFileSize     int64
-	jsonOut         string
-	threads         int
+	jsonOut           string
+	htmlOut           string
+	noReport          bool
+	redactHosts       bool
+	maxReportFindings int
+	threads           int
 	nice            int
 	iocDir          string
 	allowlist       string
 	oneFileSystem   bool
-	rulesDir        string
-	yaraMaxFileSize int64
-	demoRules       bool
+	rulesDir                   string
+	trustRulesDir              bool
+	trustInstalledPentestTools bool
+	yaraMaxFileSize            int64
+	demoRules                  bool
 	modules         []string
+	fileTimeout     time.Duration
+	hashOversizeMax int64
 }
 
 func isTerminal() bool {
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
 }
 
+func attachScanFlags(cmd *cobra.Command, sFlags *scanCmdFlags) {
+	cmd.Flags().StringSliceVarP(&sFlags.paths, "path", "p", nil, "Target path(s) to scan (repeatable)")
+	cmd.Flags().StringVar(&sFlags.root, "root", "/", "Root directory to scan (resolves paths relative to this root for offline forensic scan)")
+	cmd.Flags().BoolVar(&sFlags.quick, "quick", false, "Perform quick triage scan of high-risk locations")
+	cmd.Flags().BoolVar(&sFlags.full, "full", false, "Perform full deep filesystem scan")
+	cmd.Flags().StringSliceVarP(&sFlags.excludes, "exclude", "e", nil, "Target path(s) to exclude from scan (repeatable)")
+	cmd.Flags().Int64Var(&sFlags.maxFileSize, "max-filesize", config.DefaultMaxFileSize, "Maximum file size in bytes to inspect/hash (default: 50MB); files larger than this are skipped completely")
+	cmd.Flags().StringVar(&sFlags.jsonOut, "json-out", "", "Output report destination path for JSON format")
+	cmd.Flags().StringVar(&sFlags.htmlOut, "html-out", "", "Output report destination path for self-contained HTML format")
+	cmd.Flags().BoolVar(&sFlags.noReport, "no-report", false, "Disable automatic HTML report generation")
+	cmd.Flags().BoolVar(&sFlags.redactHosts, "redact-hosts", false, "Redact hostnames, IPs, usernames, and user home paths in output")
+	cmd.Flags().IntVar(&sFlags.maxReportFindings, "max-report-findings", config.DefaultMaxReportFindings, "Maximum number of findings to display in HTML report table (default: 5000)")
+	cmd.Flags().IntVarP(&sFlags.threads, "threads", "t", runtime.NumCPU(), "Worker pool concurrency")
+	cmd.Flags().IntVar(&sFlags.nice, "nice", config.DefaultNice, "CPU scheduling priority (-20 to 19, higher = lower priority)")
+	cmd.Flags().StringVar(&sFlags.iocDir, "ioc-dir", "", "Custom directory containing IOC signature files (.txt, .yaml)")
+	cmd.Flags().StringVar(&sFlags.allowlist, "allowlist", "", "Path to trusted SHA256 allowlist file")
+	cmd.Flags().BoolVar(&sFlags.oneFileSystem, "one-file-system", false, "Do not cross filesystem mount boundaries (default on for --full)")
+	cmd.Flags().StringVar(&sFlags.rulesDir, "rules-dir", "", "Custom directory containing YARA rules (*.yar, *.yara)")
+	cmd.Flags().BoolVar(&sFlags.trustRulesDir, "trust-rules-dir", false, "Explicitly trust rules directory without ownership/permission checks (development/testing only)")
+	cmd.Flags().BoolVar(&sFlags.trustInstalledPentestTools, "trust-installed-pentest-tools", true, "Downgrade YARA findings in well-known pentest tool directories to INFO (for pentest workstations/VMs; disable on suspect end-user systems)")
+	cmd.Flags().Int64Var(&sFlags.yaraMaxFileSize, "yara-max-filesize", config.DefaultYaraMaxFileSize, "Maximum file size in bytes for in-memory YARA scanning (default: 20MB); files above this are stream-hashed but skip YARA")
+	cmd.Flags().BoolVar(&sFlags.demoRules, "demo-rules", false, "Load synthetic demonstration YARA rules (harmless EICAR/marker patterns)")
+	cmd.Flags().StringSliceVar(&sFlags.modules, "modules", nil, "Comma-separated list of modules to run (filesystem, process, persistence, users, network, kernel)")
+	cmd.Flags().DurationVar(&sFlags.fileTimeout, "file-timeout", config.DefaultFileTimeout, "Timeout for inspecting/hashing a single file before abandoning worker (default: 30s)")
+	cmd.Flags().Int64Var(&sFlags.hashOversizeMax, "hash-oversize-max", config.DefaultHashOversizeMax, "Maximum file size in bytes to hash without signature scanning (default: 2GB)")
+}
+
+func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags *scanCmdFlags, defaultMode string) error {
+	// 1. Determine execution mode (TUI vs Plain)
+	usePlain := gFlags.plain || !isTerminal()
+
+	// 2. Setup logging: unless --debug is explicitly set, suppress raw slog output
+	var logger *slog.Logger
+	if gFlags.debug {
+		logger = report.SetupLogger("debug", false)
+	} else {
+		logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+		slog.SetDefault(logger)
+	}
+
+	// 3. Load configuration hierarchy
+	cfg, loadedPath, err := config.LoadConfig(gFlags.configPath)
+	if err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+	if loadedPath != "" {
+		logger.Debug("loaded configuration file", slog.String("path", loadedPath))
+	}
+
+	// 4. Positional arguments support: args -> paths
+	if len(args) > 0 {
+		for _, arg := range args {
+			cleanArg := filepath.Clean(arg)
+			sFlags.paths = append(sFlags.paths, cleanArg)
+		}
+		cfg.Scan.Paths = sFlags.paths
+		cfg.Scan.ExplicitPaths = true
+	} else if cmd.Flags().Changed("path") {
+		cfg.Scan.Paths = sFlags.paths
+		cfg.Scan.ExplicitPaths = true
+	}
+
+	if cmd.Flags().Changed("root") {
+		cfg.Scan.Root = filepath.Clean(sFlags.root)
+	}
+	if cmd.Flags().Changed("exclude") {
+		cfg.Scan.Excludes = sFlags.excludes
+	}
+
+	// Apply mode overrides
+	if defaultMode == "quick" || sFlags.quick {
+		cfg.Scan.Quick = true
+		cfg.Scan.Full = false
+	} else if defaultMode == "full" || sFlags.full {
+		cfg.Scan.Full = true
+		cfg.Scan.Quick = false
+	}
+
+	if cmd.Flags().Changed("max-filesize") {
+		cfg.Scan.MaxFileSize = sFlags.maxFileSize
+	}
+	if cmd.Flags().Changed("threads") {
+		cfg.Scan.Threads = sFlags.threads
+	}
+	if cmd.Flags().Changed("nice") {
+		cfg.Scan.Nice = sFlags.nice
+	}
+	if cmd.Flags().Changed("json-out") {
+		cfg.Scan.JSONOut = sFlags.jsonOut
+	}
+
+	// Auto-HTML report: default to ./aether-report.html if not disabled
+	if cmd.Flags().Changed("html-out") {
+		cfg.Scan.HTMLOut = sFlags.htmlOut
+	} else if !sFlags.noReport && cfg.Scan.HTMLOut == "" {
+		cfg.Scan.HTMLOut = "aether-report.html"
+	}
+
+	if cmd.Flags().Changed("redact-hosts") {
+		cfg.Scan.RedactHosts = sFlags.redactHosts
+	}
+	if cmd.Flags().Changed("max-report-findings") {
+		cfg.Scan.MaxReportFindings = sFlags.maxReportFindings
+	}
+	if cmd.Flags().Changed("ioc-dir") {
+		cfg.Scan.IOCDir = sFlags.iocDir
+	}
+	if cmd.Flags().Changed("allowlist") {
+		cfg.Scan.AllowlistPath = sFlags.allowlist
+	}
+	if cmd.Flags().Changed("one-file-system") {
+		cfg.Scan.OneFileSystem = sFlags.oneFileSystem
+	}
+	if cmd.Flags().Changed("rules-dir") {
+		cfg.Scan.RulesDir = sFlags.rulesDir
+	}
+	if cmd.Flags().Changed("trust-rules-dir") {
+		cfg.Scan.TrustRulesDir = sFlags.trustRulesDir
+	}
+	if cmd.Flags().Changed("trust-installed-pentest-tools") {
+		cfg.Scan.TrustInstalledPentestTools = sFlags.trustInstalledPentestTools
+	}
+	if cmd.Flags().Changed("yara-max-filesize") {
+		cfg.Scan.YaraMaxFileSize = sFlags.yaraMaxFileSize
+	}
+	if cmd.Flags().Changed("demo-rules") {
+		cfg.Scan.DemoRules = sFlags.demoRules
+	}
+	if cmd.Flags().Changed("modules") {
+		if err := config.ValidateModules(sFlags.modules); err != nil {
+			return err
+		}
+		cfg.Scan.Modules = sFlags.modules
+	}
+	if cmd.Flags().Changed("file-timeout") {
+		cfg.Scan.FileTimeout = sFlags.fileTimeout
+	}
+	if cmd.Flags().Changed("hash-oversize-max") {
+		cfg.Scan.HashOversizeMax = sFlags.hashOversizeMax
+	}
+
+	// 5. Apply niceness early at startup before worker pool starts
+	if cfg.Scan.Nice != 0 {
+		if err := scanner.ApplyNice(cfg.Scan.Nice); err != nil {
+			logger.Warn("could not apply nice priority", slog.Any("error", err))
+		}
+	}
+
+	// 6. Initialize event bus and reporter subscriber
+	bus := events.NewEventBus()
+	defer bus.Close()
+
+	reporter, err := report.NewConcurrentReporter(cfg.Scan.JSONOut)
+	if err != nil {
+		return fmt.Errorf("failed to initialize reporter: %w", err)
+	}
+	defer reporter.Close()
+
+	// 7. Setup graceful cancellation context
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	exe, _ := os.Executable()
+	binName := filepath.Base(exe)
+	s := scanner.NewScanner(cfg, bus, reporter, logger,
+		scanner.WithDevRpath(devRpath == "1"),
+		scanner.WithBuildInfo(version, commit, buildDate, binName),
+		scanner.WithExecutiveAssessment(func(findings []report.Finding, sf events.ScanFinished) (string, string, []htmlreport.RemediationAction, map[string]string) {
+			synth := realworld.NewAssessmentSynthesizer()
+			ass := synth.SynthesizeFromScan(findings, sf)
+			var plan []htmlreport.RemediationAction
+			for _, act := range ass.NextActions {
+				plan = append(plan, htmlreport.RemediationAction{
+					Priority:    act.Priority,
+					Title:       act.Title,
+					Description: act.Description,
+					Command:     act.Command,
+				})
+			}
+			bd := realworld.FromScanFinished(sf, 0)
+			timing := map[string]string{
+				"filesystem_walk": bd.FilesystemWalk.Round(time.Millisecond).String(),
+				"hashing":         bd.Hashing.Round(time.Millisecond).String(),
+				"heuristics":      bd.Heuristics.Round(time.Millisecond).String(),
+				"yara":            bd.YARA.Round(time.Millisecond).String(),
+				"process":         bd.Process.Round(time.Millisecond).String(),
+				"network":         bd.Network.Round(time.Millisecond).String(),
+				"correlation":     bd.Correlation.Round(time.Millisecond).String(),
+				"total_duration":  bd.Total.Round(time.Millisecond).String(),
+			}
+			return string(ass.Posture), ass.SummaryRationale, plan, timing
+		}),
+	)
+
+	mode := "custom"
+	if cfg.Scan.Quick {
+		mode = "quick"
+	} else if cfg.Scan.Full {
+		mode = "full"
+	}
+
+	th := theme.NewTheme(theme.DetectNoColor())
+
+	if usePlain {
+		var outWriter io.Writer = os.Stdout
+		if sFlags.jsonOut == "-" {
+			outWriter = os.Stderr
+		}
+		consumer := plain.NewConsumer(outWriter, th, gFlags.verbose)
+		plainSub := bus.Subscribe()
+		defer plainSub.Close()
+
+		scanErrChan := make(chan error, 1)
+		go func() {
+			scanErrChan <- s.Run(ctx)
+		}()
+
+		_ = consumer.Consume(ctx, plainSub)
+		scanErr := <-scanErrChan
+		if cfg.Scan.HTMLOut != "" {
+			greenStyle := lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true)
+			boldStyle := lipgloss.NewStyle().Bold(true)
+			if th.NoColor {
+				greenStyle = lipgloss.NewStyle().Bold(true)
+				boldStyle = lipgloss.NewStyle().Bold(true)
+			}
+			fmt.Fprintf(outWriter, "\n  %s %s: %s\n\n", greenStyle.Render("✓"), boldStyle.Render("Executive HTML Report"), cfg.Scan.HTMLOut)
+		}
+		return scanErr
+	}
+
+	// Interactive TUI execution
+	uiSub := bus.Subscribe()
+	defer uiSub.Close()
+
+	scanCtx, scanCancel := context.WithCancel(ctx)
+	defer scanCancel()
+
+	go func() {
+		_ = s.Run(scanCtx)
+	}()
+
+	tuiErr := tui.Run(ctx, scanCancel, uiSub, th, gFlags.noAnim, mode, cfg.Scan.Threads, cfg.Scan.Paths)
+	if cfg.Scan.HTMLOut != "" {
+		greenStyle := lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true)
+		boldStyle := lipgloss.NewStyle().Bold(true)
+		if th.NoColor {
+			greenStyle = lipgloss.NewStyle().Bold(true)
+			boldStyle = lipgloss.NewStyle().Bold(true)
+		}
+		fmt.Printf("\n  %s %s: %s\n\n", greenStyle.Render("✓"), boldStyle.Render("Executive HTML Report"), cfg.Scan.HTMLOut)
+	}
+	return tuiErr
+}
+
+func runInteractiveLauncher(cmd *cobra.Command, gFlags *globalFlags, sFlags *scanCmdFlags) error {
+	th := theme.NewTheme(theme.DetectNoColor())
+
+	res, err := tui.RunInteractiveLauncher(th)
+	if err != nil {
+		return err
+	}
+
+	switch res.Action {
+	case tui.ActionQuick:
+		sFlags.quick = true
+		return executeScan(cmd, nil, gFlags, sFlags, "quick")
+	case tui.ActionFull:
+		sFlags.full = true
+		return executeScan(cmd, nil, gFlags, sFlags, "full")
+	case tui.ActionCustom:
+		path := strings.TrimSpace(res.Path)
+		if path == "" {
+			path = "."
+		}
+		if path == "~" {
+			if home, err := os.UserHomeDir(); err == nil {
+				path = home
+			}
+		} else if strings.HasPrefix(path, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				path = filepath.Join(home, path[2:])
+			}
+		}
+		return executeScan(cmd, []string{path}, gFlags, sFlags, "custom")
+	case tui.ActionSetup:
+		_, sErr := setup.RunSetup(setup.SetupOptions{
+			DownloadRules: true,
+			InstallBinary: true,
+		}, th)
+		return sErr
+	case tui.ActionOpenReport:
+		reportPath := "aether-report.html"
+		if _, statErr := os.Stat(reportPath); statErr == nil {
+			absPath, _ := filepath.Abs(reportPath)
+			fmt.Printf("\n  %s %s: %s\n",
+				lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true).Render("✓"),
+				lipgloss.NewStyle().Bold(true).Render("Executive HTML Report Available"),
+				absPath)
+			_ = exec.Command("xdg-open", absPath).Start()
+		} else {
+			fmt.Println("\n  No previous HTML report found in current directory. Run a scan first to generate a report.")
+		}
+		return nil
+	case tui.ActionDemo:
+		demoCmd := cmd.Root()
+		for _, c := range demoCmd.Commands() {
+			if c.Name() == "demo" {
+				return c.RunE(c, nil)
+			}
+		}
+		return nil
+	case tui.ActionStatus:
+		return printEngineDiagnostics(th)
+	case tui.ActionExit:
+		return nil
+	default:
+		return nil
+	}
+}
+
+func printEngineDiagnostics(th *theme.Theme) error {
+	titleStyle := lipgloss.NewStyle().Foreground(theme.ColorTextPrim).Bold(true)
+	azureStyle := lipgloss.NewStyle().Foreground(theme.ColorAccent).Bold(true)
+	subStyle := lipgloss.NewStyle().Foreground(theme.ColorTextMute)
+
+	if th.NoColor {
+		titleStyle = lipgloss.NewStyle().Bold(true)
+		azureStyle = lipgloss.NewStyle().Bold(true)
+		subStyle = lipgloss.NewStyle()
+	}
+
+	fmt.Printf("\n%s\n", azureStyle.Render("╭─────────────────────────────────────────────────────────────╮"))
+	fmt.Printf("%s\n", azureStyle.Render("│  A E T H E R  ::  Engine Status & Security Diagnostics      │"))
+	fmt.Printf("%s\n\n", azureStyle.Render("╰─────────────────────────────────────────────────────────────╯"))
+
+	fmt.Printf("  %s %s\n", titleStyle.Render("Aether Version:"), version)
+	fmt.Printf("  %s %s\n", subStyle.Render("Build Commit:  "), commit)
+	fmt.Printf("  %s %s\n", subStyle.Render("Build Date:    "), buildDate)
+	fmt.Printf("  %s %s/%s (%d CPU cores)\n", subStyle.Render("Runtime Host:  "), runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+
+	if os.Geteuid() == 0 {
+		fmt.Printf("  %s %s\n", titleStyle.Render("Privileges:    "), lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true).Render("ROOT (Full live kernel/memory inspection enabled)"))
+	} else {
+		fmt.Printf("  %s %s\n", titleStyle.Render("Privileges:    "), lipgloss.NewStyle().Foreground(theme.ColorWarning).Render("NON-ROOT (Unprivileged mode - some kernel metrics restricted)"))
+	}
+
+	yInfo := yara.VersionInfo()
+	if yInfo != "not compiled in" {
+		fmt.Printf("  %s %s\n", titleStyle.Render("YARA Engine:   "), lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true).Render(yInfo+" (Active with Embedded Core Rules)"))
+	} else {
+		fmt.Printf("  %s %s\n", titleStyle.Render("YARA Engine:   "), lipgloss.NewStyle().Foreground(theme.ColorWarning).Render("Pure-Go Heuristics (YARA not compiled in)"))
+	}
+
+	fmt.Printf("\n  %s\n", titleStyle.Render("Active Security Modules:"))
+	modules := []string{
+		"filesystem  (single-pass header inspection, IOC hashes, script heuristics)",
+		"persistence (systemd services, cron jobs, shell profiles, ld.so.preload, ssh)",
+		"process     (procfs inspections, hidden PIDs, deleted binary memory execution)",
+		"kernel      (loaded module verification, kernel taint flags)",
+		"network     (suspicious raw socket listeners, proc_net telemetry)",
+		"users       (rogue UID 0 accounts, shadow integrity, PAM backdoors)",
+		"yara        (multi-pattern signature matching against malware families)",
+	}
+	for _, m := range modules {
+		fmt.Printf("    • %s\n", subStyle.Render(m))
+	}
+	fmt.Println()
+	return nil
+}
+
 func main() {
 	var gFlags globalFlags
+	var sFlags scanCmdFlags
 
 	rootCmd := &cobra.Command{
-		Use:   "aether",
+		Use:   "aether [command|path]",
 		Short: "Aether - Defensive Linux threat-hunting scanner",
 		Long: `Aether is a Linux-native defensive compromise detection and threat-hunting
 scanner inspired by THOR Lite. It executes read-only inspections utilizing IOC
 matching and YARA signature engines without altering scanned systems.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				// If a path was passed directly like: aether /var/www
+				return executeScan(cmd, args, &gFlags, &sFlags, "custom")
+			}
+			if !isTerminal() || gFlags.plain {
+				return cmd.Help()
+			}
+			return runInteractiveLauncher(cmd, &gFlags, &sFlags)
+		},
 	}
 
 	rootCmd.PersistentFlags().StringVarP(&gFlags.configPath, "config", "c", "", "Path to YAML configuration file")
@@ -92,9 +489,8 @@ matching and YARA signature engines without altering scanned systems.`,
 	rootCmd.PersistentFlags().BoolVar(&gFlags.noAnim, "no-anim", false, "Disable animations and splash screen")
 
 	// Scan command
-	var sFlags scanCmdFlags
 	scanCmd := &cobra.Command{
-		Use:   "scan",
+		Use:   "scan [paths...]",
 		Short: "Perform compromise detection and threat hunting scan",
 		Long: `Scan target filesystems, processes, and persistence hooks for indicators
 of compromise (IOCs) and YARA signature matches in strict read-only mode.`,
@@ -105,167 +501,62 @@ of compromise (IOCs) and YARA signature matches in strict read-only mode.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// 1. Determine execution mode (TUI vs Plain)
-			usePlain := gFlags.plain || !isTerminal()
-
-			// 2. Setup logging: unless --debug is explicitly set, suppress raw slog output
-			// so that plain consumer and TUI retain full control over terminal rendering.
-			var logger *slog.Logger
-			if gFlags.debug {
-				logger = report.SetupLogger("debug", false)
-			} else {
-				logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-				slog.SetDefault(logger)
-			}
-
-			// 3. Load configuration hierarchy
-			cfg, loadedPath, err := config.LoadConfig(gFlags.configPath)
-			if err != nil {
-				return fmt.Errorf("configuration error: %w", err)
-			}
-			if loadedPath != "" {
-				logger.Debug("loaded configuration file", slog.String("path", loadedPath))
-			}
-
-			// 4. Apply CLI flag overrides to configuration
-			if cmd.Flags().Changed("path") {
-				cfg.Scan.Paths = sFlags.paths
-				cfg.Scan.ExplicitPaths = true
-			}
-			if cmd.Flags().Changed("exclude") {
-				cfg.Scan.Excludes = sFlags.excludes
-			}
-			if cmd.Flags().Changed("quick") {
-				cfg.Scan.Quick = sFlags.quick
-			}
-			if cmd.Flags().Changed("full") {
-				cfg.Scan.Full = sFlags.full
-			}
-			if cmd.Flags().Changed("max-filesize") {
-				cfg.Scan.MaxFileSize = sFlags.maxFileSize
-			}
-			if cmd.Flags().Changed("threads") {
-				cfg.Scan.Threads = sFlags.threads
-			}
-			if cmd.Flags().Changed("nice") {
-				cfg.Scan.Nice = sFlags.nice
-			}
-			if cmd.Flags().Changed("json-out") {
-				cfg.Scan.JSONOut = sFlags.jsonOut
-			}
-			if cmd.Flags().Changed("ioc-dir") {
-				cfg.Scan.IOCDir = sFlags.iocDir
-			}
-			if cmd.Flags().Changed("allowlist") {
-				cfg.Scan.AllowlistPath = sFlags.allowlist
-			}
-			if cmd.Flags().Changed("one-file-system") {
-				cfg.Scan.OneFileSystem = sFlags.oneFileSystem
-			}
-			if cmd.Flags().Changed("rules-dir") {
-				cfg.Scan.RulesDir = sFlags.rulesDir
-			}
-			if cmd.Flags().Changed("yara-max-filesize") {
-				cfg.Scan.YaraMaxFileSize = sFlags.yaraMaxFileSize
-			}
-			if cmd.Flags().Changed("demo-rules") {
-				cfg.Scan.DemoRules = sFlags.demoRules
-			}
-			if cmd.Flags().Changed("modules") {
-				if err := config.ValidateModules(sFlags.modules); err != nil {
-					return err
-				}
-				cfg.Scan.Modules = sFlags.modules
-			}
-
-			// 5. Apply niceness early at startup before worker pool starts
-			if cfg.Scan.Nice != 0 {
-				if err := scanner.ApplyNice(cfg.Scan.Nice); err != nil {
-					logger.Warn("could not apply nice priority", slog.Any("error", err))
-				}
-			}
-
-			// 6. Initialize event bus and reporter subscriber
-			bus := events.NewEventBus()
-			defer bus.Close()
-
-			reporter, err := report.NewConcurrentReporter(cfg.Scan.JSONOut)
-			if err != nil {
-				return fmt.Errorf("failed to initialize reporter: %w", err)
-			}
-			defer reporter.Close()
-
-			// 7. Setup graceful cancellation context
-			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-			defer cancel()
-
-			exe, _ := os.Executable()
-			binName := filepath.Base(exe)
-			s := scanner.NewScanner(cfg, bus, reporter, logger,
-				scanner.WithDevRpath(devRpath == "1"),
-				scanner.WithBuildInfo(version, buildDate, binName),
-			)
-
-			mode := "custom"
-			if cfg.Scan.Quick {
-				mode = "quick"
-			} else if cfg.Scan.Full {
-				mode = "full"
-			}
-
-			th := theme.NewTheme(theme.DetectNoColor())
-
-			if usePlain {
-				var outWriter io.Writer = os.Stdout
-				if sFlags.jsonOut == "-" {
-					outWriter = os.Stderr
-				}
-				consumer := plain.NewConsumer(outWriter, th, gFlags.verbose)
-				plainSub := bus.Subscribe()
-				defer plainSub.Close()
-
-				scanErrChan := make(chan error, 1)
-				go func() {
-					scanErrChan <- s.Run(ctx)
-				}()
-
-				_ = consumer.Consume(ctx, plainSub)
-				return <-scanErrChan
-			}
-
-			// Interactive TUI execution
-			uiSub := bus.Subscribe()
-			defer uiSub.Close()
-
-			scanCtx, scanCancel := context.WithCancel(ctx)
-			defer scanCancel()
-
-			go func() {
-				_ = s.Run(scanCtx)
-			}()
-
-			return tui.Run(ctx, scanCancel, uiSub, th, gFlags.noAnim, mode, cfg.Scan.Threads, cfg.Scan.Paths)
+			return executeScan(cmd, args, &gFlags, &sFlags, "custom")
 		},
 	}
-
-	// Register scan flags
-	scanCmd.Flags().StringSliceVarP(&sFlags.paths, "path", "p", nil, "Target path(s) to scan (repeatable)")
-	scanCmd.Flags().BoolVar(&sFlags.quick, "quick", false, "Perform quick triage scan of high-risk locations")
-	scanCmd.Flags().BoolVar(&sFlags.full, "full", false, "Perform full deep filesystem scan")
-	scanCmd.Flags().StringSliceVarP(&sFlags.excludes, "exclude", "e", nil, "Target path(s) to exclude from scan (repeatable)")
-	scanCmd.Flags().Int64Var(&sFlags.maxFileSize, "max-filesize", config.DefaultMaxFileSize, "Maximum file size in bytes to inspect/hash (default: 50MB); files larger than this are skipped completely")
-	scanCmd.Flags().StringVar(&sFlags.jsonOut, "json-out", "", "Output report destination path for JSON format")
-	scanCmd.Flags().IntVarP(&sFlags.threads, "threads", "t", runtime.NumCPU(), "Worker pool concurrency")
-	scanCmd.Flags().IntVar(&sFlags.nice, "nice", config.DefaultNice, "CPU scheduling priority (-20 to 19, higher = lower priority)")
-	scanCmd.Flags().StringVar(&sFlags.iocDir, "ioc-dir", "", "Custom directory containing IOC signature files (.txt, .yaml)")
-	scanCmd.Flags().StringVar(&sFlags.allowlist, "allowlist", "", "Path to trusted SHA256 allowlist file")
-	scanCmd.Flags().BoolVar(&sFlags.oneFileSystem, "one-file-system", false, "Do not cross filesystem mount boundaries (default on for --full)")
-	scanCmd.Flags().StringVar(&sFlags.rulesDir, "rules-dir", "", "Custom directory containing YARA rules (*.yar, *.yara)")
-	scanCmd.Flags().Int64Var(&sFlags.yaraMaxFileSize, "yara-max-filesize", config.DefaultYaraMaxFileSize, "Maximum file size in bytes for in-memory YARA scanning (default: 20MB); files above this are stream-hashed but skip YARA")
-	scanCmd.Flags().BoolVar(&sFlags.demoRules, "demo-rules", false, "Load synthetic demonstration YARA rules (harmless EICAR/marker patterns)")
-	scanCmd.Flags().StringSliceVar(&sFlags.modules, "modules", nil, "Comma-separated list of modules to run (filesystem, process, persistence, users, network, kernel)")
-
+	attachScanFlags(scanCmd, &sFlags)
 	scanCmd.MarkFlagsMutuallyExclusive("quick", "full")
+
+	// Quick command shortcut
+	var qFlags scanCmdFlags
+	quickCmd := &cobra.Command{
+		Use:   "quick [paths...]",
+		Short: "Perform fast triage scan of high-risk locations and persistence hooks",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			qFlags.quick = true
+			return executeScan(cmd, args, &gFlags, &qFlags, "quick")
+		},
+	}
+	attachScanFlags(quickCmd, &qFlags)
+
+	// Full command shortcut
+	var fFlags scanCmdFlags
+	fullCmd := &cobra.Command{
+		Use:   "full [paths...]",
+		Short: "Perform deep, comprehensive filesystem threat hunting scan",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fFlags.full = true
+			return executeScan(cmd, args, &gFlags, &fFlags, "full")
+		},
+	}
+	attachScanFlags(fullCmd, &fFlags)
+
+	// Setup command
+	var setupDownload bool
+	var setupCustomDir string
+	var setupForce bool
+
+	setupCmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Automated 1-click system configuration, permissions, and YARA-Forge rules setup",
+		Long: `Configures secure rules directories (/etc/aether/rules or ~/.config/aether/rules),
+verifies directory permissions, optionally installs binary to /usr/local/bin, and downloads
+the latest verified YARA-Forge Core ruleset.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			th := theme.NewTheme(theme.DetectNoColor())
+			opts := setup.SetupOptions{
+				DownloadRules: setupDownload,
+				CustomDir:     setupCustomDir,
+				Force:         setupForce,
+				InstallBinary: true,
+			}
+			_, err := setup.RunSetup(opts, th)
+			return err
+		},
+	}
+	setupCmd.Flags().BoolVar(&setupDownload, "download-rules", true, "Download latest YARA-Forge Core ruleset")
+	setupCmd.Flags().StringVar(&setupCustomDir, "rules-dir", "", "Custom target directory for rules")
+	setupCmd.Flags().BoolVar(&setupForce, "force", false, "Force overwrite existing rules")
 
 	// Update command
 	updateCmd := &cobra.Command{
@@ -281,19 +572,25 @@ of compromise (IOCs) and YARA signature matches in strict read-only mode.`,
 	}
 
 	// Version command
+	var versionJSON bool
 	versionCmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print version, commit, and build information",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Printf("Aether Threat Hunter v%s\n", version)
-			fmt.Printf("  Commit:     %s\n", commit)
-			fmt.Printf("  Build Date: %s\n", buildDate)
-			fmt.Printf("  Go Version: %s\n", runtime.Version())
-			fmt.Printf("  OS/Arch:    %s/%s\n", runtime.GOOS, runtime.GOARCH)
-			fmt.Printf("  YARA:       %s\n", yara.VersionInfo())
+			info := appversion.New(version, commit, buildDate, yara.VersionInfo())
+			if versionJSON {
+				jsonStr, err := info.JSON()
+				if err != nil {
+					return err
+				}
+				fmt.Println(jsonStr)
+				return nil
+			}
+			fmt.Println(info.String())
 			return nil
 		},
 	}
+	versionCmd.Flags().BoolVar(&versionJSON, "json", false, "Output version information in JSON format")
 
 	// Hidden Demo command for UI testing and verification
 	var demoJSONOut string
@@ -573,7 +870,51 @@ ALERT and IOC findings are never ackable.`,
 	ackCmd.Flags().BoolVar(&aFlags.system, "system", false, "Write to system acknowledgment file (/etc/aether/acknowledged.yaml)")
 	ackCmd.Flags().BoolVarP(&aFlags.yes, "yes", "y", false, "Non-interactive confirmation")
 
-	rootCmd.AddCommand(scanCmd, ackCmd, updateCmd, versionCmd, demoCmd)
+	// Rules command
+	rulesCmd := &cobra.Command{
+		Use:   "rules",
+		Short: "Manage and validate YARA rules",
+	}
+
+	validateCmd := &cobra.Command{
+		Use:   "validate <dir>",
+		Short: "Validate and compile YARA rule files in a directory",
+		Long: `Recursively discovers and compiles all *.yar and *.yara rule files in a given directory
+using the YARA-X engine, checking syntax, namespaces, and variables without running a scan.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir := filepath.Clean(args[0])
+			res, err := yara.ValidateRulesDir(dir)
+			if err != nil {
+				return err
+			}
+
+			fmt.Println("[AETHER] YARA Rule Validation Report:")
+			fmt.Printf("  Directory:                 %s\n", dir)
+			fmt.Printf("  Rule Files Found:          %d\n", res.TotalFilesFound)
+			fmt.Printf("  Files Compiled:            %d\n", res.FilesCompiled)
+			fmt.Printf("  Files Failed:              %d\n", res.FilesFailed)
+			fmt.Printf("  Total Rules Loaded:        %d\n", res.TotalRulesLoaded)
+			fmt.Printf("  With Explicit Score:       %d\n", res.RulesWithExplicitScore)
+			fmt.Printf("  With Explicit Severity:    %d\n", res.RulesWithExplicitSev)
+			fmt.Printf("  With Alert/Critical/Score>=90: %d\n", res.RulesWithAlertOrCritical)
+			fmt.Printf("  With Defaulted Metadata:   %d\n", res.RulesWithDefaultMetadata)
+
+			if len(res.Failures) > 0 {
+				fmt.Println("\n[AETHER] Compilation Errors:")
+				for _, f := range res.Failures {
+					fmt.Printf("  [FAIL] %s\n         Error: %s\n", f.Path, f.Error)
+				}
+				return fmt.Errorf("YARA validation failed: %d file(s) had syntax or compilation errors", len(res.Failures))
+			}
+
+			fmt.Printf("\n[AETHER] Validation status: SUCCESS (all %d file(s) valid)\n", res.TotalFilesFound)
+			return nil
+		},
+	}
+	rulesCmd.AddCommand(validateCmd)
+
+	rootCmd.AddCommand(scanCmd, quickCmd, fullCmd, setupCmd, ackCmd, updateCmd, versionCmd, demoCmd, rulesCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

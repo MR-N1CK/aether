@@ -203,33 +203,13 @@ func EvaluateLibraryTrust(
 		return false, "dev rpath build not permitted for root execution"
 	}
 
-	// 2. LD_LIBRARY_PATH and LD_PRELOAD are untrusted for root execution
-	if val := getenv("LD_LIBRARY_PATH"); strings.TrimSpace(val) != "" {
-		return false, "library path not trusted"
-	}
-	if val := getenv("LD_PRELOAD"); strings.TrimSpace(val) != "" {
-		return false, "library path not trusted"
-	}
-
-	// 3. Own binary trust check: verify the executable itself and all ancestor directories
-	if trusted, _ := VerifyRootOwnedPath(exePath, statFn, evalSymlinksFn); !trusted {
-		return false, "executable not in a root-owned path"
-	}
-
-	// 4. Parse ELF dynamic linkage metadata
+	// 2. Parse ELF dynamic linkage metadata
 	linkage, err := elfParser(exePath)
 	if err != nil {
 		return false, "cannot verify linkage"
 	}
 
-	// 5. Verify all RUNPATH and RPATH entries (and their ancestors) are root-owned and not group/world-writable
-	for _, rp := range linkage.Runpaths {
-		if trusted, _ := VerifyRootOwnedPath(rp, statFn, evalSymlinksFn); !trusted {
-			return false, "RUNPATH not trusted"
-		}
-	}
-
-	// 6. Check if libyara_x_capi is NEEDED (match "libyara_x_capi.so" prefix or contains)
+	// 3. Check if libyara_x_capi is NEEDED (match "libyara_x_capi.so" prefix or contains)
 	hasYaraNeeded := false
 	for _, lib := range linkage.NeededLibraries {
 		if strings.HasPrefix(lib, "libyara_x_capi.so") || strings.Contains(lib, "libyara_x_capi") {
@@ -239,17 +219,38 @@ func EvaluateLibraryTrust(
 	}
 
 	if !hasYaraNeeded {
-		// Static YARA build (libyara_x_capi.a embedded) or pure Go binary without dynamic YARA
+		// Static YARA build (libyara_x_capi.a embedded) or pure Go binary: no dynamic library loading risk
 		return true, ""
 	}
 
-	// 7. Dynamic YARA: memory maps verification is mandatory (fail closed)
+	// 4. For dynamically linked builds only:
+	// Verify the executable binary itself and its ancestor directories are root-owned
+	if trusted, _ := VerifyRootOwnedPath(exePath, statFn, evalSymlinksFn); !trusted {
+		return false, "executable not in a root-owned path"
+	}
+
+	// LD_LIBRARY_PATH and LD_PRELOAD are untrusted for root execution
+	if val := getenv("LD_LIBRARY_PATH"); strings.TrimSpace(val) != "" {
+		return false, "library path not trusted"
+	}
+	if val := getenv("LD_PRELOAD"); strings.TrimSpace(val) != "" {
+		return false, "library path not trusted"
+	}
+
+	// Verify all RUNPATH and RPATH entries (and their ancestors) are root-owned and not group/world-writable
+	for _, rp := range linkage.Runpaths {
+		if trusted, _ := VerifyRootOwnedPath(rp, statFn, evalSymlinksFn); !trusted {
+			return false, "RUNPATH not trusted"
+		}
+	}
+
+	// Dynamic YARA: memory maps verification is mandatory (fail closed)
 	libPath := findLibInMaps(mapsContent, "libyara_x_capi")
 	if libPath == "" {
 		return false, "library path not trusted"
 	}
 
-	// 8. Verify the library file and its ancestor path
+	// Verify the library file and its ancestor path
 	if trusted, _ := VerifyRootOwnedPath(libPath, statFn, evalSymlinksFn); !trusted {
 		return false, "library path not trusted"
 	}

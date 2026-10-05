@@ -1,0 +1,24 @@
+[Unit]
+Description=Aether Scheduled Threat Hunting Scan
+Documentation=man:aether(1) man:aether-scan(1)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/aether scan --full --plain --html-out /var/log/aether/scheduled-scan-latest.html
+Nice=19
+IOSchedulingClass=idle
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log/aether
+LogsDirectory=aether
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+PrivateTmp=false
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true

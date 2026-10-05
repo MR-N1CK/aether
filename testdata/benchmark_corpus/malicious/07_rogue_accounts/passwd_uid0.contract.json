@@ -1,0 +1,15 @@
+{
+  "id": "MAL-ACCT-001",
+  "name": "Rogue Non-Root UID 0 Backdoor Account",
+  "category": "MALICIOUS",
+  "subcategory": "rogue_accounts",
+  "target_path": "/etc/passwd",
+  "file_mode": 420,
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH"
+  }
+}

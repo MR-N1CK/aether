@@ -1,0 +1,10 @@
+Package: aether
+Version: @@VERSION@@
+Architecture: @@ARCH@@
+Maintainer: Aether Security Team <security@aether.local>
+Section: admin
+Priority: optional
+Description: High-assurance Linux threat hunter and forensic triage engine
+ Aether is an executive-grade, forensic-safe, read-only Linux threat hunting
+ and anomaly detection engine. It performs deep static heuristic analysis,
+ process/network correlation, and package integrity verification.

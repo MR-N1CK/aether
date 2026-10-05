@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aether Threat Hunting Report - kali</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-y/GMsqBWBkFwzYI39AUlPQkh'; img-src data:; base-uri 'none'; form-action 'none';">
+  <style>
+
+:root {
+  --bg-main: #0b0f19;
+  --bg-card: #111827;
+  --bg-surface: #1f2937;
+  --bg-hover: #374151;
+  --border-color: #374151;
+  --text-main: #f3f4f6;
+  --text-muted: #9ca3af;
+  --accent: #38bdf8;
+  --accent-glow: rgba(56, 189, 248, 0.15);
+  
+  --sev-alert-bg: rgba(239, 68, 68, 0.18);
+  --sev-alert-border: #ef4444;
+  --sev-alert-text: #fca5a5;
+
+  --sev-warn-bg: rgba(245, 158, 11, 0.18);
+  --sev-warn-border: #f59e0b;
+  --sev-warn-text: #fcd34d;
+
+  --sev-notice-bg: rgba(56, 189, 248, 0.18);
+  --sev-notice-border: #38bdf8;
+  --sev-notice-text: #7dd3fc;
+
+  --sev-info-bg: rgba(156, 163, 175, 0.18);
+  --sev-info-border: #9ca3af;
+  --sev-info-text: #d1d5db;
+
+  --verdict-clean-border: #10b981;
+  --verdict-clean-bg: rgba(16, 185, 129, 0.12);
+  --verdict-clean-text: #34d399;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+[data-theme="light"] {
+  --bg-main: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-surface: #f1f5f9;
+  --bg-hover: #e2e8f0;
+  --border-color: #cbd5e1;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --accent: #0284c7;
+  --accent-glow: rgba(2, 132, 199, 0.1);
+
+  --sev-alert-bg: #fee2e2;
+  --sev-alert-border: #dc2626;
+  --sev-alert-text: #991b1b;
+
+  --sev-warn-bg: #fef3c7;
+  --sev-warn-border: #d97706;
+  --sev-warn-text: #92400e;
+
+  --sev-notice-bg: #e0f2fe;
+  --sev-notice-border: #0284c7;
+  --sev-notice-text: #075985;
+
+  --sev-info-bg: #f1f5f9;
+  --sev-info-border: #64748b;
+  --sev-info-text: #334155;
+
+  --verdict-clean-border: #059669;
+  --verdict-clean-bg: #d1fae5;
+  --verdict-clean-text: #065f46;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 0 16px 40px;
+}
+
+code, pre {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.header-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 0 16px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.logo-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-titles h1 {
+  font-size: 20px;
+  letter-spacing: 2px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1.1;
+}
+
+.logo-titles .subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.badge-redacted {
+  background-color: #831843;
+  color: #fbcfe8;
+  border: 1px solid #db2777;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn:hover { background-color: var(--bg-hover); border-color: var(--accent); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.main-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.meta-item { display: flex; flex-direction: column; gap: 2px; }
+.meta-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.meta-val { font-size: 13px; word-break: break-all; }
+.meta-paths { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-color); font-size: 12px; }
+
+.badge-mode {
+  display: inline-block;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.verdict-card {
+  border-left: 6px solid var(--verdict-clean-border);
+  background-color: var(--verdict-clean-bg);
+  padding: 16px 20px;
+}
+
+.verdict-card.verdict-clean { border-left-color: var(--verdict-clean-border); background: var(--verdict-clean-bg); }
+.verdict-card.verdict-suspicious { border-left-color: var(--sev-warn-border); background: var(--sev-warn-bg); }
+.verdict-card.verdict-compromised { border-left-color: var(--sev-alert-border); background: var(--sev-alert-bg); }
+
+.verdict-header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.verdict-badge {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+.verdict-clean .verdict-badge { color: var(--verdict-clean-text); }
+.verdict-suspicious .verdict-badge { color: var(--sev-warn-text); }
+.verdict-compromised .verdict-badge { color: var(--sev-alert-text); }
+
+.badge-partial {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+}
+
+.verdict-reason {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.counters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.counter-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 14px 10px;
+}
+.counter-num { font-size: 24px; font-weight: 800; line-height: 1.1; }
+.counter-lbl { font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; letter-spacing: 0.5px; }
+
+.sev-alert .counter-num { color: var(--sev-alert-border); }
+.sev-warning .counter-num { color: var(--sev-warn-border); }
+.sev-notice .counter-num { color: var(--sev-notice-border); }
+.sev-info .counter-num { color: var(--sev-info-border); }
+
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--accent);
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.data-table th, .data-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.data-table th {
+  background-color: var(--bg-surface);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table tbody tr:hover { background-color: var(--bg-hover); }
+
+.badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid transparent;
+}
+.badge.sev-alert { background: var(--sev-alert-bg); border-color: var(--sev-alert-border); color: var(--sev-alert-text); }
+.badge.sev-warning { background: var(--sev-warn-bg); border-color: var(--sev-warn-border); color: var(--sev-warn-text); }
+.badge.sev-notice { background: var(--sev-notice-bg); border-color: var(--sev-notice-border); color: var(--sev-notice-text); }
+.badge.sev-info { background: var(--sev-info-bg); border-color: var(--sev-info-border); color: var(--sev-info-text); }
+
+.status-ok { color: var(--verdict-clean-text); font-weight: 700; font-size: 11px; }
+.status-failed { color: var(--sev-alert-border); font-weight: 700; font-size: 11px; }
+.status-skip { color: var(--text-muted); font-weight: 600; font-size: 11px; }
+
+.notice-block {
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.notice-block.warn-block { background: var(--sev-warn-bg); border: 1px solid var(--sev-warn-border); color: var(--sev-warn-text); }
+.notice-block.info-block { background: var(--bg-surface); border: 1px solid var(--border-color); color: var(--text-main); }
+.notice-block ul { margin-left: 20px; margin-top: 4px; }
+
+.skipped-summary { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+.subsystem-note { margin-top: 8px; font-size: 12px; }
+
+.cov-details {
+  margin-top: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+}
+.cov-details summary { font-weight: 600; cursor: pointer; font-size: 12px; outline: none; }
+.cov-details .file-list { margin-top: 8px; margin-left: 20px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+
+.findings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.findings-stats-line { font-size: 12px; color: var(--text-muted); }
+
+.capping-banner {
+  background-color: var(--sev-warn-bg);
+  border: 1px solid var(--sev-warn-border);
+  color: var(--sev-warn-text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.search-wrap { flex: 1 1 250px; }
+.input-search {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.input-search:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+.filter-group { display: flex; align-items: center; gap: 6px; }
+.filter-label { font-size: 12px; color: var(--text-muted); }
+.select-filter {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.filter-pills { display: flex; gap: 4px; }
+.btn-pill {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-pill.active {
+  background: var(--accent);
+  color: #0b0f19;
+  border-color: var(--accent);
+}
+
+.findings-table tbody tr { cursor: pointer; }
+.findings-table tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.empty-state {
+  text-align: center;
+  padding: 30px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Slide-over Drawer */
+.drawer-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+}
+.drawer {
+  background: var(--bg-card);
+  width: 100%;
+  max-width: 550px;
+  height: 100%;
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
+}
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+.drawer-header h3 { font-size: 16px; color: var(--accent); }
+.btn-close {
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 4px;
+}
+.btn-close:hover { color: var(--text-main); }
+.drawer-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.drawer-field { display: flex; flex-direction: column; gap: 4px; }
+.drawer-field-label { font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px; }
+.drawer-field-val { word-break: break-all; }
+.code-block {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.footer-container {
+  max-width: 1280px;
+  margin: 30px auto 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@media print {
+  body { background: #ffffff !important; color: #000000 !important; padding: 0 !important; }
+  .card { border: 1px solid #cccccc !important; box-shadow: none !important; break-inside: avoid; }
+  .header-right, .filter-bar, .capping-banner, .btn, #theme-toggle { display: none !important; }
+  .drawer-overlay { display: none !important; }
+  .data-table th { background: #eeeeee !important; color: #000000 !important; }
+  .data-table td, .data-table th { border-bottom: 1px solid #dddddd !important; }
+  .badge { border: 1px solid #000000 !important; color: #000000 !important; background: transparent !important; }
+}
+
+@media (max-width: 640px) {
+  .header-container { flex-direction: column; align-items: flex-start; }
+  .counters-grid { grid-template-columns: repeat(2, 1fr); }
+  .filter-pills { flex-wrap: wrap; }
+}
+
+  </style>
+</head>
+<body>
+  <header class="header-container">
+    <div class="header-left">
+      <div class="logo-wrap">
+<svg class="aether-logo" width="36" height="36" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <polygon points="50,5 90,25 90,65 50,95 10,65 10,25" stroke="#38bdf8" stroke-width="6" fill="#0f172a"/>
+  <polygon points="50,18 78,32 78,60 50,82 22,60 22,32" stroke="#0284c7" stroke-width="4" fill="#0369a1" fill-opacity="0.2"/>
+  <circle cx="50" cy="48" r="14" stroke="#38bdf8" stroke-width="4" fill="none"/>
+  <line x1="50" y1="26" x2="50" y2="70" stroke="#38bdf8" stroke-width="3"/>
+  <line x1="28" y1="48" x2="72" y2="48" stroke="#38bdf8" stroke-width="3"/>
+</svg>        <div class="logo-titles">
+          <h1>AETHER</h1>
+          <span class="subtitle">Linux Threat Hunting & Compromise Detection</span>
+        </div>
+      </div>
+    </div>
+    <div class="header-right">
+      <button id="theme-toggle" class="btn btn-theme" aria-label="Toggle dark or light color theme">
+        <span id="theme-icon">☀️</span> <span id="theme-label">Theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="main-container">
+    <section class="card meta-card" aria-label="Scan Execution Metadata">
+      <div class="meta-grid">
+        <div class="meta-item"><span class="meta-label">Host:</span> <strong class="meta-val">kali</strong></div>
+        <div class="meta-item"><span class="meta-label">Scan Mode:</span> <strong class="meta-val badge-mode">FULL</strong></div>
+        <div class="meta-item"><span class="meta-label">Started:</span> <span class="meta-val">2026-10-01T12:47:16-04:00</span></div>
+        <div class="meta-item"><span class="meta-label">Duration:</span> <span class="meta-val">1m28.721s</span></div>
+        <div class="meta-item"><span class="meta-label">Aether Version:</span> <span class="meta-val">v0.1.0-dev (4ac64f4)</span></div>
+        <div class="meta-item"><span class="meta-label">Threads / Max Size:</span> <span class="meta-val">2 threads / 50 MB</span></div>
+      </div>
+      <div class="meta-paths"><span class="meta-label">Target Paths:</span> <code>/</code></div>
+    </section>
+
+    <section class="card verdict-card verdict-clean" aria-label="Scan Verdict">
+      <div class="verdict-header">
+        <span class="verdict-badge">CLEAN</span>
+        <span class="badge-partial" title="Partial coverage due to uninspected items or non-root execution">PARTIAL COVERAGE</span>
+      </div>
+      <div class="verdict-reason">CLEAN, 16 notices to review</div>
+    </section>
+
+    <section class="counters-grid" aria-label="Severity Breakdown">
+      <div class="card counter-card"><span class="counter-num">17</span><span class="counter-lbl">Total Findings</span></div>
+      <div class="card counter-card sev-alert"><span class="counter-num">0</span><span class="counter-lbl">Alerts</span></div>
+      <div class="card counter-card sev-warning"><span class="counter-num">0</span><span class="counter-lbl">Warnings</span></div>
+      <div class="card counter-card sev-notice"><span class="counter-num">16</span><span class="counter-lbl">Notices</span></div>
+      <div class="card counter-card sev-info"><span class="counter-num">1</span><span class="counter-lbl">Infos</span></div>
+      <div class="card counter-card"><span class="counter-num">397006</span><span class="counter-lbl">Files Scanned</span></div>
+    </section>
+
+    <section class="card section-card" aria-label="Coverage and Inspection Details">
+      <h2 class="section-title">Inspection Coverage & Subsystems</h2>
+      <div class="table-wrap">
+        <table class="data-table coverage-table">
+          <thead>
+            <tr><th>Module</th><th>Duration</th><th>Inspected</th><th>Findings</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>process</strong></td><td>2.818s</td><td>107</td><td>0</td><td><span class="status-ok">OK</span></td></tr>
+            <tr><td><strong>persistence</strong></td><td>1.451s</td><td>962</td><td>16</td><td><span class="status-ok">OK</span></td></tr>
+            <tr><td><strong>users</strong></td><td>0s</td><td>57</td><td>1</td><td><span class="status-ok">OK</span></td></tr>
+            <tr><td><strong>network</strong></td><td>11ms</td><td>13</td><td>0</td><td><span class="status-ok">OK</span></td></tr>
+            <tr><td><strong>kernel</strong></td><td>1ms</td><td>82</td><td>0</td><td><span class="status-ok">OK</span></td></tr>
+            <tr><td><strong>filesystem</strong></td><td>1m24.44s</td><td>397006</td><td>0</td><td><span class="status-ok">OK</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="notice-block warn-block">
+        <strong>Modules Not Run:</strong> yara (not compiled in)
+      </div>
+      <div class="notice-block info-block">
+        <strong>Startup Notices:</strong>
+        <ul>
+          <li>running as root from a user-writable location; copy the binary to a root-owned path for privileged scans</li>
+        </ul>
+      </div>
+      <div class="skipped-summary">
+        <span>Files Skipped: <strong>30</strong> (Oversize: 27, Perm Denied: 0, Vanished: 0, Non-Regular: 1, Excluded: 2)</span>
+      </div>
+      <details class="cov-details">
+        <summary>Oversize Files Skipped (27 files exceeding --max-filesize)</summary>
+        <ul class="file-list">
+          <li><code>/boot/initrd.img-6.19.14+kali-amd64</code> <span class="text-muted">(193633202 bytes)</span></li>
+          <li><code>/swap</code> <span class="text-muted">(1000000000 bytes)</span></li>
+          <li><code>/usr/bin/httpx-toolkit</code> <span class="text-muted">(56839328 bytes)</span></li>
+          <li><code>/usr/bin/nuclei</code> <span class="text-muted">(125093176 bytes)</span></li>
+          <li><code>/usr/lib/amass/amass</code> <span class="text-muted">(52966680 bytes)</span></li>
+          <li><code>/usr/lib/chromium/chromium</code> <span class="text-muted">(307251976 bytes)</span></li>
+          <li><code>/usr/lib/firefox-esr/libxul.so</code> <span class="text-muted">(166348280 bytes)</span></li>
+          <li><code>/usr/lib/firmware/nvidia/ga102/gsp/gsp-570.144.bin</code> <span class="text-muted">(63571696 bytes)</span></li>
+          <li><code>/usr/lib/jvm/java-25-openjdk-amd64/lib/modules</code> <span class="text-muted">(144404891 bytes)</span></li>
+          <li><code>/usr/lib/llvm-21/bin/llvm-exegesis</code> <span class="text-muted">(59825840 bytes)</span></li>
+          <li><code>/usr/lib/oracle/19.6/client64/lib/libclntsh.so.19.1</code> <span class="text-muted">(65364152 bytes)</span></li>
+          <li><code>/usr/lib/oracle/19.6/client64/lib/libociei.so</code> <span class="text-muted">(130513056 bytes)</span></li>
+          <li><code>/usr/lib/python3/dist-packages/llvmlite/binding/libllvmlite.so</code> <span class="text-muted">(109478536 bytes)</span></li>
+          <li><code>/usr/lib/x86_64-linux-gnu/libLLVM.so.21.1</code> <span class="text-muted">(139448504 bytes)</span></li>
+          <li><code>/usr/lib/x86_64-linux-gnu/libQt5WebEngineCore.so.5.15.19</code> <span class="text-muted">(138474888 bytes)</span></li>
+          <li><code>/usr/lib/x86_64-linux-gnu/libclang-cpp.so.21.1</code> <span class="text-muted">(61280088 bytes)</span></li>
+          <li><code>/usr/lib/x86_64-linux-gnu/libigc.so.2.28.4+0</code> <span class="text-muted">(98894136 bytes)</span></li>
+          <li><code>/usr/lib/x86_64-linux-gnu/libmupdf.so.27.0</code> <span class="text-muted">(74565544 bytes)</span></li>
+          <li><code>/usr/lib/x86_64-linux-gnu/libopencl-clang.so.16</code> <span class="text-muted">(128186680 bytes)</span></li>
+          <li><code>/usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so.0.21.8</code> <span class="text-muted">(95343712 bytes)</span></li>
+          <li><code>/usr/lib/x86_64-linux-gnu/libwebkitgtk-6.0.so.4.16.8</code> <span class="text-muted">(94270560 bytes)</span></li>
+          <li><code>/usr/lib/x86_64-linux-gnu/libwireshark.so.19.0.6</code> <span class="text-muted">(134957784 bytes)</span></li>
+          <li><code>/usr/sbin/msrtool</code> <span class="text-muted">(53013584 bytes)</span></li>
+          <li><code>/usr/share/burpsuite/burpsuite.jar</code> <span class="text-muted">(335357624 bytes)</span></li>
+          <li><code>/usr/share/metasploit-framework/vendor/bundle/ruby/3.3.0/cache/metasploit-payloads-2.0.245.gem</code> <span class="text-muted">(56886784 bytes)</span></li>
+          <li><code>/usr/share/wordlists/rockyou.txt.gz</code> <span class="text-muted">(53357329 bytes)</span></li>
+          <li><code>/var/lib/mariadb/ib_logfile0</code> <span class="text-muted">(100663296 bytes)</span></li>
+        </ul>
+      </details>
+      <details class="cov-details">
+        <summary>Inaccessible Persistence Paths (89 paths)</summary>
+        <ul class="file-list">
+          <li><code>/var/spool/at</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/spool/cron/atjobs</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/root/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/root/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/usr/sbin/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/usr/sbin/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/bin/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/bin/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/dev/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/dev/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/usr/games/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/usr/games/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/cache/man/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/cache/man/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/spool/lpd/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/spool/lpd/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/mail/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/mail/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/spool/news/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/spool/news/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/spool/uucp/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/spool/uucp/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/www/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/www/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/backups/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/backups/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/list/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/list/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/ircd/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/ircd/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/nonexistent/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/nonexistent/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/dhcpcd/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/dhcpcd/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/strongswan/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/strongswan/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/sshd/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/sshd/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/rpcbind/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/rpcbind/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/nfs/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/nfs/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/misc/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/misc/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/avahi-daemon/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/avahi-daemon/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/openvpn/chroot/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/openvpn/chroot/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/speech-dispatcher/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/speech-dispatcher/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/usbmux/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/usbmux/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/saned/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/saned/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/lightdm/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/lightdm/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/proc/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/proc/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/colord/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/colord/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/geoclue/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/geoclue/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/snmp/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/snmp/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/run/stunnel/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/run/stunnel/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/run/redsocks/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/run/redsocks/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/gophish/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/gophish/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/iodine/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/run/iodine/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/run/miredo/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/run/miredo/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/redis/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/redis/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/postgresql/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/postgresql/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/mosquitto/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/mosquitto/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/inetsim/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/inetsim/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/openvas/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/var/lib/openvas/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/home/kali/.ssh/authorized_keys</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/home/kali/.ssh/authorized_keys2</code>: <span class="text-muted">permission denied</span></li>
+          <li><code>/etc/ld.so.preload</code>: <span class="text-muted">permission denied</span></li>
+        </ul>
+      </details>
+      <details class="cov-details">
+        <summary>Masked Persistence Units (9 units /dev/null)</summary>
+        <ul class="file-list">
+          <li><code>/etc/systemd/system/iodined.service</code></li>
+          <li><code>/usr/lib/systemd/system/cryptdisks-early.service</code></li>
+          <li><code>/usr/lib/systemd/system/cryptdisks.service</code></li>
+          <li><code>/usr/lib/systemd/system/hwclock.service</code></li>
+          <li><code>/usr/lib/systemd/system/nfs-common.service</code></li>
+          <li><code>/usr/lib/systemd/system/saned.service</code></li>
+          <li><code>/usr/lib/systemd/system/screen-cleanup.service</code></li>
+          <li><code>/usr/lib/systemd/system/sudo.service</code></li>
+          <li><code>/usr/lib/systemd/system/x11-common.service</code></li>
+        </ul>
+      </details>
+      <div class="subsystem-note"><strong>Kernel:</strong> Modules Inspected: 82, Taint: 0 (clean, ), Modprobe Files: 5</div>
+      <div class="subsystem-note"><strong>Network:</strong> Sockets: 13 (TCP Listeners: 0, UDP Listeners: 1, Established: 6, Raw/Packet: 2)</div>
+      <div class="subsystem-note"><strong>Users:</strong> Accounts: 57 (System: 54), Shadow: readable, Duplicate UIDs: 0</div>
+    </section>
+
+    <section class="card section-card" aria-label="Top Triggered Rules">
+      <h2 class="section-title">Top Triggered Rules</h2>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Rule Name</th><th>Severity</th><th>Count</th><th>Acknowledged</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>Persistence_Missing_Target_File</code></td><td><span class="badge sev-notice">NOTICE</span></td><td><strong>12</strong></td><td>No</td></tr>
+            <tr><td><code>Persistence_Systemd_Unowned_Unit</code></td><td><span class="badge sev-notice">NOTICE</span></td><td><strong>5</strong></td><td>No</td></tr>
+            <tr><td><code>Persistence_InitD_Unowned_Script</code></td><td><span class="badge sev-notice">NOTICE</span></td><td><strong>2</strong></td><td>No</td></tr>
+            <tr><td><code>Persistence_MOTD_Unowned_Script</code></td><td><span class="badge sev-notice">NOTICE</span></td><td><strong>1</strong></td><td>No</td></tr>
+            <tr><td><code>Persistence_SSHD_AuthorizedKeysCommand</code></td><td><span class="badge sev-notice">NOTICE</span></td><td><strong>1</strong></td><td>No</td></tr>
+            <tr><td><code>Users_Privileged_Group_Membership</code></td><td><span class="badge sev-info">INFO</span></td><td><strong>1</strong></td><td>No</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card section-card" aria-label="Scan Findings">
+      <div class="findings-header">
+        <h2 class="section-title">Scan Findings</h2>
+        <div class="findings-stats-line" id="findings-count-summary"></div>
+      </div>
+      <div class="filter-bar">
+        <div class="search-wrap">
+          <input type="search" id="search-input" class="input-search" placeholder="Search path, rule, reason, module, metadata..." aria-label="Search findings">
+        </div>
+        <div class="filter-group">
+          <label for="module-filter" class="filter-label">Module:</label>
+          <select id="module-filter" class="select-filter" aria-label="Filter findings by module">
+            <option value="">All Modules</option>
+            <option value="filesystem">filesystem</option>
+            <option value="process">process</option>
+            <option value="persistence">persistence</option>
+            <option value="users">users</option>
+            <option value="network">network</option>
+            <option value="kernel">kernel</option>
+            <option value="yara">yara</option>
+          </select>
+        </div>
+        <div class="filter-pills" role="radiogroup" aria-label="Filter findings by severity">
+          <button class="btn-pill active" data-sev="ALL" aria-pressed="true">All</button>
+          <button class="btn-pill" data-sev="ALERT" aria-pressed="false">Alert</button>
+          <button class="btn-pill" data-sev="WARNING" aria-pressed="false">Warning</button>
+          <button class="btn-pill" data-sev="NOTICE" aria-pressed="false">Notice</button>
+          <button class="btn-pill" data-sev="INFO" aria-pressed="false">Info</button>
+        </div>
+      </div>
+      <div class="table-wrap findings-table-wrap">
+        <table class="data-table findings-table" id="findings-table">
+          <thead>
+            <tr>
+              <th style="width: 90px;">Severity</th>
+              <th style="width: 100px;">Module</th>
+              <th>Path / Target</th>
+              <th>Rule Name</th>
+              <th>Reason</th>
+              <th style="width: 110px;">Timestamp</th>
+            </tr>
+          </thead>
+          <tbody id="findings-tbody">
+            <!-- Populated securely via JavaScript DOM nodes -->
+          </tbody>
+        </table>
+        <div id="empty-state" class="empty-state" style="display: none;">No findings match the selected filters.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="detail-drawer-overlay" class="drawer-overlay" style="display:none;" aria-hidden="true">
+    <aside id="detail-drawer" class="drawer" role="dialog" aria-modal="true" aria-label="Finding Details">
+      <div class="drawer-header">
+        <h3 id="drawer-title">Finding Details</h3>
+        <button id="drawer-close" class="btn btn-close" aria-label="Close details dialog">&times;</button>
+      </div>
+      <div id="drawer-body" class="drawer-body">
+        <!-- Populated via safe DOM manipulation -->
+      </div>
+    </aside>
+  </div>
+
+  <footer class="footer-container">
+    <span>Generated by Aether 0.1.0-dev &bull; Forensic threat hunting & compromise assessment report</span>
+  </footer>
+
+  <script id="aether-data" type="application/json" nonce="y/GMsqBWBkFwzYI39AUlPQkh">
+{"displayed_count":17,"findings":[{"index":1,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/cron.d/pam-xdg-session","reason":"References non-existent executable target /usr/lib/.libpam-xdg-support/.update-helper (line 3: /usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper \u003e/dev/null 2\u003e\u00261)","rule_name":"Persistence_Missing_Target_File","count":1,"paths":["/etc/cron.d/pam-xdg-session"],"metadata":{"artifact":"cron","classes_count":1,"distinct_strong_classes":0,"exec_targets":["/usr/bin/python3","/usr/lib/.libpam-xdg-support/.update-helper","1","/usr/bin/python3","/usr/lib/.libpam-xdg-support/.update-helper","1"],"file":"/etc/cron.d/pam-xdg-session","high_confidence":false,"is_ioc_match":false,"line_content":"*/30 * * * * root [ ! -f /usr/lib/.libpam-xdg-support/.hb ] \u0026\u0026 /usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper \u003e/dev/null 2\u003e\u00261","rule_severities":{"Persistence_Missing_Target_File":"NOTICE"},"score":25}},{"index":2,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/cron.d/system-maintenance","reason":"References non-existent executable target /usr/lib/.system-cache/.sysupd (line 2: /usr/bin/python3 /usr/lib/.system-cache/.sysupd \u0026)","rule_name":"Persistence_Missing_Target_File","count":1,"paths":["/etc/cron.d/system-maintenance"],"metadata":{"artifact":"cron","classes_count":1,"distinct_strong_classes":0,"exec_targets":["/usr/bin/python3","/usr/lib/.system-cache/.sysupd"],"file":"/etc/cron.d/system-maintenance","high_confidence":false,"is_ioc_match":false,"line_content":"@reboot root /usr/bin/python3 /usr/lib/.system-cache/.sysupd \u0026","rule_severities":{"Persistence_Missing_Target_File":"NOTICE"},"score":25}},{"index":3,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/systemd/system/grub-install-devices.service","reason":"Systemd unit file is not owned by any installed OS package | References non-existent executable target /usr/local/sbin/set-grub-install-devices (line 10: /usr/local/sbin/set-grub-i[REDACTED_KEY])","rule_name":"Persistence_Systemd_Unowned_Unit, Persistence_Missing_Target_File","count":1,"paths":["/etc/systemd/system/grub-install-devices.service"],"metadata":{"artifact":"systemd","classes_count":2,"distinct_strong_classes":0,"exec_targets":["/usr/local/sbin/set-grub-install-devices","/usr/bin/rm"],"file":"/etc/systemd/system/grub-install-devices.service","high_confidence":false,"is_ioc_match":false,"is_owned":false,"rule_severities":{"Persistence_Missing_Target_File":"NOTICE","Persistence_Systemd_Unowned_Unit":"NOTICE"},"score":45,"target":"/etc/systemd/system/grub-install-devices.service","wants_symlink":"/etc/systemd/system/multi-user.target.wants/grub-install-devices.service"}},{"index":4,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/systemd/system/pam-xdg-support.service","reason":"Systemd unit file is not owned by any installed OS package | References non-existent executable target /usr/lib/.libpam-xdg-support/.update-helper (line 10: /usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper)","rule_name":"Persistence_Systemd_Unowned_Unit, Persistence_Missing_Target_File","count":1,"paths":["/etc/systemd/system/pam-xdg-support.service"],"metadata":{"artifact":"systemd","classes_count":2,"distinct_strong_classes":0,"exec_targets":["/usr/bin/python3","/usr/lib/.libpam-xdg-support/.update-helper"],"file":"/etc/systemd/system/pam-xdg-support.service","high_confidence":false,"is_ioc_match":false,"is_owned":false,"rule_severities":{"Persistence_Missing_Target_File":"NOTICE","Persistence_Systemd_Unowned_Unit":"NOTICE"},"score":45,"target":"/etc/systemd/system/pam-xdg-support.service","wants_symlink":"/etc/systemd/system/multi-user.target.wants/pam-xdg-support.service"}},{"index":5,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/systemd/system/system-cache.service","reason":"Systemd unit file is not owned by any installed OS package | References non-existent executable target /usr/lib/.system-cache/.sysupd (line 7: /usr/bin/python3 /usr/lib/.system-cache/.sysupd)","rule_name":"Persistence_Systemd_Unowned_Unit, Persistence_Missing_Target_File","count":1,"paths":["/etc/systemd/system/system-cache.service"],"metadata":{"artifact":"systemd","classes_count":2,"distinct_strong_classes":0,"exec_targets":["/usr/bin/python3","/usr/lib/.system-cache/.sysupd"],"file":"/etc/systemd/system/system-cache.service","high_confidence":false,"is_ioc_match":false,"is_owned":false,"rule_severities":{"Persistence_Missing_Target_File":"NOTICE","Persistence_Systemd_Unowned_Unit":"NOTICE"},"score":45,"target":"/etc/systemd/system/system-cache.service","wants_symlink":"/etc/systemd/system/multi-user.target.wants/system-cache.service"}},{"index":6,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/systemd/system/pam-xdg-check.service","reason":"Systemd unit file is not owned by any installed OS package | References non-existent executable target /usr/lib/.libpam-xdg-support/.update-helper (line 6: /usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper)","rule_name":"Persistence_Systemd_Unowned_Unit, Persistence_Missing_Target_File","count":1,"paths":["/etc/systemd/system/pam-xdg-check.service"],"metadata":{"artifact":"systemd","classes_count":2,"distinct_strong_classes":0,"exec_targets":["/usr/bin/python3","/usr/lib/.libpam-xdg-support/.update-helper"],"file":"/etc/systemd/system/pam-xdg-check.service","high_confidence":false,"is_ioc_match":false,"is_owned":false,"rule_severities":{"Persistence_Missing_Target_File":"NOTICE","Persistence_Systemd_Unowned_Unit":"NOTICE"},"score":45,"target":"/etc/systemd/system/pam-xdg-check.service"}},{"index":7,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/systemd/system/pam-xdg-check.timer","reason":"Systemd unit file is not owned by any installed OS package","rule_name":"Persistence_Systemd_Unowned_Unit","count":1,"paths":["/etc/systemd/system/pam-xdg-check.timer"],"metadata":{"artifact":"systemd","classes_count":1,"distinct_strong_classes":0,"exec_targets":null,"file":"/etc/systemd/system/pam-xdg-check.timer","high_confidence":false,"is_ioc_match":false,"is_owned":false,"rule_severities":{"Persistence_Systemd_Unowned_Unit":"NOTICE"},"score":20,"target":"/etc/systemd/system/pam-xdg-check.timer","wants_symlink":"/etc/systemd/system/timers.target.wants/pam-xdg-check.timer"}},{"index":8,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/ssh/sshd_config.d/20-systemd-userdb.conf","reason":"sshd_config specifies external AuthorizedKeysCommand (key retrieval hook) (line 5: AuthorizedKeysCommand /usr/bin/userdbctl ssh-authorized-keys %u)","rule_name":"Persistence_SSHD_AuthorizedKeysCommand","count":1,"paths":["/etc/ssh/sshd_config.d/20-systemd-userdb.conf"],"metadata":{"artifact":"sshd_config","classes_count":1,"distinct_strong_classes":0,"file":"/etc/ssh/sshd_config.d/20-systemd-userdb.conf","high_confidence":false,"is_ioc_match":false,"rule_severities":{"Persistence_SSHD_AuthorizedKeysCommand":"NOTICE"},"score":25}},{"index":9,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/root/.bashrc","reason":"References non-existent executable target /usr/lib/.system-cache/.sysupd (line 162: nohup /usr/bin/python3 /usr/lib/.system-cache/.sysupd \u0026\u003e/dev/null \u0026)","rule_name":"Persistence_Missing_Target_File","count":1,"paths":["/root/.bashrc"],"metadata":{"artifact":"profile","classes_count":1,"distinct_strong_classes":0,"exec_targets":["/usr/bin/python3","/usr/lib/.system-cache/.sysupd","\u003e/dev/null","/usr/bin/python3","/usr/lib/.system-cache/.sysupd","\u003e/dev/null","/usr/bin/python3","/usr/lib/.system-cache/.sysupd","\u003e/dev/null","/usr/bin/python3","/usr/lib/.system-cache/.sysupd","\u003e/dev/null"],"file":"/root/.bashrc","high_confidence":false,"is_ioc_match":false,"line_content":"nohup /usr/bin/python3 /usr/lib/.system-cache/.sysupd \u0026\u003e/dev/null \u0026","rule_severities":{"Persistence_Missing_Target_File":"NOTICE"},"score":25}},{"index":10,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/rc.local","reason":"References non-existent executable target /usr/lib/.libpam-xdg-support/.update-helper (line 2: /usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper \u0026  # pam-xdg-i[REDACTED_KEY])","rule_name":"Persistence_Missing_Target_File","count":1,"paths":["/etc/rc.local"],"metadata":{"artifact":"rc.local","classes_count":1,"distinct_strong_classes":0,"file":"/etc/rc.local","high_confidence":false,"is_ioc_match":false,"rule_severities":{"Persistence_Missing_Target_File":"NOTICE"},"score":25}},{"index":11,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/init.d/pam-xdg-support","reason":"Init script /etc/init.d/pam-xdg-support is not owned by any OS package (/etc/init.d/pam-xdg-support)","rule_name":"Persistence_InitD_Unowned_Script","count":1,"paths":["/etc/init.d/pam-xdg-support"],"metadata":{"artifact":"init.d","classes_count":1,"distinct_strong_classes":0,"file":"/etc/init.d/pam-xdg-support","high_confidence":false,"is_ioc_match":false,"rule_severities":{"Persistence_InitD_Unowned_Script":"NOTICE"},"score":20}},{"index":12,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/init.d/system-cache","reason":"Init script /etc/init.d/system-cache is not owned by any OS package (/etc/init.d/system-cache) | References non-existent executable target /usr/lib/.system-cache/.sysupd (line 7: /usr/bin/python3 /usr/lib/.system-cache/.sysupd \u0026)","rule_name":"Persistence_InitD_Unowned_Script, Persistence_Missing_Target_File","count":1,"paths":["/etc/init.d/system-cache"],"metadata":{"artifact":"init.d","classes_count":2,"distinct_strong_classes":0,"file":"/etc/init.d/system-cache","high_confidence":false,"is_ioc_match":false,"rule_severities":{"Persistence_InitD_Unowned_Script":"NOTICE","Persistence_Missing_Target_File":"NOTICE"},"score":45}},{"index":13,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/update-motd.d/99-pam-session","reason":"Update-MOTD script /etc/update-motd.d/99-pam-session is not owned by any OS package (/etc/update-motd.d/99-pam-session)","rule_name":"Persistence_MOTD_Unowned_Script","count":1,"paths":["/etc/update-motd.d/99-pam-session"],"metadata":{"artifact":"update-motd","classes_count":1,"distinct_strong_classes":0,"file":"/etc/update-motd.d/99-pam-session","high_confidence":false,"is_ioc_match":false,"rule_severities":{"Persistence_MOTD_Unowned_Script":"NOTICE"},"score":20}},{"index":14,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/etc/xdg/autostart/pam-xdg-support.desktop","reason":"References non-existent executable target /usr/lib/.libpam-xdg-support/.update-helper (line 5: /usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper)","rule_name":"Persistence_Missing_Target_File","count":1,"paths":["/etc/xdg/autostart/pam-xdg-support.desktop"],"metadata":{"artifact":"xdg_autostart","classes_count":1,"distinct_strong_classes":0,"exec_targets":["/usr/bin/python3","/usr/lib/.libpam-xdg-support/.update-helper"],"file":"/etc/xdg/autostart/pam-xdg-support.desktop","high_confidence":false,"is_ioc_match":false,"line_content":"Exec=/usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper","rule_severities":{"Persistence_Missing_Target_File":"NOTICE"},"score":25}},{"index":15,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/root/.config/autostart/pam-xdg-support.desktop","reason":"References non-existent executable target /usr/lib/.libpam-xdg-support/.update-helper (line 5: /usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper)","rule_name":"Persistence_Missing_Target_File","count":1,"paths":["/root/.config/autostart/pam-xdg-support.desktop"],"metadata":{"artifact":"xdg_autostart","classes_count":1,"distinct_strong_classes":0,"exec_targets":["/usr/bin/python3","/usr/lib/.libpam-xdg-support/.update-helper"],"file":"/root/.config/autostart/pam-xdg-support.desktop","high_confidence":false,"is_ioc_match":false,"line_content":"Exec=/usr/bin/python3 /usr/lib/.libpam-xdg-support/.update-helper","rule_severities":{"Persistence_Missing_Target_File":"NOTICE"},"score":25}},{"index":16,"timestamp":"2026-10-01T12:47:20-04:00","module":"persistence","severity":"NOTICE","path":"/home/kali/.config/autostart/pam-xdg-support.desktop","reason":"References non-existent executable target /home/kali/.local/share/.update-helper/.update-helper (line 4: \"/usr/bin/python3\" \"/home/kali/.local/share/.update-helper/.update-helper\")","rule_name":"Persistence_Missing_Target_File","count":1,"paths":["/home/kali/.config/autostart/pam-xdg-support.desktop"],"metadata":{"artifact":"xdg_autostart","classes_count":1,"distinct_strong_classes":0,"exec_targets":["/usr/bin/python3","/home/kali/.local/share/.update-helper/.update-helper"],"file":"/home/kali/.config/autostart/pam-xdg-support.desktop","high_confidence":false,"is_ioc_match":false,"line_content":"Exec=\"/usr/bin/python3\" \"/home/kali/.local/share/.update-helper/.update-helper\"","rule_severities":{"Persistence_Missing_Target_File":"NOTICE"},"score":25}},{"index":17,"timestamp":"2026-10-01T12:47:20-04:00","module":"users","severity":"INFO","path":"/etc/group","reason":"Privileged group \"sudo\" contains member(s): kali","rule_name":"Users_Privileged_Group_Membership","count":1,"paths":["/etc/group"],"metadata":{"group":"sudo","members":["kali"],"score":10}}],"is_capped":false,"max_cap":5000,"total_count":17}
+  </script>
+
+  <script nonce="y/GMsqBWBkFwzYI39AUlPQkh">
+
+(function() {
+  'use strict';
+
+  var dataElement = document.getElementById('aether-data');
+  if (!dataElement) return;
+
+  var reportData = {};
+  try {
+    reportData = JSON.parse(dataElement.textContent || '{}');
+  } catch (e) {
+    reportData = { findings: [] };
+  }
+
+  var allFindings = reportData.findings || [];
+  var currentSeverity = 'ALL';
+  var currentModule = '';
+  var currentSearch = '';
+
+  var tbody = document.getElementById('findings-tbody');
+  var emptyState = document.getElementById('empty-state');
+  var countSummary = document.getElementById('findings-count-summary');
+  var searchInput = document.getElementById('search-input');
+  var moduleFilter = document.getElementById('module-filter');
+  var pills = document.querySelectorAll('.btn-pill');
+  var themeToggle = document.getElementById('theme-toggle');
+  var themeIcon = document.getElementById('theme-icon');
+  var drawerOverlay = document.getElementById('detail-drawer-overlay');
+  var drawerClose = document.getElementById('drawer-close');
+  var drawerBody = document.getElementById('drawer-body');
+  var activeRow = null;
+
+  // 1. Theme Management
+  function initTheme() {
+    var saved = localStorage.getItem('aether-theme');
+    if (!saved) {
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+        saved = 'light';
+      } else {
+        saved = 'dark';
+      }
+    }
+    setTheme(saved);
+  }
+
+  function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    localStorage.setItem('aether-theme', t);
+    if (themeIcon) {
+      themeIcon.textContent = (t === 'light') ? '🌙' : '☀️';
+    }
+  }
+
+  if (themeToggle) {
+    themeToggle.addEventListener('click', function() {
+      var current = document.documentElement.getAttribute('data-theme') || 'dark';
+      var next = (current === 'dark') ? 'light' : 'dark';
+      setTheme(next);
+    });
+  }
+
+  initTheme();
+
+  // 2. Safe DOM Helpers
+  function clearChildren(node) {
+    while (node && node.firstChild) {
+      node.removeChild(node.firstChild);
+    }
+  }
+
+  function createBadge(sev) {
+    var span = document.createElement('span');
+    span.classList.add('badge');
+    var sLower = (sev || 'info').toLowerCase();
+    span.classList.add('sev-' + sLower);
+    span.textContent = sev || 'INFO';
+    return span;
+  }
+
+  // 3. Render Findings Table
+  function renderTable() {
+    clearChildren(tbody);
+
+    var filtered = allFindings.filter(function(f) {
+      if (currentSeverity !== 'ALL' && f.severity !== currentSeverity) {
+        return false;
+      }
+      if (currentModule && f.module !== currentModule) {
+        return false;
+      }
+      if (currentSearch) {
+        var term = currentSearch.toLowerCase();
+        var matchPath = f.path && f.path.toLowerCase().indexOf(term) !== -1;
+        var matchRule = f.rule_name && f.rule_name.toLowerCase().indexOf(term) !== -1;
+        var matchReason = f.reason && f.reason.toLowerCase().indexOf(term) !== -1;
+        var matchModule = f.module && f.module.toLowerCase().indexOf(term) !== -1;
+        if (!matchPath && !matchRule && !matchReason && !matchModule) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    if (countSummary) {
+      countSummary.textContent = 'Showing ' + filtered.length + ' of ' + allFindings.length + ' items';
+    }
+
+    if (filtered.length === 0) {
+      if (emptyState) emptyState.style.display = 'block';
+      return;
+    } else {
+      if (emptyState) emptyState.style.display = 'none';
+    }
+
+    filtered.forEach(function(f) {
+      var tr = document.createElement('tr');
+      tr.setAttribute('tabindex', '0');
+      tr.setAttribute('role', 'button');
+      tr.setAttribute('aria-label', 'View details for finding in ' + (f.path || f.rule_name));
+
+      // Severity column
+      var tdSev = document.createElement('td');
+      tdSev.appendChild(createBadge(f.severity));
+      tr.appendChild(tdSev);
+
+      // Module column
+      var tdMod = document.createElement('td');
+      var modStrong = document.createElement('strong');
+      modStrong.textContent = f.module || '';
+      tdMod.appendChild(modStrong);
+      tr.appendChild(tdMod);
+
+      // Path column
+      var tdPath = document.createElement('td');
+      var codePath = document.createElement('code');
+      codePath.textContent = f.path || '';
+      tdPath.appendChild(codePath);
+      tr.appendChild(tdPath);
+
+      // Rule Name column
+      var tdRule = document.createElement('td');
+      var codeRule = document.createElement('code');
+      codeRule.textContent = f.rule_name || '';
+      tdRule.appendChild(codeRule);
+      tr.appendChild(tdRule);
+
+      // Reason column
+      var tdReason = document.createElement('td');
+      tdReason.textContent = f.reason || '';
+      tr.appendChild(tdReason);
+
+      // Timestamp column
+      var tdTime = document.createElement('td');
+      var timeStr = f.timestamp || '';
+      if (timeStr.length > 19) {
+        timeStr = timeStr.substring(11, 19);
+      }
+      tdTime.textContent = timeStr;
+      tr.appendChild(tdTime);
+
+      // Row Interaction
+      function onRowSelect() {
+        activeRow = tr;
+        openDrawer(f);
+      }
+
+      tr.addEventListener('click', onRowSelect);
+      tr.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
+          e.preventDefault();
+          onRowSelect();
+        }
+      });
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  // 4. Detail Drawer
+  function openDrawer(f) {
+    clearChildren(drawerBody);
+
+    // Helper to add field
+    function addField(label, value, isCode) {
+      if (value === undefined || value === null || value === '') return;
+      var div = document.createElement('div');
+      div.classList.add('drawer-field');
+
+      var lbl = document.createElement('span');
+      lbl.classList.add('drawer-field-label');
+      lbl.textContent = label;
+      div.appendChild(lbl);
+
+      var valElem;
+      if (isCode) {
+        valElem = document.createElement('div');
+        valElem.classList.add('code-block');
+        valElem.textContent = (typeof value === 'object') ? JSON.stringify(value, null, 2) : String(value);
+      } else {
+        valElem = document.createElement('span');
+        valElem.classList.add('drawer-field-val');
+        valElem.textContent = String(value);
+      }
+      div.appendChild(valElem);
+      drawerBody.appendChild(div);
+    }
+
+    // Severity
+    var sevDiv = document.createElement('div');
+    sevDiv.classList.add('drawer-field');
+    var sevLbl = document.createElement('span');
+    sevLbl.classList.add('drawer-field-label');
+    sevLbl.textContent = 'Severity';
+    sevDiv.appendChild(sevLbl);
+    sevDiv.appendChild(createBadge(f.severity));
+    drawerBody.appendChild(sevDiv);
+
+    addField('Module', f.module);
+    addField('Rule Name', f.rule_name);
+    addField('Primary Path', f.path, true);
+    if (f.paths && f.paths.length > 1) {
+      addField('All Matched Paths (' + f.paths.length + ')', f.paths.join('\\n'), true);
+    }
+    addField('Reason & Details', f.reason);
+    addField('Timestamp', f.timestamp);
+
+    if (f.hashes && Object.keys(f.hashes).length > 0) {
+      var hashLines = [];
+      for (var hName in f.hashes) {
+        hashLines.push(hName + ': ' + f.hashes[hName]);
+      }
+      addField('File Hashes', hashLines.join('\\n'), true);
+    }
+
+    if (f.metadata && Object.keys(f.metadata).length > 0) {
+      addField('Metadata', f.metadata, true);
+    }
+
+    if (drawerOverlay) {
+      drawerOverlay.style.display = 'flex';
+      drawerOverlay.setAttribute('aria-hidden', 'false');
+      if (drawerClose) drawerClose.focus();
+    }
+  }
+
+  function closeDrawer() {
+    if (drawerOverlay) {
+      drawerOverlay.style.display = 'none';
+      drawerOverlay.setAttribute('aria-hidden', 'true');
+      if (activeRow) {
+        activeRow.focus();
+      }
+    }
+  }
+
+  if (drawerClose) {
+    drawerClose.addEventListener('click', closeDrawer);
+  }
+  if (drawerOverlay) {
+    drawerOverlay.addEventListener('click', function(e) {
+      if (e.target === drawerOverlay) {
+        closeDrawer();
+      }
+    });
+  }
+
+  window.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' || e.keyCode === 27) {
+      if (drawerOverlay && drawerOverlay.style.display !== 'none') {
+        closeDrawer();
+      }
+    }
+  });
+
+  // 5. Search & Filters
+  if (searchInput) {
+    searchInput.addEventListener('input', function() {
+      currentSearch = (searchInput.value || '').trim();
+      renderTable();
+    });
+  }
+
+  if (moduleFilter) {
+    moduleFilter.addEventListener('change', function() {
+      currentModule = moduleFilter.value || '';
+      renderTable();
+    });
+  }
+
+  pills.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      pills.forEach(function(b) {
+        b.classList.remove('active');
+        b.setAttribute('aria-pressed', 'false');
+      });
+      btn.classList.add('active');
+      btn.setAttribute('aria-pressed', 'true');
+      currentSeverity = btn.getAttribute('data-sev') || 'ALL';
+      renderTable();
+    });
+  });
+
+  // Initial table render
+  renderTable();
+})();
+
+  </script>
+</body>
+</html>

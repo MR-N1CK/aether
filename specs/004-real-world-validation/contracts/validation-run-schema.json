@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RealWorldValidationRun",
+  "type": "object",
+  "required": [
+    "run_id",
+    "timestamp",
+    "profile_id",
+    "is_elevated",
+    "files_inspected",
+    "processes_inspected",
+    "sockets_inspected",
+    "peak_memory_mb",
+    "throughput_files_per_sec",
+    "duration",
+    "assessment",
+    "manifest_compliance"
+  ],
+  "properties": {
+    "run_id": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "profile_id": { "type": "string" },
+    "is_elevated": { "type": "boolean" },
+    "files_inspected": { "type": "integer", "minimum": 0 },
+    "processes_inspected": { "type": "integer", "minimum": 0 },
+    "sockets_inspected": { "type": "integer", "minimum": 0 },
+    "peak_memory_mb": { "type": "number", "minimum": 0 },
+    "throughput_files_per_sec": { "type": "number", "minimum": 0 },
+    "duration": {
+      "type": "object",
+      "required": ["total"],
+      "properties": {
+        "filesystem_walk": { "type": "string" },
+        "hashing": { "type": "string" },
+        "heuristics": { "type": "string" },
+        "yara": { "type": "string" },
+        "process": { "type": "string" },
+        "network": { "type": "string" },
+        "persistence": { "type": "string" },
+        "users": { "type": "string" },
+        "kernel": { "type": "string" },
+        "correlation": { "type": "string" },
+        "reporting": { "type": "string" },
+        "total": { "type": "string" }
+      }
+    },
+    "assessment": { "$ref": "system-assessment-schema.json" },
+    "manifest_compliance": { "type": "boolean" },
+    "compliance_violations": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -3,9 +3,9 @@ package users
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,10 +31,6 @@ func CheckShadow(rootFS string, cfg *config.Config, isNonRoot bool, cov *UsersCo
 	var findings []report.Finding
 
 	shadowPath := "/etc/shadow"
-	hostPath := shadowPath
-	if rootFS != "" {
-		hostPath = filepath.Join(rootFS, "etc/shadow")
-	}
 
 	if isNonRoot {
 		cov.ShadowGapNonRoot = true
@@ -43,9 +39,9 @@ func CheckShadow(rootFS string, cfg *config.Config, isNonRoot bool, cov *UsersCo
 	}
 
 	// Safe read /etc/shadow
-	data, err := safeopen.ReadFileReadOnly(hostPath, 1024*1024)
+	data, err := safeopen.ReadFileReadOnlyUnderRoot(rootFS, shadowPath, 1024*1024)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) || errors.Is(err, safeopen.ErrVanished) {
 			return entries, findings
 		}
 		cov.ShadowReadable = false

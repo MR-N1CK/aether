@@ -13,6 +13,7 @@ import (
 	"aether/internal/ioc"
 	"aether/internal/pkgdb"
 	"aether/internal/report"
+	"aether/internal/safeopen"
 )
 
 var reAliasPriv = regexp.MustCompile(`(?i)^\s*alias\s+(sudo|su|ssh)\s*=`)
@@ -42,21 +43,24 @@ func CheckProfiles(ctx context.Context, rootFS string, cfg *config.Config, pkgDB
 
 	// 2. Inspect /etc/profile.d/*
 	profileD := "/etc/profile.d"
-	hostProfileD := profileD
-	if rootFS != "" {
-		hostProfileD = filepath.Join(rootFS, "etc/profile.d")
-	}
-	if entries, err := os.ReadDir(hostProfileD); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				virtPath := filepath.Join(profileD, e.Name())
-				inspectProfileFile(virtPath, rootFS, cfg, pkgDB, iocEng, cov, &findings)
+	hostProfileD, _, _, pErr := safeopen.ResolveUnderRoot(rootFS, profileD)
+	if pErr == nil {
+		if entries, err := os.ReadDir(hostProfileD); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() {
+					virtPath := filepath.Join(profileD, e.Name())
+					inspectProfileFile(virtPath, rootFS, cfg, pkgDB, iocEng, cov, &findings)
+				}
 			}
+		} else if os.IsNotExist(err) {
+			cov.Missing++
+		} else {
+			cov.RecordUnreadable(profileD, err)
 		}
-	} else if os.IsNotExist(err) {
+	} else if os.IsNotExist(pErr) {
 		cov.Missing++
 	} else {
-		cov.RecordUnreadable(profileD, err)
+		cov.RecordUnreadable(profileD, pErr)
 	}
 
 	// 3. Inspect user shell files
@@ -158,6 +162,7 @@ func inspectProfileFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 		return
 	}
 
+	fileGuards := ExtractGuardedPaths(string(data))
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	lineNum := 0
 	var lastSuspiciousLine string
@@ -218,7 +223,7 @@ func inspectProfileFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 		}
 
 		// 4. Check general command patterns (curl|sh, reverse shells, base64)
-		cmdSignals := CheckSuspiciousCommand(line, effectiveLineNum, cfg, rootFS, isSystemProfile, pkgDB)
+		cmdSignals := CheckSuspiciousCommand(line, effectiveLineNum, cfg, rootFS, isSystemProfile, pkgDB, fileGuards)
 		if len(cmdSignals) > 0 {
 			lastSuspiciousLine = line
 			execTargets, _ := ExtractExecTargets(line)
@@ -266,7 +271,7 @@ func inspectProfileFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 			"artifact":     "profile",
 			"file":         virtPath,
 			"line_content": lastSuspiciousLine,
-			"exec_targets": allExecTargets,
+			"exec_targets": dedupeSlice(allExecTargets),
 		}
 		if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
 			*findings = append(*findings, *f)

@@ -1,0 +1,16 @@
+{
+  "id": "BENIGN-PY-TEST-001",
+  "name": "Python Package Unit Test Mock",
+  "category": "BENIGN",
+  "subcategory": "python_packages",
+  "target_path": "test_mock.py",
+  "is_package_owned": true,
+  "package_name": "python3-example-tests",
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["NOTICE", "INFO"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW",
+    "expected_rationale_contains": "test"
+  }
+}

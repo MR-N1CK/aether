@@ -1,0 +1,15 @@
+{
+  "id": "MAL-PERSIST-001",
+  "name": "Malicious Systemd Service in Volatile Path",
+  "category": "MALICIOUS",
+  "subcategory": "systemd_cron_persistence",
+  "target_path": "/etc/systemd/system/malware.service",
+  "file_mode": 420,
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH"
+  }
+}

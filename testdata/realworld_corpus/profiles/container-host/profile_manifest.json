@@ -1,0 +1,15 @@
+{
+  "profile_id": "container-host",
+  "version": "1.0.0",
+  "expected_status": "SAFE",
+  "max_acceptable_alerts": 0,
+  "max_acceptable_warnings": 2,
+  "acceptable_findings": [
+    {
+      "rule_name": "Process_Container_Mount_Namespace",
+      "expected_severity": "INFO",
+      "expected_verdict": "SAFE",
+      "reason": "Container workload in isolated mount namespace"
+    }
+  ]
+}

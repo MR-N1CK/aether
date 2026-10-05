@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AetherCorrelationContext",
+  "description": "JSON schema for static/runtime cross-domain correlation records",
+  "type": "object",
+  "required": [
+    "correlation_id",
+    "primary_target",
+    "domains_involved",
+    "evidence_strength",
+    "verdict",
+    "signals"
+  ],
+  "properties": {
+    "correlation_id": {
+      "type": "string"
+    },
+    "primary_target": {
+      "type": "string"
+    },
+    "primary_pid": {
+      "type": "integer"
+    },
+    "primary_hash": {
+      "type": "string"
+    },
+    "domains_involved": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["filesystem", "process", "network", "persistence", "ioc"]
+      },
+      "minItems": 1
+    },
+    "evidence_strength": {
+      "type": "string",
+      "enum": ["DIRECT", "CORROBORATED", "CONTEXTUAL", "INCOMPLETE", "StrengthDirect", "StrengthCorroborated", "StrengthContextual", "StrengthIncomplete"]
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["MALICIOUS", "SUSPICIOUS", "SAFE", "UNKNOWN"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["ALERT", "WARNING", "NOTICE", "INFO"]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["HIGH", "MEDIUM", "LOW"]
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["domain", "rule_name", "target_ref"],
+        "properties": {
+          "domain": { "type": "string" },
+          "rule_name": { "type": "string" },
+          "description": { "type": "string" },
+          "target_ref": { "type": "string" }
+        }
+      }
+    }
+  }
+}

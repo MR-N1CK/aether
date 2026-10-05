@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"aether/internal/ioc"
 	"aether/internal/pkgdb"
 	"aether/internal/report"
+	"aether/internal/safeopen"
 )
 
 // CheckCron inspects system and user crontabs, cron directories, and at jobs.
@@ -57,14 +59,19 @@ func CheckCron(ctx context.Context, rootFS string, cfg *config.Config, pkgDB pkg
 		default:
 		}
 
-		hostDir := dir
-		if rootFS != "" {
-			hostDir = filepath.Join(rootFS, strings.TrimPrefix(dir, "/"))
+		hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, dir)
+		if err != nil {
+			if os.IsNotExist(err) || errors.Is(err, safeopen.ErrVanished) || errors.Is(err, os.ErrNotExist) {
+				cov.Missing++
+			} else {
+				cov.RecordUnreadable(dir, err)
+			}
+			continue
 		}
 
 		entries, err := os.ReadDir(hostDir)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if os.IsNotExist(err) || errors.Is(err, safeopen.ErrVanished) || errors.Is(err, os.ErrNotExist) {
 				cov.Missing++
 			} else {
 				cov.RecordUnreadable(dir, err)
@@ -109,7 +116,7 @@ func inspectCronFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb.Pa
 
 	lst, err := os.Lstat(hostPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) || errors.Is(err, safeopen.ErrVanished) || errors.Is(err, os.ErrNotExist) {
 			cov.Missing++
 		} else {
 			cov.RecordUnreadable(virtPath, err)
@@ -171,6 +178,7 @@ func inspectCronFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb.Pa
 		}
 	}
 
+	fileGuards := ExtractGuardedPaths(string(data))
 	// Parse lines
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	lineNum := 0
@@ -199,7 +207,7 @@ func inspectCronFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb.Pa
 
 		// Check command patterns (strip cron schedule first so command/exec targets are extracted properly)
 		cmdText := stripCronSchedule(line, isUserCrontab)
-		cmdSignals := CheckSuspiciousCommand(cmdText, lineNum, cfg, rootFS, isSystemContext, pkgDB)
+		cmdSignals := CheckSuspiciousCommand(cmdText, lineNum, cfg, rootFS, isSystemContext, pkgDB, fileGuards)
 		if len(cmdSignals) > 0 {
 			lastSuspiciousLine = line
 			execTargets, _ := ExtractExecTargets(cmdText)
@@ -213,7 +221,7 @@ func inspectCronFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb.Pa
 			"artifact":     "cron",
 			"file":         virtPath,
 			"line_content": lastSuspiciousLine,
-			"exec_targets": allExecTargets,
+			"exec_targets": dedupeSlice(allExecTargets),
 		}
 		if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
 			*findings = append(*findings, *f)

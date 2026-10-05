@@ -25,35 +25,32 @@ func CheckModprobe(ctx context.Context, rootFS string, cfg *config.Config, cov *
 
 	// 1. /etc/modules
 	etcModules := "/etc/modules"
-	if rootFS != "" {
-		etcModules = filepath.Join(rootFS, "etc/modules")
-	}
-	if fi, err := os.Stat(etcModules); err == nil && fi.Mode().IsRegular() {
-		targetFiles = append(targetFiles, "/etc/modules")
+	if hostPath, _, _, err := safeopen.ResolveUnderRoot(rootFS, etcModules); err == nil {
+		if fi, err := os.Stat(hostPath); err == nil && fi.Mode().IsRegular() {
+			targetFiles = append(targetFiles, "/etc/modules")
+		}
 	}
 
 	// 2. /etc/modules-load.d/*.conf
 	modulesLoadDir := "/etc/modules-load.d"
-	if rootFS != "" {
-		modulesLoadDir = filepath.Join(rootFS, "etc/modules-load.d")
-	}
-	if entries, err := os.ReadDir(modulesLoadDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".conf") {
-				targetFiles = append(targetFiles, filepath.Join("/etc/modules-load.d", e.Name()))
+	if hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, modulesLoadDir); err == nil {
+		if entries, err := os.ReadDir(hostDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".conf") {
+					targetFiles = append(targetFiles, filepath.Join("/etc/modules-load.d", e.Name()))
+				}
 			}
 		}
 	}
 
 	// 3. /etc/modprobe.d/*.conf
 	modprobeDir := "/etc/modprobe.d"
-	if rootFS != "" {
-		modprobeDir = filepath.Join(rootFS, "etc/modprobe.d")
-	}
-	if entries, err := os.ReadDir(modprobeDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".conf") {
-				targetFiles = append(targetFiles, filepath.Join("/etc/modprobe.d", e.Name()))
+	if hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, modprobeDir); err == nil {
+		if entries, err := os.ReadDir(hostDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".conf") {
+					targetFiles = append(targetFiles, filepath.Join("/etc/modprobe.d", e.Name()))
+				}
 			}
 		}
 	}
@@ -67,12 +64,7 @@ func CheckModprobe(ctx context.Context, rootFS string, cfg *config.Config, cov *
 		default:
 		}
 
-		hostPath := virtPath
-		if rootFS != "" {
-			hostPath = filepath.Join(rootFS, strings.TrimPrefix(virtPath, "/"))
-		}
-
-		data, err := safeopen.ReadFileReadOnly(hostPath, 1024*1024)
+		data, err := safeopen.ReadFileReadOnlyUnderRoot(rootFS, virtPath, 1024*1024)
 		if err != nil {
 			continue
 		}

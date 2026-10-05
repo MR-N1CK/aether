@@ -14,6 +14,7 @@ import (
 	"aether/internal/ioc"
 	"aether/internal/pkgdb"
 	"aether/internal/report"
+	"aether/internal/safeopen"
 )
 
 var (
@@ -23,7 +24,7 @@ var (
 	reAptHook    = regexp.MustCompile(`(?i)(?:Pre-Invoke|Post-Invoke|Pre-Install-Pkgs)\s*\{[^}]*["']([^"']+)["']`)
 )
 
-// CheckOtherHooks inspects rc.local, init.d, udev rules, sudoers, motd, apt hooks, and autostart.
+// CheckOtherHooks inspects rc.local, init.d, rc*.d, udev rules, sudoers, motd, apt hooks, and autostart.
 func CheckOtherHooks(ctx context.Context, rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, iocEng ioc.Engine, cov *CheckCoverage) ([]report.Finding, error) {
 	cov.Name = "hooks"
 	var findings []report.Finding
@@ -34,19 +35,22 @@ func CheckOtherHooks(ctx context.Context, rootFS string, cfg *config.Config, pkg
 	// 2. /etc/init.d/ scripts
 	inspectInitD(rootFS, cfg, pkgDB, cov, &findings)
 
-	// 3. /etc/udev/rules.d/
+	// 3. /etc/rc*.d/ runlevel scripts and symlinks
+	inspectRCD(rootFS, cfg, pkgDB, cov, &findings)
+
+	// 4. /etc/udev/rules.d/
 	inspectUdevRules(rootFS, cfg, pkgDB, cov, &findings)
 
-	// 4. /etc/sudoers and /etc/sudoers.d/
+	// 5. /etc/sudoers and /etc/sudoers.d/
 	inspectSudoers(rootFS, cfg, cov, &findings)
 
-	// 5. /etc/update-motd.d/
+	// 6. /etc/update-motd.d/
 	inspectUpdateMotd(rootFS, cfg, pkgDB, cov, &findings)
 
-	// 6. /etc/apt/apt.conf.d/
+	// 7. /etc/apt/apt.conf.d/
 	inspectAptHooks(rootFS, cfg, pkgDB, cov, &findings)
 
-	// 7. XDG autostart
+	// 8. XDG autostart
 	inspectXDGAutostart(rootFS, cfg, pkgDB, cov, &findings)
 
 	return findings, nil
@@ -72,20 +76,26 @@ func inspectRcLocal(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, co
 		}
 	}
 
+	fileGuards := ExtractGuardedPaths(string(data))
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	lineNum := 0
+	var allExecTargets []string
 	for scanner.Scan() {
 		lineNum++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") || line == "exit 0" {
 			continue
 		}
-		cmdSignals := CheckSuspiciousCommand(line, lineNum, cfg, rootFS, true, pkgDB)
+		cmdSignals := CheckSuspiciousCommand(line, lineNum, cfg, rootFS, true, pkgDB, fileGuards)
+		if len(cmdSignals) > 0 {
+			execTargets, _ := ExtractExecTargets(line)
+			allExecTargets = append(allExecTargets, execTargets...)
+		}
 		signals = append(signals, cmdSignals...)
 	}
 
 	if len(signals) > 0 {
-		meta := map[string]any{"artifact": "rc.local", "file": virtPath}
+		meta := map[string]any{"artifact": "rc.local", "file": virtPath, "exec_targets": dedupeSlice(allExecTargets)}
 		if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
 			*findings = append(*findings, *f)
 		}
@@ -129,8 +139,10 @@ func inspectInitD(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, cov 
 			}
 		}
 
+		var allExecTargets []string
 		data, _, rErr := SafeReadRegularFile(rootFS, virtPath, 256*1024)
 		if rErr == nil {
+			fileGuards := ExtractGuardedPaths(string(data))
 			scanner := bufio.NewScanner(bytes.NewReader(data))
 			lineNum := 0
 			inHeredoc := false
@@ -169,7 +181,11 @@ func inspectInitD(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, cov 
 				}
 				prevContinuation = strings.HasSuffix(line, "\\")
 
-				cmdSignals := CheckSuspiciousCommand(line, lineNum, cfg, rootFS, true, pkgDB)
+				cmdSignals := CheckSuspiciousCommand(line, lineNum, cfg, rootFS, true, pkgDB, fileGuards)
+				if len(cmdSignals) > 0 {
+					execTargets, _ := ExtractExecTargets(line)
+					allExecTargets = append(allExecTargets, execTargets...)
+				}
 				for _, cs := range cmdSignals {
 					if isPackageOwned && (cs.Class == ClassMissingTarget || cs.Class == ClassUnowned) {
 						continue
@@ -180,7 +196,7 @@ func inspectInitD(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, cov 
 		}
 
 		if len(signals) > 0 {
-			meta := map[string]any{"artifact": "init.d", "file": virtPath}
+			meta := map[string]any{"artifact": "init.d", "file": virtPath, "exec_targets": dedupeSlice(allExecTargets)}
 			if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
 				*findings = append(*findings, *f)
 			}
@@ -188,11 +204,126 @@ func inspectInitD(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, cov 
 	}
 }
 
+func inspectRCD(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, cov *CheckCoverage, findings *[]report.Finding) {
+	rcDirs := []string{
+		"/etc/rc0.d",
+		"/etc/rc1.d",
+		"/etc/rc2.d",
+		"/etc/rc3.d",
+		"/etc/rc4.d",
+		"/etc/rc5.d",
+		"/etc/rc6.d",
+		"/etc/rcS.d",
+		"/etc/rc.local.d",
+	}
+
+	for _, rcDir := range rcDirs {
+		hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, rcDir)
+		if err != nil {
+			continue
+		}
+
+		entries, err := os.ReadDir(hostDir)
+		if err != nil {
+			continue
+		}
+
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+
+			virtPath := filepath.Join(rcDir, e.Name())
+			cov.Inspected++
+
+			var signals []*PersistenceSignal
+			hostEntry := filepath.Join(hostDir, e.Name())
+			lst, lErr := os.Lstat(hostEntry)
+			if lErr != nil {
+				continue
+			}
+
+			isSymlink := (lst.Mode() & os.ModeSymlink) != 0
+			isPackageOwned := false
+			if pkgDB != nil && pkgDB.IsAvailable() {
+				if _, ok := pkgDB.Owner(virtPath); ok {
+					isPackageOwned = true
+				}
+			}
+
+			if isSymlink {
+				if symSig := AssessSymlink(rootFS, virtPath, pkgDB, false, "", 0); symSig != nil {
+					signals = append(signals, symSig)
+				}
+			}
+
+			var allExecTargets []string
+			// Read script content (following symlink within root if valid)
+			_, targetVirt, _, rErr := safeopen.ResolveUnderRoot(rootFS, virtPath)
+			if rErr == nil {
+				if pkgDB != nil && pkgDB.IsAvailable() && !isPackageOwned {
+					if _, ok := pkgDB.Owner(targetVirt); ok {
+						isPackageOwned = true
+					}
+				}
+
+				if !isPackageOwned && !isSymlink {
+					signals = append(signals, &PersistenceSignal{
+						Class:      ClassUnowned,
+						RuleName:   "Persistence_RCD_Unowned_Script",
+						Reason:     fmt.Sprintf("Runlevel script %s is not owned by any OS package", virtPath),
+						Score:      20,
+						Severity:   report.SeverityNotice,
+						LineNumber: 0,
+						Snippet:    virtPath,
+					})
+				}
+
+				data, _, readErr := SafeReadRegularFile(rootFS, targetVirt, 256*1024)
+				if readErr == nil {
+					fileGuards := ExtractGuardedPaths(string(data))
+					scanner := bufio.NewScanner(bytes.NewReader(data))
+					lineNum := 0
+					for scanner.Scan() {
+						lineNum++
+						line := strings.TrimSpace(scanner.Text())
+						if line == "" || strings.HasPrefix(line, "#") {
+							continue
+						}
+						cmdSignals := CheckSuspiciousCommand(line, lineNum, cfg, rootFS, true, pkgDB, fileGuards)
+						if len(cmdSignals) > 0 {
+							execTargets, _ := ExtractExecTargets(line)
+							allExecTargets = append(allExecTargets, execTargets...)
+						}
+						for _, cs := range cmdSignals {
+							if isPackageOwned && (cs.Class == ClassMissingTarget || cs.Class == ClassUnowned) {
+								continue
+							}
+							signals = append(signals, cs)
+						}
+					}
+				}
+			}
+
+			if len(signals) > 0 {
+				meta := map[string]any{"artifact": "rc.d", "file": virtPath, "exec_targets": dedupeSlice(allExecTargets)}
+				if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
+					*findings = append(*findings, *f)
+				}
+			}
+		}
+	}
+}
+
 func inspectUdevRules(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, cov *CheckCoverage, findings *[]report.Finding) {
 	udevDir := "/etc/udev/rules.d"
-	hostDir := udevDir
-	if rootFS != "" {
-		hostDir = filepath.Join(rootFS, "etc/udev/rules.d")
+	hostDir, _, _, uErr := safeopen.ResolveUnderRoot(rootFS, udevDir)
+	if uErr != nil {
+		if rootFS != "" {
+			hostDir = filepath.Join(rootFS, "etc/udev/rules.d")
+		} else {
+			hostDir = udevDir
+		}
 	}
 
 	entries, err := os.ReadDir(hostDir)
@@ -256,14 +387,12 @@ func inspectSudoers(rootFS string, cfg *config.Config, cov *CheckCoverage, findi
 	files := []string{"/etc/sudoers"}
 
 	dDir := "/etc/sudoers.d"
-	hostD := dDir
-	if rootFS != "" {
-		hostD = filepath.Join(rootFS, "etc/sudoers.d")
-	}
-	if entries, err := os.ReadDir(hostD); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && !strings.HasPrefix(e.Name(), ".") && !strings.HasSuffix(e.Name(), "~") {
-				files = append(files, filepath.Join(dDir, e.Name()))
+	if hostD, _, _, err := safeopen.ResolveUnderRoot(rootFS, dDir); err == nil {
+		if entries, err := os.ReadDir(hostD); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && !strings.HasPrefix(e.Name(), ".") && !strings.HasSuffix(e.Name(), "~") {
+					files = append(files, filepath.Join(dDir, e.Name()))
+				}
 			}
 		}
 	}
@@ -348,9 +477,9 @@ func inspectSudoers(rootFS string, cfg *config.Config, cov *CheckCoverage, findi
 
 func inspectUpdateMotd(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, cov *CheckCoverage, findings *[]report.Finding) {
 	motdDir := "/etc/update-motd.d"
-	hostDir := motdDir
-	if rootFS != "" {
-		hostDir = filepath.Join(rootFS, "etc/update-motd.d")
+	hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, motdDir)
+	if err != nil {
+		return
 	}
 
 	entries, err := os.ReadDir(hostDir)
@@ -380,8 +509,10 @@ func inspectUpdateMotd(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB,
 			}
 		}
 
+		var allExecTargets []string
 		data, _, rErr := SafeReadRegularFile(rootFS, virtPath, 256*1024)
 		if rErr == nil {
+			fileGuards := ExtractGuardedPaths(string(data))
 			scanner := bufio.NewScanner(bytes.NewReader(data))
 			lineNum := 0
 			for scanner.Scan() {
@@ -390,13 +521,17 @@ func inspectUpdateMotd(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB,
 				if line == "" || strings.HasPrefix(line, "#") {
 					continue
 				}
-				cmdSignals := CheckSuspiciousCommand(line, lineNum, cfg, rootFS, true, pkgDB)
+				cmdSignals := CheckSuspiciousCommand(line, lineNum, cfg, rootFS, true, pkgDB, fileGuards)
+				if len(cmdSignals) > 0 {
+					execTargets, _ := ExtractExecTargets(line)
+					allExecTargets = append(allExecTargets, execTargets...)
+				}
 				signals = append(signals, cmdSignals...)
 			}
 		}
 
 		if len(signals) > 0 {
-			meta := map[string]any{"artifact": "update-motd", "file": virtPath}
+			meta := map[string]any{"artifact": "update-motd", "file": virtPath, "exec_targets": dedupeSlice(allExecTargets)}
 			if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
 				*findings = append(*findings, *f)
 			}
@@ -406,9 +541,9 @@ func inspectUpdateMotd(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB,
 
 func inspectAptHooks(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, cov *CheckCoverage, findings *[]report.Finding) {
 	aptDir := "/etc/apt/apt.conf.d"
-	hostDir := aptDir
-	if rootFS != "" {
-		hostDir = filepath.Join(rootFS, "etc/apt/apt.conf.d")
+	hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, aptDir)
+	if err != nil {
+		return
 	}
 
 	entries, err := os.ReadDir(hostDir)
@@ -428,6 +563,7 @@ func inspectAptHooks(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, c
 			continue
 		}
 
+		fileGuards := ExtractGuardedPaths(string(data))
 		var signals []*PersistenceSignal
 		content := string(data)
 		matches := reAptHook.FindAllStringSubmatch(content, -1)
@@ -447,7 +583,7 @@ func inspectAptHooks(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, c
 						Snippet:     RedactSnippet(cmd),
 					})
 				} else {
-					cmdSignals := CheckSuspiciousCommand(cmd, 0, cfg, rootFS, true, pkgDB)
+					cmdSignals := CheckSuspiciousCommand(cmd, 0, cfg, rootFS, true, pkgDB, fileGuards)
 					signals = append(signals, cmdSignals...)
 				}
 			}
@@ -469,16 +605,15 @@ func inspectXDGAutostart(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageD
 	users := parsePasswd(rootFS, cov)
 	if len(users) == 0 {
 		homeBase := "/home"
-		if rootFS != "" {
-			homeBase = filepath.Join(rootFS, "home")
-		}
-		if entries, err := os.ReadDir(homeBase); err == nil {
-			for _, e := range entries {
-				if e.IsDir() {
-					users = append(users, passwdUser{
-						Username: e.Name(),
-						Home:     "/home/" + e.Name(),
-					})
+		if hostHome, _, _, err := safeopen.ResolveUnderRoot(rootFS, homeBase); err == nil {
+			if entries, err := os.ReadDir(hostHome); err == nil {
+				for _, e := range entries {
+					if e.IsDir() {
+						users = append(users, passwdUser{
+							Username: e.Name(),
+							Home:     "/home/" + e.Name(),
+						})
+					}
 				}
 			}
 		}
@@ -490,9 +625,9 @@ func inspectXDGAutostart(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageD
 	}
 
 	for _, dir := range searchDirs {
-		hostDir := dir
-		if rootFS != "" {
-			hostDir = filepath.Join(rootFS, strings.TrimPrefix(dir, "/"))
+		hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, dir)
+		if err != nil {
+			continue
 		}
 
 		entries, err := os.ReadDir(hostDir)
@@ -519,6 +654,7 @@ func inspectXDGAutostart(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageD
 				continue
 			}
 
+			fileGuards := ExtractGuardedPaths(string(data))
 			var signals []*PersistenceSignal
 			scanner := bufio.NewScanner(bytes.NewReader(data))
 			lineNum := 0
@@ -530,7 +666,7 @@ func inspectXDGAutostart(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageD
 				line := strings.TrimSpace(scanner.Text())
 				if strings.HasPrefix(line, "Exec=") {
 					cmd := strings.TrimPrefix(line, "Exec=")
-					cmdSignals := CheckSuspiciousCommand(cmd, lineNum, cfg, rootFS, !isUserAutostart, pkgDB)
+					cmdSignals := CheckSuspiciousCommand(cmd, lineNum, cfg, rootFS, !isUserAutostart, pkgDB, fileGuards)
 					if len(cmdSignals) > 0 {
 						lastSuspiciousLine = line
 						execTargets, _ := ExtractExecTargets(cmd)
@@ -550,7 +686,7 @@ func inspectXDGAutostart(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageD
 					"artifact":     "xdg_autostart",
 					"file":         virtPath,
 					"line_content": lastSuspiciousLine,
-					"exec_targets": allExecTargets,
+					"exec_targets": dedupeSlice(allExecTargets),
 				}
 				if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
 					*findings = append(*findings, *f)

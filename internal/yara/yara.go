@@ -9,6 +9,25 @@ import (
 	"aether/internal/report"
 )
 
+// ValidationResult contains the compile validation summary of a rules directory.
+type ValidationResult struct {
+	TotalFilesFound          int
+	FilesCompiled            int
+	FilesFailed              int
+	TotalRulesLoaded         int
+	RulesWithExplicitScore   int
+	RulesWithExplicitSev     int
+	RulesWithAlertOrCritical int
+	RulesWithDefaultMetadata int
+	Failures                 []RuleFailure
+}
+
+// RuleFailure contains the path and error message for a failed rule file.
+type RuleFailure struct {
+	Path  string
+	Error string
+}
+
 // RuleMatch represents a signature hit from a YARA scan.
 type RuleMatch struct {
 	RuleName       string                 `json:"rule_name"`

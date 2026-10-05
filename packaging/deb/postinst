@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        # Create configuration and logging directories with standard permissions
+        mkdir -p /etc/aether/rules /var/log/aether
+        chmod 0755 /etc/aether /etc/aether/rules /var/log/aether
+        if [ -f /etc/aether/config.yaml ]; then
+            chmod 0644 /etc/aether/config.yaml
+        fi
+
+        # Reload systemd manager configuration if systemd is active
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        # Note: Do NOT automatically enable or start aether-scan.timer (opt-in per FR-015 / FR-024)
+    ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0

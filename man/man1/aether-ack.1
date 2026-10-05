@@ -1,0 +1,29 @@
+.TH AETHER-ACK 1 "October 2026" "Aether 1.0.0" "User Commands"
+.SH NAME
+aether-ack \- acknowledge and suppress operational triage anomalies
+.SH SYNOPSIS
+.B aether ack
+\fIPATH\fR
+[\fB\-\-reason\fR \fITEXT\fR]
+.SH DESCRIPTION
+The \fBack\fR command records an administrator acknowledgment for an inspected file that triggered a benign anomaly (SUSPICIOUS warning). It computes the SHA-256 hash of the target object and appends an entry to the acknowledgment registry.
+.PP
+Subsequent scans encountering the exact same file with matching cryptographic hash and path will categorize the object as an acknowledged baseline finding rather than raising repeated alerts.
+.SH SECURITY CONSTRAINTS
+.TP
+.B Non-Ackable Alerts
+Confirmed threats (\fBMALICIOUS\fR tier, score $\ge$ 85, such as reverse shells or ransomware lockers) \fBCANNOT\fR be acknowledged. The engine refuses to suppress confirmed malware indicators.
+.TP
+.B Hash Invalidation
+If an acknowledged file is modified on disk, its cryptographic hash changes, immediately invalidating the acknowledgment and triggering fresh inspection.
+.SH FILES
+.TP
+.I /etc/aether/acknowledged.yaml
+System-wide acknowledgment registry (used in privileged root mode).
+.TP
+.I ~/.config/aether/acknowledged.yaml
+Per-user acknowledgment registry (used in unprivileged mode).
+.SH SEE ALSO
+\fBaether\fR(1), \fBaether-scan\fR(1), \fBaether-rules\fR(1)
+.SH AUTHORS
+Aether Security Engineering Team.

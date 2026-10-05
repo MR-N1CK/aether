@@ -10,7 +10,10 @@ import (
 	"sync"
 )
 
-const bufferSize = 64 * 1024 // 64KB chunk buffer
+const (
+	bufferSize        = 64 * 1024 // 64KB chunk buffer
+	headerCaptureSize = 4096      // Up to 4096 bytes for magic bytes, file headers, and script inspection
+)
 
 var bufferPool = sync.Pool{
 	New: func() any {
@@ -29,7 +32,7 @@ type FileHashes struct {
 // HashStreamResult holds calculated hashes and leading header bytes for heuristic checks.
 type HashStreamResult struct {
 	Hashes    FileHashes
-	Header    []byte // Up to first 16 bytes for magic bytes (e.g. ELF)
+	Header    []byte // Up to first 512 bytes for magic bytes and headers
 	BytesRead int64
 }
 
@@ -54,9 +57,9 @@ func StreamHashAndHeader(f *os.File) (*HashStreamResult, error) {
 		if n > 0 {
 			totalRead += int64(n)
 
-			// Capture the first up to 16 bytes for header inspection
-			if len(header) < 16 {
-				needed := 16 - len(header)
+			// Capture the first up to headerCaptureSize bytes for header inspection
+			if len(header) < headerCaptureSize {
+				needed := headerCaptureSize - len(header)
 				if n < needed {
 					header = append(header, buf[:n]...)
 				} else {
@@ -96,9 +99,9 @@ func HashFromBytes(data []byte) *HashStreamResult {
 	hSHA256 := sha256.Sum256(data)
 
 	var header []byte
-	if len(data) >= 16 {
-		header = make([]byte, 16)
-		copy(header, data[:16])
+	if len(data) >= headerCaptureSize {
+		header = make([]byte, headerCaptureSize)
+		copy(header, data[:headerCaptureSize])
 	} else {
 		header = make([]byte, len(data))
 		copy(header, data)

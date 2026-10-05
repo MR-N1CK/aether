@@ -20,22 +20,24 @@ const (
 	MinTermHeight = 18
 )
 
-// Palette definitions - Dark Luxurious Palette with truecolor, 256-color and 16-color fallbacks.
+// Palette definitions - Premium Executive Studio Palette (Apple Pro / Stripe / Linear luxury clarity)
 var (
 	ColorObsidian = lipgloss.Color("#0B0F17") // Deep void black
 	ColorSurface  = lipgloss.Color("#161B22") // Card background
-	ColorBorder   = lipgloss.Color("#30363D") // Border slate
-	ColorBorderLit= lipgloss.Color("#58A6FF") // Focused border
-	ColorTextPrim = lipgloss.Color("#F0F6FC") // Platinum text
-	ColorTextMute = lipgloss.Color("#8B949E") // Muted slate gray
-	ColorAccent   = lipgloss.Color("#7C3AED") // Electric violet accent
-	ColorCyan     = lipgloss.Color("#38BDF8") // Vibrant cyan
+	ColorBorder   = lipgloss.Color("#334155") // Sleek titanium slate border
+	ColorBorderLit= lipgloss.Color("#3B82F6") // Focused azure border
+	ColorTextPrim = lipgloss.Color("#FFFFFF") // Crisp platinum white text
+	ColorTextSec  = lipgloss.Color("#F1F5F9") // Soft silver text
+	ColorTextMute = lipgloss.Color("#94A3B8") // Refined slate gray
+	ColorAccent   = lipgloss.Color("#3B82F6") // Luminous Royal Azure
+	ColorIndigo   = lipgloss.Color("#6366F1") // Electric Indigo
+	ColorCyan     = lipgloss.Color("#0EA5E9") // Bright Sapphire Sky
 
-	// Severity colors
-	ColorInfo    = lipgloss.Color("#38BDF8") // Electric sky
-	ColorNotice  = lipgloss.Color("#34D399") // Emerald mint
-	ColorWarning = lipgloss.Color("#FBBF24") // Vivid amber
-	ColorAlert   = lipgloss.Color("#F43F5E") // Hyper crimson
+	// Executive severity colors - vibrant, distinct, harmonious
+	ColorInfo    = lipgloss.Color("#0EA5E9") // Sapphire Blue
+	ColorNotice  = lipgloss.Color("#10B981") // Emerald Mint
+	ColorWarning = lipgloss.Color("#F59E0B") // Honey Amber
+	ColorAlert   = lipgloss.Color("#EF4444") // Coral Crimson
 )
 
 // Theme encapsulates styling configurations respecting terminal capabilities and NO_COLOR.
@@ -75,6 +77,18 @@ type Theme struct {
 	BadgeNotice  lipgloss.Style
 	BadgeWarning lipgloss.Style
 	BadgeAlert   lipgloss.Style
+
+	// Enhanced Executive Studio styles
+	BrandBannerBox   lipgloss.Style
+	BrandTitle       lipgloss.Style
+	BrandTagline     lipgloss.Style
+	StatValueSafe    lipgloss.Style
+	StatValueWarn    lipgloss.Style
+	StatValueAlert   lipgloss.Style
+	KeyHint          lipgloss.Style
+	KeyDesc          lipgloss.Style
+	SectionHeader    lipgloss.Style
+	SubSectionHeader lipgloss.Style
 }
 
 // DetectNoColor returns true if NO_COLOR environment variable is set per no-color.org.
@@ -117,13 +131,38 @@ func NewTheme(noColor bool) *Theme {
 		t.BadgeNotice = lipgloss.NewStyle().Bold(true)
 		t.BadgeWarning = lipgloss.NewStyle().Bold(true)
 		t.BadgeAlert = lipgloss.NewStyle().Bold(true)
+
+		t.BrandBannerBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+		t.BrandTitle = lipgloss.NewStyle().Bold(true)
+		t.BrandTagline = lipgloss.NewStyle()
+		t.StatValueSafe = lipgloss.NewStyle().Bold(true)
+		t.StatValueWarn = lipgloss.NewStyle().Bold(true)
+		t.StatValueAlert = lipgloss.NewStyle().Bold(true)
+		t.KeyHint = lipgloss.NewStyle().Bold(true)
+		t.KeyDesc = lipgloss.NewStyle()
+		t.SectionHeader = lipgloss.NewStyle().Bold(true)
+		t.SubSectionHeader = lipgloss.NewStyle().Bold(true)
 		return t
 	}
 
-	// Luxurious Dark Palette with rounded borders
+	// Luxurious Dark Palette with rounded borders & luminous accents
 	t.AppContainer = lipgloss.NewStyle().
 		Background(ColorObsidian).
 		Padding(0, 1)
+
+	t.BrandBannerBox = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorAccent).
+		Background(ColorSurface).
+		Padding(0, 1)
+
+	t.BrandTitle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorTextPrim)
+
+	t.BrandTagline = lipgloss.NewStyle().
+		Foreground(ColorCyan).
+		Bold(true)
 
 	t.HeaderBox = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -156,11 +195,11 @@ func NewTheme(noColor bool) *Theme {
 		BorderForeground(ColorBorder)
 
 	t.FindingRowNormal = lipgloss.NewStyle().
-		Foreground(ColorTextPrim)
+		Foreground(ColorTextSec)
 
 	t.FindingRowSelected = lipgloss.NewStyle().
 		Foreground(ColorTextPrim).
-		Background(lipgloss.Color("#21262D")).
+		Background(lipgloss.Color("#1E293B")).
 		Bold(true)
 
 	t.FindingTimestamp = lipgloss.NewStyle().
@@ -178,7 +217,7 @@ func NewTheme(noColor bool) *Theme {
 
 	t.ModalBox = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorCyan).
+		BorderForeground(ColorAccent).
 		Background(ColorSurface).
 		Padding(1, 2)
 
@@ -198,6 +237,7 @@ func NewTheme(noColor bool) *Theme {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorNotice).
 		Foreground(ColorNotice).
+		Background(lipgloss.Color("#064E3B")).
 		Padding(1, 2)
 
 	t.VerdictSuspicious = lipgloss.NewStyle().
@@ -205,13 +245,15 @@ func NewTheme(noColor bool) *Theme {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorWarning).
 		Foreground(ColorWarning).
+		Background(lipgloss.Color("#451A03")).
 		Padding(1, 2)
 
 	t.VerdictCompromised = lipgloss.NewStyle().
 		Bold(true).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ColorAlert).
-		Foreground(ColorAlert).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#7F1D1D")).
 		Padding(1, 2)
 
 	t.BadgeInfo = lipgloss.NewStyle().
@@ -228,6 +270,33 @@ func NewTheme(noColor bool) *Theme {
 
 	t.BadgeAlert = lipgloss.NewStyle().
 		Foreground(ColorAlert).
+		Bold(true)
+
+	t.StatValueSafe = lipgloss.NewStyle().
+		Foreground(ColorNotice).
+		Bold(true)
+
+	t.StatValueWarn = lipgloss.NewStyle().
+		Foreground(ColorWarning).
+		Bold(true)
+
+	t.StatValueAlert = lipgloss.NewStyle().
+		Foreground(ColorAlert).
+		Bold(true)
+
+	t.KeyHint = lipgloss.NewStyle().
+		Foreground(ColorCyan).
+		Bold(true)
+
+	t.KeyDesc = lipgloss.NewStyle().
+		Foreground(ColorTextMute)
+
+	t.SectionHeader = lipgloss.NewStyle().
+		Foreground(ColorTextPrim).
+		Bold(true)
+
+	t.SubSectionHeader = lipgloss.NewStyle().
+		Foreground(ColorCyan).
 		Bold(true)
 
 	return t
@@ -273,7 +342,59 @@ func (t *Theme) SeverityStyle(sev report.Severity) lipgloss.Style {
 	}
 }
 
+// PillBadge renders a high-contrast pill badge with background and foreground colors.
+func (t *Theme) PillBadge(label string, sev report.Severity) string {
+	if t.NoColor {
+		return fmt.Sprintf("[%s]", label)
+	}
+
+	var bg, fg lipgloss.Color
+	switch sev {
+	case report.SeverityAlert, report.SeverityCritical:
+		bg = ColorAlert
+		fg = lipgloss.Color("#FFFFFF")
+	case report.SeverityWarning, report.SeverityHigh:
+		bg = ColorWarning
+		fg = lipgloss.Color("#000000")
+	case report.SeverityNotice, report.SeverityMedium:
+		bg = ColorNotice
+		fg = lipgloss.Color("#000000")
+	default:
+		bg = ColorInfo
+		fg = lipgloss.Color("#FFFFFF")
+	}
+
+	style := lipgloss.NewStyle().
+		Background(bg).
+		Foreground(fg).
+		Bold(true).
+		Padding(0, 1)
+
+	return style.Render(label)
+}
+
+// StatusPill renders an active/inactive status indicator pill (e.g. ● ACTIVE).
+func (t *Theme) StatusPill(label string, active bool) string {
+	if t.NoColor {
+		if active {
+			return fmt.Sprintf("[● %s]", label)
+		}
+		return fmt.Sprintf("[○ %s]", label)
+	}
+
+	if active {
+		return lipgloss.NewStyle().
+			Foreground(ColorNotice).
+			Bold(true).
+			Render(fmt.Sprintf("● %s", label))
+	}
+	return lipgloss.NewStyle().
+		Foreground(ColorTextMute).
+		Render(fmt.Sprintf("○ %s", label))
+}
+
 // CleanANSI removes ANSI escape sequences when plain output is needed.
 func CleanANSI(s string) string {
 	return strings.ReplaceAll(s, "\x1b", "")
 }
+

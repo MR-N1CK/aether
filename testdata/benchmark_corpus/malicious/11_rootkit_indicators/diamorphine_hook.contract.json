@@ -1,0 +1,14 @@
+{
+  "id": "MAL-ROOTKIT-001",
+  "name": "Diamorphine LKM Kernel Rootkit Artifact",
+  "category": "MALICIOUS",
+  "subcategory": "rootkit_indicators",
+  "target_path": "diamorphine_hook.c",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH"
+  }
+}

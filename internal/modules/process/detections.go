@@ -552,9 +552,19 @@ func ConsolidateProcessSignals(signals []*ProcessSignal, info *ProcessInfo, isCo
 	if len(info.Cmdline) > 0 {
 		finding.Metadata["cmdline"] = strings.Join(info.Cmdline, " ")
 	}
-	if isContainer {
-		finding.Metadata["container"] = true
-		finding.Metadata["mnt_ns"] = info.MntNs
+	if finding.EvidenceRecord != nil {
+		finding.EvidenceRecord.PID = info.PID
+		finding.EvidenceRecord.Comm = info.Comm
+		if len(info.Cmdline) > 0 {
+			finding.EvidenceRecord.Cmdline = strings.Join(info.Cmdline, " ")
+		}
+		finding.EvidenceRecord.MountNamespace = info.MntNs
+		if isContainer {
+			finding.EvidenceRecord.ContextProfile = "container_namespace"
+		}
+		if len(ruleNames) == 1 && (ruleNames[0] == "Process_Deleted_Binary_Package_Upgrade" || ruleNames[0] == "Process_Deleted_Binary_Replaced") {
+			finding.EvidenceRecord.PackageStatus = "verified_package"
+		}
 	}
 
 	return &finding

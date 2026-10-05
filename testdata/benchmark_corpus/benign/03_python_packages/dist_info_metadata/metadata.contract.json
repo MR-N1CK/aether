@@ -1,0 +1,16 @@
+{
+  "id": "BENIGN-PY-DOC-001",
+  "name": "Python Dist-Info Metadata with Example Commands",
+  "category": "BENIGN",
+  "subcategory": "python_packages",
+  "target_path": "METADATA",
+  "is_package_owned": true,
+  "package_name": "python3-example",
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["NOTICE", "INFO"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW",
+    "expected_rationale_contains": "documentation"
+  }
+}

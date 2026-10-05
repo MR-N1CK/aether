@@ -1,0 +1,7 @@
+{
+  "profile_id": "package-mixed",
+  "version": "1.0.0",
+  "expected_status": "SAFE",
+  "max_acceptable_alerts": 0,
+  "max_acceptable_warnings": 2
+}

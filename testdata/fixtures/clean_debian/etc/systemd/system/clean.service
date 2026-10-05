@@ -1,0 +1,7 @@
+[Unit]
+Description=Standard Clean Daemon
+[Service]
+Type=simple
+ExecStart=/usr/bin/clean-daemon --option
+[Install]
+WantedBy=multi-user.target

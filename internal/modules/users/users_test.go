@@ -451,4 +451,10 @@ func TestUsers_NonRoot_ShadowGapNote(t *testing.T) {
 	if !cov.ShadowGapNonRoot {
 		t.Errorf("expected ShadowGapNonRoot == true for unreadable shadow")
 	}
+
+	for _, f := range rep.findings {
+		if f.Verdict == report.VerdictMalicious {
+			t.Errorf("expected 0 MALICIOUS findings on unreadable shadow, got %s", f.RuleName)
+		}
+	}
 }

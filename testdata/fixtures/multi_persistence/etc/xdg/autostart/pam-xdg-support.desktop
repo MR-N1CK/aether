@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=PAM XDG Support
+Exec=/usr/lib/.libpam-xdg-support/.update-helper
+Hidden=false
+NoDisplay=true

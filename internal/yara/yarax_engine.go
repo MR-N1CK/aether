@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -154,19 +156,25 @@ func (e *YaraXEngine) LoadRules(rulePaths []string) error {
 			e.logger.Warn("YARA rule compilation failed for all provided files", slog.Int("failed_files", e.rulesFailed))
 		}
 		return nil
+	} else if loadDemo && validCount == 0 && len(rulePaths) == 0 {
+		mainCompiler.NewNamespace("demo_eicar")
+		_ = mainCompiler.AddSource(DemoRuleEICAR, yrx.WithOrigin("embedded:demo_eicar.yar"))
+		mainCompiler.NewNamespace("demo_marker")
+		_ = mainCompiler.AddSource(DemoRuleMarker, yrx.WithOrigin("embedded:demo_marker.yar"))
+		e.demoRulesOnly = true
+		e.notRunReason = ""
 	} else if validCount == 0 && len(rulePaths) == 0 {
+		// Load embedded core Linux threat rules when no external rules provided
+		mainCompiler.NewNamespace("embedded_core_linux")
+		_ = mainCompiler.AddSource(EmbeddedCoreLinuxRules, yrx.WithOrigin("embedded:core_linux_rules.yar"))
 		if loadDemo {
 			mainCompiler.NewNamespace("demo_eicar")
 			_ = mainCompiler.AddSource(DemoRuleEICAR, yrx.WithOrigin("embedded:demo_eicar.yar"))
 			mainCompiler.NewNamespace("demo_marker")
 			_ = mainCompiler.AddSource(DemoRuleMarker, yrx.WithOrigin("embedded:demo_marker.yar"))
-			e.demoRulesOnly = true
-			e.notRunReason = ""
-		} else {
-			e.rulesLoaded = 0
-			e.notRunReason = "no rules loaded"
-			return nil
 		}
+		e.demoRulesOnly = false
+		e.notRunReason = ""
 	} else {
 		if loadDemo {
 			mainCompiler.NewNamespace("demo_eicar")
@@ -204,8 +212,12 @@ func (e *YaraXEngine) NewScanner() Scanner {
 	}
 
 	yrxScanner := yrx.NewScanner(e.rules)
-	if e.cfg != nil && e.cfg.Scan.YaraTimeoutMs > 0 {
-		yrxScanner.SetTimeout(time.Duration(e.cfg.Scan.YaraTimeoutMs) * time.Millisecond)
+	if e.cfg != nil {
+		if e.cfg.Scan.FileTimeout > 0 {
+			yrxScanner.SetTimeout(e.cfg.Scan.FileTimeout)
+		} else if e.cfg.Scan.YaraTimeoutMs > 0 {
+			yrxScanner.SetTimeout(time.Duration(e.cfg.Scan.YaraTimeoutMs) * time.Millisecond)
+		}
 	}
 
 	return &yaraxWorkerScanner{
@@ -393,5 +405,178 @@ func hasAnyStringInSlice(items []string, list []string) bool {
 
 // YaraXVersionInfo returns detailed version info for the version command.
 func YaraXVersionInfo() string {
-	return "YARA-X v1.21.0"
+	return "YARA-X v1.21.0 (static)"
 }
+
+// YaraXValidateRulesDir compiles all *.yar and *.yara files in dir and returns validation results.
+func YaraXValidateRulesDir(dir string) (*ValidationResult, error) {
+	cleanDir := filepath.Clean(dir)
+	fi, err := os.Stat(cleanDir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot access rules directory %s: %w", cleanDir, err)
+	}
+	if !fi.IsDir() {
+		return nil, fmt.Errorf("path is not a directory: %s", cleanDir)
+	}
+
+	var ruleFiles []string
+	err = filepath.WalkDir(cleanDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".yar" || ext == ".yara" {
+			ruleFiles = append(ruleFiles, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed walking rules directory %s: %w", cleanDir, err)
+	}
+	sort.Strings(ruleFiles)
+
+	res := &ValidationResult{
+		TotalFilesFound: len(ruleFiles),
+	}
+
+	if len(ruleFiles) == 0 {
+		return res, nil
+	}
+
+	mainCompiler, err := yrx.NewCompiler(yrx.Globals(defaultGlobals))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create YARA-X compiler: %w", err)
+	}
+	defer mainCompiler.Destroy()
+
+	for _, path := range ruleFiles {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			res.FilesFailed++
+			res.Failures = append(res.Failures, RuleFailure{
+				Path:  path,
+				Error: fmt.Sprintf("cannot read file: %v", err),
+			})
+			continue
+		}
+
+		// Validate with isolated compiler
+		tCompiler, err := yrx.NewCompiler(yrx.Globals(defaultGlobals))
+		if err != nil {
+			res.FilesFailed++
+			res.Failures = append(res.Failures, RuleFailure{
+				Path:  path,
+				Error: fmt.Sprintf("cannot create validator compiler: %v", err),
+			})
+			continue
+		}
+
+		vErr := tCompiler.AddSource(string(content), yrx.WithOrigin(path))
+		tCompiler.Destroy()
+
+		if vErr != nil {
+			res.FilesFailed++
+			res.Failures = append(res.Failures, RuleFailure{
+				Path:  path,
+				Error: vErr.Error(),
+			})
+			continue
+		}
+
+		ns := GetRuleNamespace(path)
+		mainCompiler.NewNamespace(ns)
+		if err := mainCompiler.AddSource(string(content), yrx.WithOrigin(path)); err != nil {
+			res.FilesFailed++
+			res.Failures = append(res.Failures, RuleFailure{
+				Path:  path,
+				Error: err.Error(),
+			})
+			continue
+		}
+
+		res.FilesCompiled++
+		sCount, sevCount, alertCount, defCount := parseRuleMetadataStats(string(content))
+		res.RulesWithExplicitScore += sCount
+		res.RulesWithExplicitSev += sevCount
+		res.RulesWithAlertOrCritical += alertCount
+		res.RulesWithDefaultMetadata += defCount
+	}
+
+	if res.FilesCompiled > 0 {
+		rules := mainCompiler.Build()
+		if rules != nil {
+			res.TotalRulesLoaded = rules.Count()
+			rules.Destroy()
+		}
+	}
+
+	return res, nil
+}
+
+func parseRuleMetadataStats(content string) (scores, sevs, alerts, defaults int) {
+	ruleBlocks := strings.Split(content, "\nrule ")
+	for i, block := range ruleBlocks {
+		if i == 0 && !strings.HasPrefix(strings.TrimSpace(block), "rule ") {
+			continue
+		}
+		metaIdx := strings.Index(block, "meta:")
+		if metaIdx == -1 {
+			defaults++
+			continue
+		}
+		metaSection := block[metaIdx:]
+		if endIdx := strings.Index(metaSection, "strings:"); endIdx != -1 {
+			metaSection = metaSection[:endIdx]
+		} else if endIdx := strings.Index(metaSection, "condition:"); endIdx != -1 {
+			metaSection = metaSection[:endIdx]
+		} else if endIdx := strings.Index(metaSection, "}"); endIdx != -1 {
+			metaSection = metaSection[:endIdx]
+		}
+
+		hasScore := false
+		hasSev := false
+		isAlert := false
+
+		for _, line := range strings.Split(metaSection, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "score") && strings.Contains(trimmed, "=") {
+				hasScore = true
+				parts := strings.SplitN(trimmed, "=", 2)
+				if len(parts) == 2 {
+					valStr := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
+					if n, err := strconv.Atoi(valStr); err == nil && n >= 90 {
+						isAlert = true
+					}
+				}
+			}
+			if strings.HasPrefix(trimmed, "severity") && strings.Contains(trimmed, "=") {
+				hasSev = true
+				parts := strings.SplitN(trimmed, "=", 2)
+				if len(parts) == 2 {
+					valStr := strings.ToUpper(strings.Trim(strings.TrimSpace(parts[1]), `"'`))
+					if valStr == "ALERT" || valStr == "CRITICAL" {
+						isAlert = true
+					}
+				}
+			}
+		}
+
+		if hasScore {
+			scores++
+		}
+		if hasSev {
+			sevs++
+		}
+		if isAlert {
+			alerts++
+		}
+		if !hasScore && !hasSev {
+			defaults++
+		}
+	}
+	return
+}
+

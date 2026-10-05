@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,88 +19,82 @@ func CheckPermissions(rootFS string, cfg *config.Config, cov *UsersCoverage) []r
 
 	// Check /etc/passwd
 	passwdPath := "/etc/passwd"
-	hostPasswd := passwdPath
-	if rootFS != "" {
-		hostPasswd = filepath.Join(rootFS, "etc/passwd")
-	}
-
-	if fi, err := os.Stat(hostPasswd); err == nil {
-		mode := fi.Mode().Perm()
-		if (mode & 0002) != 0 {
-			// World-writable
-			findings = append(findings, report.Finding{
-				Timestamp: time.Now(),
-				Module:    "users",
-				Severity:  report.SeverityWarning,
-				Path:      passwdPath,
-				Reason:    fmt.Sprintf("/etc/passwd is world-writable (permissions: 0%o)", mode),
-				RuleName:  "Users_Passwd_World_Writable",
-				Count:     1,
-				Paths:     []string{passwdPath},
-				Metadata: map[string]interface{}{
-					"permissions": fmt.Sprintf("0%o", mode),
-					"score":       85,
-				},
-			})
-		} else if (mode & 0020) != 0 {
-			// Group-writable
-			findings = append(findings, report.Finding{
-				Timestamp: time.Now(),
-				Module:    "users",
-				Severity:  report.SeverityNotice,
-				Path:      passwdPath,
-				Reason:    fmt.Sprintf("/etc/passwd is group-writable (permissions: 0%o)", mode),
-				RuleName:  "Users_Passwd_Group_Writable",
-				Count:     1,
-				Paths:     []string{passwdPath},
-				Metadata: map[string]interface{}{
-					"permissions": fmt.Sprintf("0%o", mode),
-					"score":       30,
-				},
-			})
+	if hostPasswd, _, _, err := safeopen.ResolveUnderRoot(rootFS, passwdPath); err == nil {
+		if fi, err := os.Stat(hostPasswd); err == nil {
+			mode := fi.Mode().Perm()
+			if (mode & 0002) != 0 {
+				// World-writable
+				findings = append(findings, report.Finding{
+					Timestamp: time.Now(),
+					Module:    "users",
+					Severity:  report.SeverityWarning,
+					Path:      passwdPath,
+					Reason:    fmt.Sprintf("/etc/passwd is world-writable (permissions: 0%o)", mode),
+					RuleName:  "Users_Passwd_World_Writable",
+					Count:     1,
+					Paths:     []string{passwdPath},
+					Metadata: map[string]interface{}{
+						"permissions": fmt.Sprintf("0%o", mode),
+						"score":       85,
+					},
+				})
+			} else if (mode & 0020) != 0 {
+				// Group-writable
+				findings = append(findings, report.Finding{
+					Timestamp: time.Now(),
+					Module:    "users",
+					Severity:  report.SeverityNotice,
+					Path:      passwdPath,
+					Reason:    fmt.Sprintf("/etc/passwd is group-writable (permissions: 0%o)", mode),
+					RuleName:  "Users_Passwd_Group_Writable",
+					Count:     1,
+					Paths:     []string{passwdPath},
+					Metadata: map[string]interface{}{
+						"permissions": fmt.Sprintf("0%o", mode),
+						"score":       30,
+					},
+				})
+			}
 		}
 	}
 
 	// Check /etc/shadow
 	shadowPath := "/etc/shadow"
-	hostShadow := shadowPath
-	if rootFS != "" {
-		hostShadow = filepath.Join(rootFS, "etc/shadow")
-	}
-
-	if fi, err := os.Stat(hostShadow); err == nil {
-		mode := fi.Mode().Perm()
-		// 0640 (u=rw,g=r,o=) is standard and clean on Debian/Ubuntu/RHEL (root:shadow).
-		if (mode & 0002) != 0 {
-			findings = append(findings, report.Finding{
-				Timestamp: time.Now(),
-				Module:    "users",
-				Severity:  report.SeverityWarning,
-				Path:      shadowPath,
-				Reason:    fmt.Sprintf("/etc/shadow is world-writable (permissions: 0%o)", mode),
-				RuleName:  "Users_Shadow_World_Writable",
-				Count:     1,
-				Paths:     []string{shadowPath},
-				Metadata: map[string]interface{}{
-					"permissions": fmt.Sprintf("0%o", mode),
-					"score":       85,
-				},
-			})
-		} else if (mode & 0004) != 0 {
-			findings = append(findings, report.Finding{
-				Timestamp: time.Now(),
-				Module:    "users",
-				Severity:  report.SeverityWarning,
-				Path:      shadowPath,
-				Reason:    fmt.Sprintf("/etc/shadow is world-readable (permissions: 0%o)", mode),
-				RuleName:  "Users_Shadow_Insecure_Permissions",
-				Count:     1,
-				Paths:     []string{shadowPath},
-				Metadata: map[string]interface{}{
-					"permissions": fmt.Sprintf("0%o", mode),
-					"score":       85,
-				},
-			})
+	if hostShadow, _, _, err := safeopen.ResolveUnderRoot(rootFS, shadowPath); err == nil {
+		if fi, err := os.Stat(hostShadow); err == nil {
+			mode := fi.Mode().Perm()
+			// 0640 (u=rw,g=r,o=) is standard and clean on Debian/Ubuntu/RHEL (root:shadow).
+			if (mode & 0002) != 0 {
+				findings = append(findings, report.Finding{
+					Timestamp: time.Now(),
+					Module:    "users",
+					Severity:  report.SeverityWarning,
+					Path:      shadowPath,
+					Reason:    fmt.Sprintf("/etc/shadow is world-writable (permissions: 0%o)", mode),
+					RuleName:  "Users_Shadow_World_Writable",
+					Count:     1,
+					Paths:     []string{shadowPath},
+					Metadata: map[string]interface{}{
+						"permissions": fmt.Sprintf("0%o", mode),
+						"score":       85,
+					},
+				})
+			} else if (mode & 0004) != 0 {
+				findings = append(findings, report.Finding{
+					Timestamp: time.Now(),
+					Module:    "users",
+					Severity:  report.SeverityWarning,
+					Path:      shadowPath,
+					Reason:    fmt.Sprintf("/etc/shadow is world-readable (permissions: 0%o)", mode),
+					RuleName:  "Users_Shadow_Insecure_Permissions",
+					Count:     1,
+					Paths:     []string{shadowPath},
+					Metadata: map[string]interface{}{
+						"permissions": fmt.Sprintf("0%o", mode),
+						"score":       85,
+					},
+				})
+			}
 		}
 	}
 
@@ -113,12 +106,7 @@ func CheckGroups(rootFS string, cfg *config.Config, cov *UsersCoverage) []report
 	var findings []report.Finding
 
 	groupPath := "/etc/group"
-	hostGroup := groupPath
-	if rootFS != "" {
-		hostGroup = filepath.Join(rootFS, "etc/group")
-	}
-
-	data, err := safeopen.ReadFileReadOnly(hostGroup, 1024*1024)
+	data, err := safeopen.ReadFileReadOnlyUnderRoot(rootFS, groupPath, 1024*1024)
 	if err != nil {
 		return findings
 	}

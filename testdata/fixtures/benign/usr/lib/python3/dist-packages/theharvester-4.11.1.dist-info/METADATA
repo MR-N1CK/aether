@@ -1,0 +1,12 @@
+Metadata-Version: 2.1
+Name: theHarvester
+Version: 4.11.1
+Summary: E-mail, subdomain and people names harvester
+Description-Content-Type: text/x-rst
+
+theHarvester
+============
+
+Setup instructions:
+::
+    curl -sSL https://raw.githubusercontent.com/laramies/theHarvester/master/setup.sh | sh

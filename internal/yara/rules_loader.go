@@ -38,9 +38,15 @@ const (
 )
 
 // ValidateRulesDirTrust enforces strict multi-user directory ownership and permission constraints:
-// - As root (euid 0), load ONLY /etc/aether/rules and explicit --rules-dir (never user home rules).
+// - If trustRulesDir is true: explicitly bypasses all trust checks (e.g. for development/testing).
+// - As root (euid 0), verifies directory and all parent directories up to / are root-owned (UID 0)
+//   and not group- or world-writable (perm & 0022 == 0).
 // - As non-root, user rules dirs must be owned by the user (or root) and NOT group/world-writable.
-func ValidateRulesDirTrust(dir string, isRoot bool, currentUID uint32) (bool, string) {
+func ValidateRulesDirTrust(dir string, isRoot bool, currentUID uint32, trustRulesDir bool) (bool, string) {
+	if trustRulesDir {
+		return true, ""
+	}
+
 	cleanDir := filepath.Clean(dir)
 	fi, err := os.Stat(cleanDir)
 	if err != nil {
@@ -57,9 +63,10 @@ func ValidateRulesDirTrust(dir string, isRoot bool, currentUID uint32) (bool, st
 	}
 
 	if isRoot {
-		// Root must never trust user home directories
-		if strings.HasPrefix(cleanDir, "/home/") || strings.HasPrefix(cleanDir, "/home") {
-			return false, fmt.Sprintf("root execution ignores user-controlled rules directory: %s", cleanDir)
+		// Root: rules directory and all parent directories up to / must be root-owned (UID 0)
+		// and not group- or world-writable (perm & 0022 == 0).
+		if trusted, reason := VerifyRootOwnedPath(cleanDir, nil, nil); !trusted {
+			return false, fmt.Sprintf("rules directory %s is not in a secure root-owned path: %s", cleanDir, reason)
 		}
 		return true, ""
 	}
@@ -79,8 +86,8 @@ func ValidateRulesDirTrust(dir string, isRoot bool, currentUID uint32) (bool, st
 }
 
 // DiscoverRuleFiles searches configured rule directories for *.yar and *.yara files.
-// Untrusted directories are rejected with a single warning.
-func DiscoverRuleFiles(dirs []string, isRoot bool, currentUID uint32, logger *slog.Logger) ([]string, []string) {
+// Untrusted directories are rejected with a single warning unless trustRulesDir is enabled.
+func DiscoverRuleFiles(dirs []string, isRoot bool, currentUID uint32, trustRulesDir bool, logger *slog.Logger) ([]string, []string) {
 	var ruleFiles []string
 	var warnings []string
 	seen := make(map[string]bool)
@@ -99,7 +106,7 @@ func DiscoverRuleFiles(dirs []string, isRoot bool, currentUID uint32, logger *sl
 			continue
 		}
 
-		trusted, reason := ValidateRulesDirTrust(cleanDir, isRoot, currentUID)
+		trusted, reason := ValidateRulesDirTrust(cleanDir, isRoot, currentUID, trustRulesDir)
 		if !trusted {
 			msg := fmt.Sprintf("skipping untrusted rules directory %s: %s", cleanDir, reason)
 			warnings = append(warnings, msg)

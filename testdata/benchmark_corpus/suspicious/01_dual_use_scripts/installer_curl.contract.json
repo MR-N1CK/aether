@@ -1,0 +1,14 @@
+{
+  "id": "SUSP-DUAL-001",
+  "name": "Standalone Curl Pipe Shell Installer Script",
+  "category": "SUSPICIOUS",
+  "subcategory": "dual_use_scripts",
+  "target_path": "installer_curl.sh",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SUSPICIOUS",
+    "allowed_severities": ["WARNING"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "MEDIUM"
+  }
+}

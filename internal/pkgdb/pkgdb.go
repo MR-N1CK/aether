@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"aether/internal/safeopen"
 )
 
 // PackageDB abstracts package ownership lookups across Linux distributions.
@@ -73,10 +75,14 @@ func NormalizePath(p string) string {
 
 // resolve translates a virtual absolute path to the corresponding path under rootFS.
 func (d *DB) resolve(subPath string) string {
-	if d.rootFS == "" || d.rootFS == "/" {
-		return "/" + strings.TrimPrefix(subPath, "/")
+	hostPath, _, _, err := safeopen.ResolveUnderRoot(d.rootFS, subPath)
+	if err != nil {
+		if d.rootFS == "" || d.rootFS == "/" {
+			return "/" + strings.TrimPrefix(subPath, "/")
+		}
+		return filepath.Join(d.rootFS, strings.TrimPrefix(subPath, "/"))
 	}
-	return filepath.Join(d.rootFS, strings.TrimPrefix(subPath, "/"))
+	return hostPath
 }
 
 // init loads the package database once in a thread-safe manner.

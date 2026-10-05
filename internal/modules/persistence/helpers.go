@@ -57,7 +57,8 @@ var (
 	reToken    = regexp.MustCompile(`(?i)(token|bearer)\s*=\s*[^\s;&]+`)
 	reSecret   = regexp.MustCompile(`(?i)(secret|api_key|apikey)\s*=\s*[^\s;&]+`)
 	reCurlAuth = regexp.MustCompile(`(?i)(curl|wget)[^;\n]*\s+-u\s+([^\s;&]+)`)
-	reSSHKey   = regexp.MustCompile(`(?i)(-i\s*)[^\s;&]+`)
+	reSSHKey   = regexp.MustCompile(`(?i)(^|\s)(-i\s+)[^\s;&]+`)
+	reSSHCommand = regexp.MustCompile(`(?i)\b(ssh|scp|sftp|rsync|autossh)\b`)
 )
 
 // RedactSnippet truncates snippet to 200 characters and redacts credentials and key paths.
@@ -69,7 +70,9 @@ func RedactSnippet(s string) string {
 	s = reToken.ReplaceAllString(s, "$1=[REDACTED]")
 	s = reSecret.ReplaceAllString(s, "$1=[REDACTED]")
 	s = reCurlAuth.ReplaceAllString(s, "$1 ... -u [REDACTED]")
-	s = reSSHKey.ReplaceAllString(s, "$1[REDACTED_KEY]")
+	if reSSHCommand.MatchString(s) {
+		s = reSSHKey.ReplaceAllString(s, "$1$2[REDACTED_KEY]")
+	}
 
 	// Truncate to 200 characters
 	if len(s) > 200 {
@@ -150,6 +153,75 @@ func tokenizeShellCommand(s string) []string {
 	return tokens
 }
 
+func isPseudoFile(p string) bool {
+	clean := filepath.Clean(strings.TrimSpace(p))
+	if clean == "/dev/null" || clean == "/dev/zero" || clean == "/dev/tty" ||
+		clean == "/dev/stdin" || clean == "/dev/stdout" || clean == "/dev/stderr" ||
+		clean == "/dev/random" || clean == "/dev/urandom" {
+		return true
+	}
+	if strings.HasPrefix(clean, "/dev/fd/") || strings.HasPrefix(clean, "/dev/pts/") ||
+		strings.HasPrefix(clean, "/dev/tcp/") || strings.HasPrefix(clean, "/dev/udp/") ||
+		strings.HasPrefix(clean, "/proc/") || strings.HasPrefix(clean, "/sys/") {
+		return true
+	}
+	return false
+}
+
+func isRedirectionOperator(tok string) bool {
+	switch tok {
+	case ">", ">>", "<", "<<", "<<<",
+		"1>", "1>>", "2>", "2>>", "0<", "0<<", "0<<<",
+		"&>", "&>>", ">&", "<&":
+		return true
+	}
+	if len(tok) >= 2 && tok[0] >= '0' && tok[0] <= '9' {
+		sub := tok[1:]
+		if sub == ">" || sub == ">>" || sub == "<" || sub == "<<" || sub == "<<<" || sub == ">&" || sub == "<&" {
+			return true
+		}
+	}
+	return false
+}
+
+func isAttachedRedirection(tok string) bool {
+	if isRedirectionOperator(tok) {
+		return false
+	}
+	if strings.HasPrefix(tok, ">&") || strings.HasPrefix(tok, "&>") || strings.HasPrefix(tok, "&>>") || strings.HasPrefix(tok, "<&") {
+		return true
+	}
+	if strings.HasPrefix(tok, ">") || strings.HasPrefix(tok, ">>") ||
+		strings.HasPrefix(tok, "<") || strings.HasPrefix(tok, "<<") || strings.HasPrefix(tok, "<<<") {
+		return true
+	}
+	if len(tok) >= 2 && tok[0] >= '0' && tok[0] <= '9' {
+		sub := tok[1:]
+		if strings.HasPrefix(sub, ">") || strings.HasPrefix(sub, "<") {
+			return true
+		}
+	}
+	return false
+}
+
+func stripRedirections(tokens []string) []string {
+	var clean []string
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		if isRedirectionOperator(tok) {
+			if i+1 < len(tokens) {
+				i++
+			}
+			continue
+		}
+		if isAttachedRedirection(tok) {
+			continue
+		}
+		clean = append(clean, tok)
+	}
+	return clean
+}
+
 func splitCommandOperators(s string) (commands []string, subshells []string) {
 	var cur strings.Builder
 	inSingle := false
@@ -216,10 +288,37 @@ func splitCommandOperators(s string) (commands []string, subshells []string) {
 				}
 				continue
 			}
-			if ch == '&' || ch == '|' {
-				if i+1 < len(s) && (s[i+1] == '&' || s[i+1] == '|') {
+			if ch == '|' {
+				if i+1 < len(s) && (s[i+1] == '|' || s[i+1] == '&') {
 					i++
 				}
+				if strings.TrimSpace(cur.String()) != "" {
+					commands = append(commands, cur.String())
+					cur.Reset()
+				}
+				continue
+			}
+			if ch == '&' {
+				if i+1 < len(s) && s[i+1] == '&' {
+					i++
+					if strings.TrimSpace(cur.String()) != "" {
+						commands = append(commands, cur.String())
+						cur.Reset()
+					}
+					continue
+				}
+				// Do not split if part of &> or &>>
+				if i+1 < len(s) && s[i+1] == '>' {
+					cur.WriteByte(ch)
+					continue
+				}
+				// Do not split if preceded by > or < (e.g. >&, <&, 2>&1)
+				curStr := cur.String()
+				if len(curStr) > 0 && (curStr[len(curStr)-1] == '>' || curStr[len(curStr)-1] == '<') {
+					cur.WriteByte(ch)
+					continue
+				}
+				// Standalone background &
 				if strings.TrimSpace(cur.String()) != "" {
 					commands = append(commands, cur.String())
 					cur.Reset()
@@ -246,14 +345,14 @@ func ExtractExecTargets(cmd string) (execTargets []string, sourcedFiles []string
 
 	addExec := func(p string) {
 		p = strings.TrimSpace(p)
-		if p != "" && !seenExec[p] {
+		if p != "" && !isPseudoFile(p) && !seenExec[p] {
 			seenExec[p] = true
 			execTargets = append(execTargets, p)
 		}
 	}
 	addSource := func(p string) {
 		p = strings.TrimSpace(p)
-		if p != "" && !seenSource[p] {
+		if p != "" && !isPseudoFile(p) && !seenSource[p] {
 			seenSource[p] = true
 			sourcedFiles = append(sourcedFiles, p)
 		}
@@ -267,7 +366,8 @@ func ExtractExecTargets(cmd string) (execTargets []string, sourcedFiles []string
 		}
 
 		for _, cStr := range commands {
-			tokens := tokenizeShellCommand(cStr)
+			rawTokens := tokenizeShellCommand(cStr)
+			tokens := stripRedirections(rawTokens)
 			if len(tokens) == 0 {
 				continue
 			}
@@ -289,6 +389,21 @@ func ExtractExecTargets(cmd string) (execTargets []string, sourcedFiles []string
 				if len(tokens) == 0 {
 					continue
 				}
+			}
+
+			// Filter shell keywords and compound command markers
+			for len(tokens) > 0 {
+				tok := tokens[0]
+				if tok == "if" || tok == "then" || tok == "else" || tok == "elif" ||
+					tok == "fi" || tok == "do" || tok == "done" || tok == "{" ||
+					tok == "}" || tok == "!" || tok == "time" {
+					tokens = tokens[1:]
+					continue
+				}
+				break
+			}
+			if len(tokens) == 0 {
+				continue
 			}
 
 			// Unwrap wrappers
@@ -395,18 +510,11 @@ func ExtractExecTargets(cmd string) (execTargets []string, sourcedFiles []string
 			addExec(cmdName)
 
 			base := filepath.Base(cmdName)
-			isInterpreter := false
+			isInterpreter := isInterpreterOrShell(base)
 			isShell := false
 			switch base {
 			case "sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh":
-				isInterpreter = true
 				isShell = true
-			case "perl", "perl5", "node", "nodejs", "ruby":
-				isInterpreter = true
-			default:
-				if strings.HasPrefix(base, "python") {
-					isInterpreter = true
-				}
 			}
 
 			if isInterpreter && len(tokens) > 1 {
@@ -424,7 +532,7 @@ func ExtractExecTargets(cmd string) (execTargets []string, sourcedFiles []string
 					if strings.HasPrefix(arg, "-") {
 						continue
 					}
-					if strings.HasPrefix(arg, ">") || strings.HasPrefix(arg, "<") {
+					if isRedirectionOperator(arg) || isAttachedRedirection(arg) {
 						continue
 					}
 					// First non-option script argument
@@ -439,9 +547,98 @@ func ExtractExecTargets(cmd string) (execTargets []string, sourcedFiles []string
 	return execTargets, sourcedFiles
 }
 
+func isInterpreterOrShell(name string) bool {
+	base := filepath.Base(name)
+	switch base {
+	case "sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh",
+		"perl", "perl5", "node", "nodejs", "ruby", "env":
+		return true
+	}
+	if strings.HasPrefix(base, "python") {
+		return true
+	}
+	return false
+}
+
+var reShellParamDefault = regexp.MustCompile(`\$\{([a-zA-Z_][a-zA-Z0-9_]*):-([^}]+)\}`)
+
+func normalizeShellPath(target string) string {
+	target = strings.Trim(target, `"'`)
+	// Replace ${VAR:-DEFAULT} with DEFAULT
+	target = reShellParamDefault.ReplaceAllString(target, "$2")
+	// Replace known XDG and home variables
+	target = strings.ReplaceAll(target, "$XDG_CONFIG_HOME", "$HOME/.config")
+	target = strings.ReplaceAll(target, "${XDG_CONFIG_HOME}", "$HOME/.config")
+	target = strings.ReplaceAll(target, "$XDG_CACHE_HOME", "$HOME/.cache")
+	target = strings.ReplaceAll(target, "${XDG_CACHE_HOME}", "$HOME/.cache")
+	target = strings.ReplaceAll(target, "$XDG_DATA_HOME", "$HOME/.local/share")
+	target = strings.ReplaceAll(target, "${XDG_DATA_HOME}", "$HOME/.local/share")
+	return target
+}
+
+func analyzeHiddenPath(target string, wellKnownHidden []string) (hasUnknownHiddenDir bool, hasHiddenNoExtBinary bool, isCacheOnly bool, cleanPath string) {
+	norm := normalizeShellPath(target)
+	clean := filepath.Clean(norm)
+	base := filepath.Base(clean)
+	dir := filepath.Dir(clean)
+
+	// Standard exempt dotfiles
+	switch base {
+	case ".bashrc", ".profile", ".zshrc", ".bash_profile", ".bash_logout", ".bash_aliases", ".dircolors", ".bash_completion", ".gitconfig", ".vimrc":
+		return false, false, false, clean
+	}
+
+	// Check base filename: dot-prefixed with no extension is suspicious
+	if strings.HasPrefix(base, ".") && base != "." && base != ".." {
+		if filepath.Ext(base) == "" {
+			hasHiddenNoExtBinary = true
+		}
+	}
+
+	// Check directory segments
+	parts := strings.Split(dir, "/")
+	hasCache := false
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			continue
+		}
+		if strings.HasPrefix(part, ".") {
+			isWk := false
+			for _, wk := range wellKnownHidden {
+				if part == wk {
+					isWk = true
+					if part == ".cache" || part == ".npm" {
+						hasCache = true
+					}
+					break
+				}
+			}
+			if !isWk {
+				hasUnknownHiddenDir = true
+			}
+		}
+	}
+
+	if hasCache && !hasUnknownHiddenDir && !hasHiddenNoExtBinary {
+		isCacheOnly = true
+	}
+
+	return hasUnknownHiddenDir, hasHiddenNoExtBinary, isCacheOnly, clean
+}
+
 func extractHomeDotDir(target string) string {
-	clean := filepath.Clean(target)
-	if strings.HasPrefix(clean, "~/") {
+	clean := filepath.Clean(normalizeShellPath(target))
+	if strings.HasPrefix(clean, "$HOME/") {
+		parts := strings.Split(strings.TrimPrefix(clean, "$HOME/"), "/")
+		if len(parts) > 0 && strings.HasPrefix(parts[0], ".") {
+			return parts[0]
+		}
+	} else if strings.HasPrefix(clean, "${HOME}/") {
+		parts := strings.Split(strings.TrimPrefix(clean, "${HOME}/"), "/")
+		if len(parts) > 0 && strings.HasPrefix(parts[0], ".") {
+			return parts[0]
+		}
+	} else if strings.HasPrefix(clean, "~/") {
 		parts := strings.Split(strings.TrimPrefix(clean, "~/"), "/")
 		if len(parts) > 0 && strings.HasPrefix(parts[0], ".") {
 			return parts[0]
@@ -458,6 +655,79 @@ func extractHomeDotDir(target string) string {
 		}
 	}
 	return ""
+}
+
+var (
+	reGuardBracket  = regexp.MustCompile(`\[{1,2}\s+-[xfe]\s+["']?([^"'\s\]]+)["']?`)
+	reGuardTest     = regexp.MustCompile(`\btest\s+-[xfe]\s+["']?([^"'\s;&|)]+)["']?`)
+	reGuardCommandV = regexp.MustCompile(`\bcommand\s+-v\s+["']?([^"'\s;&|)]+)["']?`)
+	reGuardType     = regexp.MustCompile(`\btype\s+(?:-P\s+|-[a-zA-Z]*P[a-zA-Z]*\s+)?["']?([^"'\s;&|)]+)["']?`)
+	reGuardWhich    = regexp.MustCompile(`\bwhich\s+["']?([^"'\s;&|)]+)["']?`)
+)
+
+// ExtractGuardedPaths inspects a script or file content and extracts paths tested in conditional guards.
+func ExtractGuardedPaths(content string) map[string]bool {
+	guards := make(map[string]bool)
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		p = strings.Trim(p, `"'`)
+		if p != "" && !strings.HasPrefix(p, "$") {
+			guards[p] = true
+			clean := filepath.Clean(p)
+			guards[clean] = true
+			base := filepath.Base(clean)
+			if base != "" && base != "." && base != "/" {
+				guards[base] = true
+			}
+		}
+	}
+
+	for _, m := range reGuardBracket.FindAllStringSubmatch(content, -1) {
+		if len(m) > 1 {
+			add(m[1])
+		}
+	}
+	for _, m := range reGuardTest.FindAllStringSubmatch(content, -1) {
+		if len(m) > 1 {
+			add(m[1])
+		}
+	}
+	for _, m := range reGuardCommandV.FindAllStringSubmatch(content, -1) {
+		if len(m) > 1 {
+			add(m[1])
+		}
+	}
+	for _, m := range reGuardType.FindAllStringSubmatch(content, -1) {
+		if len(m) > 1 {
+			add(m[1])
+		}
+	}
+	for _, m := range reGuardWhich.FindAllStringSubmatch(content, -1) {
+		if len(m) > 1 {
+			add(m[1])
+		}
+	}
+
+	return guards
+}
+
+func isPathInGuards(target string, guards map[string]bool) bool {
+	if len(guards) == 0 {
+		return false
+	}
+	cleanTarget := filepath.Clean(target)
+	baseTarget := filepath.Base(cleanTarget)
+	return guards[target] || guards[cleanTarget] || guards[baseTarget]
+}
+
+func isTargetSuspiciousLocation(target string) bool {
+	if strings.Contains(target, "/.") || strings.HasPrefix(filepath.Base(target), ".") {
+		return true
+	}
+	if strings.HasPrefix(target, "/tmp/") || strings.HasPrefix(target, "/var/tmp/") || strings.HasPrefix(target, "/dev/shm/") {
+		return true
+	}
+	return false
 }
 
 // isTargetGuarded checks if target is guarded by test -x/-f/-e, [ -x/-f/-e ... ], or command -v.
@@ -498,11 +768,44 @@ func isTargetGuarded(line, target string) bool {
 		return true
 	}
 
+	// 4. type -P / type <target>
+	reType := regexp.MustCompile(fmt.Sprintf(`\btype\s+(?:-P\s+|-[a-zA-Z]*P[a-zA-Z]*\s+)?["']?(?:%s|%s)["']?(?:\s|[;&|)]|$)`, targetPattern, escapedBase))
+	if reType.MatchString(line) {
+		return true
+	}
+
+	// 5. which <target>
+	reWhich := regexp.MustCompile(fmt.Sprintf(`\bwhich\s+["']?(?:%s|%s)["']?(?:\s|[;&|)]|$)`, targetPattern, escapedBase))
+	if reWhich.MatchString(line) {
+		return true
+	}
+
 	return false
 }
 
+// dedupeSlice removes duplicate and empty entries from a slice of strings.
+func dedupeSlice(slice []string) []string {
+	if len(slice) == 0 {
+		return slice
+	}
+	seen := make(map[string]bool, len(slice))
+	var res []string
+	for _, s := range slice {
+		s = strings.TrimSpace(s)
+		if s != "" && !seen[s] {
+			seen[s] = true
+			res = append(res, s)
+		}
+	}
+	return res
+}
+
 // CheckSuspiciousCommand inspects a shell command string for threat primitives.
-func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS string, isSystemContext bool, pkgDB pkgdb.PackageDB) []*PersistenceSignal {
+func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS string, isSystemContext bool, pkgDB pkgdb.PackageDB, fileGuardsOpt ...map[string]bool) []*PersistenceSignal {
+	var fileGuards map[string]bool
+	if len(fileGuardsOpt) > 0 {
+		fileGuards = fileGuardsOpt[0]
+	}
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 		return nil
@@ -766,33 +1069,36 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 		wellKnownHidden = config.DefaultHomeWellKnownHiddenDirs
 	}
 
-	for _, target := range allTargets {
-		if strings.Contains(target, "/.") && !strings.Contains(target, "/..") {
-			base := filepath.Base(target)
-			if base == ".bashrc" || base == ".profile" || base == ".zshrc" || base == ".bash_profile" ||
-				base == ".bash_logout" || base == ".bash_aliases" || base == ".dircolors" {
+	for _, rawTarget := range allTargets {
+		normTarget := normalizeShellPath(rawTarget)
+		if strings.Contains(normTarget, "/.") && !strings.Contains(normTarget, "/..") {
+			hasUnknownHiddenDir, hasHiddenNoExtBinary, isCacheOnly, clean := analyzeHiddenPath(normTarget, wellKnownHidden)
+
+			if !hasUnknownHiddenDir && !hasHiddenNoExtBinary {
+				if isCacheOnly {
+					signals = append(signals, &PersistenceSignal{
+						Class:       ClassExecFromTemp,
+						RuleName:    "Persistence_Exec_From_Home_Cache_Path",
+						Reason:      fmt.Sprintf("Executes script or binary from user cache directory (%s)", rawTarget),
+						Score:       10,
+						Severity:    report.SeverityInfo,
+						IsStrong:    false,
+						LineNumber:  lineNum,
+						Snippet:     redacted,
+					})
+				}
 				continue
 			}
 
-			isHome := strings.HasPrefix(target, "/home/") || strings.HasPrefix(target, "/root/") || strings.HasPrefix(target, "~/")
-			if isHome {
-				dotDir := extractHomeDotDir(target)
-				isWellKnown := false
-				for _, wk := range wellKnownHidden {
-					if dotDir == wk {
-						isWellKnown = true
-						break
-					}
-				}
-				if isWellKnown {
-					continue
-				}
+			base := filepath.Base(clean)
+			isHome := strings.HasPrefix(clean, "/home/") || strings.HasPrefix(clean, "/root/") || strings.HasPrefix(clean, "~/") || strings.HasPrefix(clean, "$HOME/") || strings.HasPrefix(clean, "${HOME}/")
 
+			if isHome {
 				if isSystemContext {
 					signals = append(signals, &PersistenceSignal{
 						Class:       ClassExecFromTemp,
 						RuleName:    "Persistence_System_Exec_User_Hidden_Path",
-						Reason:      fmt.Sprintf("System file executes or sources user hidden home path (%s)", target),
+						Reason:      fmt.Sprintf("System file executes or sources user hidden home path (%s)", rawTarget),
 						Score:       70,
 						Severity:    report.SeverityWarning,
 						IsStrong:    true,
@@ -803,7 +1109,7 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 					signals = append(signals, &PersistenceSignal{
 						Class:       ClassExecFromTemp,
 						RuleName:    "Persistence_Exec_From_Home_Hidden_Path",
-						Reason:      fmt.Sprintf("Executes script or tool from hidden directory in user home (%s)", target),
+						Reason:      fmt.Sprintf("Executes script or tool from hidden directory in user home (%s)", rawTarget),
 						Score:       25,
 						Severity:    report.SeverityNotice,
 						IsStrong:    false,
@@ -811,12 +1117,26 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 						Snippet:     redacted,
 					})
 				}
-			} else if strings.HasPrefix(target, "/var") || strings.HasPrefix(target, "/run") || strings.HasPrefix(target, "/dev") ||
-				strings.HasPrefix(target, "/srv") || strings.HasPrefix(target, "/mnt") || strings.HasPrefix(target, "/opt") || strings.HasPrefix(target, "/etc") {
+			} else {
+				// System path outside home (/usr, /lib, /etc, /var, /opt, /dev, /run, /srv, etc.)
+				isSystemHiddenTree := strings.HasPrefix(clean, "/usr/") || strings.HasPrefix(clean, "/lib") || strings.HasPrefix(clean, "/etc/")
+				if !isSystemHiddenTree && strings.Contains(clean, "/.venv/") {
+					// Check benign virtualenv under /opt or /srv
+					hostTarget := clean
+					if rootFS != "" && strings.HasPrefix(clean, "/") {
+						hostTarget = filepath.Join(rootFS, strings.TrimPrefix(clean, "/"))
+					}
+					if st, err := os.Stat(hostTarget); err == nil {
+						if (st.Mode()&0002) == 0 && !strings.HasPrefix(base, ".") {
+							continue
+						}
+					}
+				}
+
 				signals = append(signals, &PersistenceSignal{
 					Class:       ClassExecFromTemp,
 					RuleName:    "Persistence_Exec_From_Hidden_Path",
-					Reason:      fmt.Sprintf("Executes binary or script from hidden path (%s)", target),
+					Reason:      fmt.Sprintf("Executes binary or script from hidden path (%s)", rawTarget),
 					Score:       70,
 					Severity:    report.SeverityWarning,
 					IsStrong:    true,
@@ -831,6 +1151,9 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 	for _, target := range allTargets {
 		if strings.HasPrefix(target, "/") {
 			if strings.ContainsAny(target, "*?[]|()$<>&;") {
+				continue
+			}
+			if isPseudoFile(target) {
 				continue
 			}
 			ext := strings.ToLower(filepath.Ext(target))
@@ -856,7 +1179,8 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 				hostTarget = filepath.Join(rootFS, strings.TrimPrefix(cleanTarget, "/"))
 			}
 			if _, err := os.Stat(hostTarget); errors.Is(err, os.ErrNotExist) {
-				if isTargetGuarded(trimmed, cleanTarget) {
+				guarded := isTargetGuarded(trimmed, cleanTarget) || isPathInGuards(cleanTarget, fileGuards)
+				if guarded && !isTargetSuspiciousLocation(cleanTarget) {
 					continue
 				}
 				signals = append(signals, &PersistenceSignal{
@@ -877,52 +1201,17 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 }
 
 // SafeResolveSymlink evaluates symlinks for virtualPath within rootFS, ensuring
+// SafeResolveSymlink evaluates symlinks for virtualPath within rootFS, ensuring
 // the target does not escape rootFS.
 func SafeResolveSymlink(rootFS, virtualPath string) (string, bool, error) {
-	cleanVirt := filepath.Clean(virtualPath)
-	hostPath := cleanVirt
-	if rootFS != "" {
-		hostPath = filepath.Join(rootFS, strings.TrimPrefix(cleanVirt, "/"))
-	}
-
-	lstat, err := os.Lstat(hostPath)
+	_, virtPath, isSym, err := safeopen.ResolveUnderRoot(rootFS, virtualPath)
 	if err != nil {
-		return cleanVirt, false, err
-	}
-
-	if (lstat.Mode() & os.ModeSymlink) == 0 {
-		return cleanVirt, false, nil
-	}
-
-	// It's a symlink; read target
-	target, err := os.Readlink(hostPath)
-	if err != nil {
-		return cleanVirt, true, err
-	}
-
-	var resolvedHost string
-	if filepath.IsAbs(target) {
-		if rootFS != "" {
-			resolvedHost = filepath.Join(rootFS, strings.TrimPrefix(target, "/"))
-		} else {
-			resolvedHost = target
+		if errors.Is(err, safeopen.ErrSymlinkEscapesRoot) {
+			return virtPath, true, ErrSymlinkEscapesRoot
 		}
-	} else {
-		resolvedHost = filepath.Join(filepath.Dir(hostPath), target)
+		return virtPath, isSym, err
 	}
-
-	// Verify containment within rootFS
-	cleanedHost := filepath.Clean(resolvedHost)
-	if rootFS != "" {
-		cleanRoot := filepath.Clean(rootFS)
-		if cleanedHost != cleanRoot && !strings.HasPrefix(cleanedHost, cleanRoot+string(filepath.Separator)) {
-			return cleanVirt, true, ErrSymlinkEscapesRoot
-		}
-		rel, _ := filepath.Rel(cleanRoot, cleanedHost)
-		return "/" + strings.TrimPrefix(rel, "/"), true, nil
-	}
-
-	return filepath.Clean(cleanedHost), true, nil
+	return virtPath, isSym, nil
 }
 
 // ResolveVirtualPath resolves symlinks in the directory hierarchy of virtPath within rootFS
@@ -933,12 +1222,7 @@ func ResolveVirtualPath(rootFS, virtPath string) string {
 	dir := filepath.Dir(cleanVirt)
 	base := filepath.Base(cleanVirt)
 
-	hostDir := dir
-	if rootFS != "" {
-		hostDir = filepath.Join(rootFS, strings.TrimPrefix(dir, "/"))
-	}
-
-	resolvedHostDir, err := filepath.EvalSymlinks(hostDir)
+	resolvedHostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, dir)
 	if err != nil {
 		return cleanVirt
 	}
@@ -964,18 +1248,23 @@ func ResolveVirtualPath(rootFS, virtPath string) string {
 // If the path is a symlink, it returns isSymlink = true.
 func SafeReadRegularFile(rootFS, virtualPath string, maxBytes int64) ([]byte, bool, error) {
 	cleanVirt := filepath.Clean(virtualPath)
-	hostPath := cleanVirt
-	if rootFS != "" {
-		hostPath = filepath.Join(rootFS, strings.TrimPrefix(cleanVirt, "/"))
+	hostPath, _, isSymlink, err := safeopen.ResolveUnderRoot(rootFS, cleanVirt)
+	if err != nil {
+		if errors.Is(err, safeopen.ErrSymlinkLoop) {
+			return nil, true, err
+		}
+		if errors.Is(err, safeopen.ErrSymlinkEscapesRoot) {
+			return nil, true, ErrSymlinkEscapesRoot
+		}
+		return nil, isSymlink, err
 	}
 
 	lstat, err := os.Lstat(hostPath)
 	if err != nil {
-		return nil, false, err
+		return nil, isSymlink, err
 	}
 
-	isSymlink := (lstat.Mode() & os.ModeSymlink) != 0
-	if isSymlink {
+	if (lstat.Mode() & os.ModeSymlink) != 0 {
 		return nil, true, nil
 	}
 
@@ -1001,9 +1290,16 @@ func SafeReadRegularFile(rootFS, virtualPath string, maxBytes int64) ([]byte, bo
 // System symlinks pointing into temp/home, world-writable, or non-root owned are WARNING (strong).
 func AssessSymlink(rootFS, virtPath string, pkgDB pkgdb.PackageDB, isUserControlled bool, userHome string, fileUID uint32) *PersistenceSignal {
 	cleanVirt := filepath.Clean(virtPath)
-	hostPath := cleanVirt
-	if rootFS != "" {
-		hostPath = filepath.Join(rootFS, strings.TrimPrefix(cleanVirt, "/"))
+	hostDir, _, _, dErr := safeopen.ResolveUnderRoot(rootFS, filepath.Dir(cleanVirt))
+	var hostPath string
+	if dErr == nil {
+		hostPath = filepath.Join(hostDir, filepath.Base(cleanVirt))
+	} else {
+		if rootFS != "" {
+			hostPath = filepath.Join(rootFS, strings.TrimPrefix(cleanVirt, "/"))
+		} else {
+			hostPath = cleanVirt
+		}
 	}
 
 	lst, err := os.Lstat(hostPath)
@@ -1047,13 +1343,13 @@ func AssessSymlink(rootFS, virtPath string, pkgDB pkgdb.PackageDB, isUserControl
 				rule = "Persistence_Systemd_Symlink_Escape"
 			}
 			return &PersistenceSignal{
-				Class:      ClassSymlinkHijack,
-				RuleName:   rule,
-				Reason:     fmt.Sprintf("Symlink target escapes root filesystem boundary (%s -> %s)", virtPath, target),
-				Score:      85,
-				Severity:   report.SeverityAlert,
-				IsStrong:   true,
-				Snippet:    target,
+				Class:    ClassSymlinkHijack,
+				RuleName: rule,
+				Reason:   fmt.Sprintf("Symlink target escapes root filesystem boundary (%s -> %s)", virtPath, target),
+				Score:    85,
+				Severity: report.SeverityAlert,
+				IsStrong: true,
+				Snippet:  target,
 			}
 		}
 	}
@@ -1334,6 +1630,9 @@ func ClassifyUnreadableReason(err error) string {
 	if err == nil {
 		return ""
 	}
+	if os.IsNotExist(err) || errors.Is(err, safeopen.ErrVanished) || errors.Is(err, os.ErrNotExist) {
+		return "does not exist"
+	}
 	if errors.Is(err, safeopen.ErrPermission) || os.IsPermission(err) {
 		return "permission denied"
 	}
@@ -1343,10 +1642,16 @@ func ClassifyUnreadableReason(err error) string {
 	if errors.Is(err, safeopen.ErrNotRegularFile) {
 		return "not regular"
 	}
-	if errors.Is(err, ErrSymlinkEscapesRoot) {
+	if errors.Is(err, ErrSymlinkEscapesRoot) || errors.Is(err, safeopen.ErrSymlinkEscapesRoot) {
 		return "symlink target refused"
 	}
+	if errors.Is(err, safeopen.ErrSymlinkLoop) {
+		return "symlink loop"
+	}
 	errStr := strings.ToLower(err.Error())
+	if strings.Contains(errStr, "no such file") || strings.Contains(errStr, "not exist") {
+		return "does not exist"
+	}
 	if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied") {
 		return "permission denied"
 	}

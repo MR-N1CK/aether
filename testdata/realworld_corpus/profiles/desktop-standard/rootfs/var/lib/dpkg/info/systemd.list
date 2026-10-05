@@ -1,0 +1,4 @@
+/lib/systemd/systemd-resolved
+/usr/bin/pulseaudio
+/usr/bin/pipewire
+/usr/bin/Xorg

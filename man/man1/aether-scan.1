@@ -1,0 +1,86 @@
+.TH AETHER-SCAN 1 "October 2026" "Aether 1.0.0" "User Commands"
+.SH NAME
+aether-scan \- execute threat hunting and anomaly detection scans
+.SH SYNOPSIS
+.B aether scan
+[\fB\-p\fR \fIPATH\fR...]
+[\fB\-\-quick\fR]
+[\fB\-\-full\fR]
+[\fB\-e\fR \fIEXCLUDE\fR...]
+[\fB\-\-max\-filesize\fR \fIBYTES\fR]
+[\fB\-\-json\-out\fR \fIPATH\fR]
+[\fB\-\-html\-out\fR \fIPATH\fR]
+[\fB\-\-no\-report\fR]
+[\fB\-\-redact\-hosts\fR]
+[\fB\-t\fR \fITHREADS\fR]
+[\fB\-\-nice\fR \fIPRIORITY\fR]
+.SH DESCRIPTION
+The \fBscan\fR subcommand initiates the Aether threat hunting engine over specified filesystem targets. It analyzes files, running processes, open network sockets, systemd services, cron jobs, PAM modules, shell profiles, and kernel modules for signs of compromise.
+.SH OPTIONS
+.TP
+.BI \-p ", " \-\-path " PATH"
+Target filesystem path to inspect (repeatable).
+.TP
+.B \-\-quick
+Perform rapid triage scan of high-risk operational directories (/tmp, /var/tmp, /dev/shm, user home directories, persistence hooks).
+.TP
+.B \-\-full
+Perform exhaustive deep scan of all mounted local partitions.
+.TP
+.BI \-e ", " \-\-exclude " PATH"
+Exclude path or prefix from inspection (repeatable).
+.TP
+.BI \-\-max\-filesize " BYTES"
+Maximum file size in bytes to inspect and hash (default: 52428800 [50MB]). Files exceeding this limit are safely skipped.
+.TP
+.BI \-\-json\-out " PATH"
+Write structured scan report to the specified file in JSON format.
+.TP
+.BI \-\-html\-out " PATH"
+Write self-contained executive HTML report with inline styling and charts.
+.TP
+.B \-\-no\-report
+Disable automatic HTML report generation.
+.TP
+.B \-\-redact\-hosts
+Sanitize hostnames, IP addresses, user names, and home directory paths from generated reports.
+.TP
+.BI \-t ", " \-\-threads " NUM"
+Number of concurrent worker threads (default: available CPU cores).
+.TP
+.BI \-\-nice " NUM"
+Set operating system process niceness (default: 0; background tasks recommended 19).
+.SH VERDICT SEMANTICS
+Aether classifies all findings into four explicit standardized verdict tiers:
+.TP
+.B MALICIOUS
+Confirmed high-severity threats (Score 85–100): reverse shells, ransomware lockers, credential dumpers, rootkit hooks, UID 0 backdoors, or memory code injection.
+.TP
+.B SUSPICIOUS
+Operational anomalies requiring investigation (Score 50–84): world-writable configuration files in /etc, unmapped listening sockets, dropper download pipes, suspicious SUID binaries, or persistence hooks.
+.TP
+.B SAFE
+Clean, verified assets and acknowledged baseline entries (Score 0–49).
+.TP
+.B UNKNOWN
+Inaccessible or unsupported objects (e.g., restricted permissions or broken devices).
+.SH EXECUTIVE STATUSES
+Every scan summary reports an overall executive system security posture:
+.TP
+.B SAFE
+Zero active threats or suspicious anomalies detected.
+.TP
+.B ATTENTION REQUIRED
+One or more suspicious anomalies detected (Warnings); investigation recommended.
+.TP
+.B HIGH RISK
+One or more confirmed malicious threats detected (Alerts); immediate containment required.
+.TP
+.B LIMITED VISIBILITY
+Scan executed with unprivileged permissions, skipping protected system areas.
+.SH DISCLAIMER
+Aether evaluates static heuristics and known malicious signatures. Detection of an anomaly does not constitute legal proof of compromise, nor does a clean scan guarantee absence of sophisticated, undocumented zero-day intrusions.
+.SH SEE ALSO
+\fBaether\fR(1), \fBaether-ack\fR(1), \fBaether-rules\fR(1)
+.SH AUTHORS
+Aether Security Engineering Team.

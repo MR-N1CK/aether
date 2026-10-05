@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AetherFinding",
+  "description": "Structured forensic finding output contract for Aether threat hunt scans",
+  "type": "object",
+  "required": [
+    "timestamp",
+    "module",
+    "severity",
+    "verdict",
+    "confidence",
+    "reason",
+    "path"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique finding identifier"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp of finding discovery"
+    },
+    "module": {
+      "type": "string",
+      "description": "Originating Aether inspection module (scanner, persistence, kernel, etc.)"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["CRITICAL", "ALERT", "HIGH", "MEDIUM", "WARNING", "LOW", "NOTICE", "INFO"],
+      "description": "Operational impact rating"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["MALICIOUS", "SUSPICIOUS", "SAFE", "UNKNOWN"],
+      "description": "Analytical threat verdict"
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["HIGH", "MEDIUM", "LOW"],
+      "description": "Evidence confidence level"
+    },
+    "title": {
+      "type": "string",
+      "description": "Human-readable finding title"
+    },
+    "path": {
+      "type": "string",
+      "description": "Primary filesystem path or inspected entity"
+    },
+    "line_number": {
+      "type": "integer",
+      "description": "Matching line number within text file (if applicable)"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Concise summary of detected behavior"
+    },
+    "rule_name": {
+      "type": "string",
+      "description": "Underlying heuristic or YARA signature rule name"
+    },
+    "why": {
+      "type": "string",
+      "description": "Plain-English explanation of threat danger"
+    },
+    "remediation": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Actionable incident containment steps"
+    },
+    "mitre": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tactic", "technique"],
+        "properties": {
+          "tactic": { "type": "string" },
+          "technique": { "type": "string" },
+          "technique_name": { "type": "string" }
+        }
+      }
+    },
+    "evidence_record": {
+      "type": "object",
+      "required": [
+        "detector_type",
+        "rule_name",
+        "target_path",
+        "package_status",
+        "context_profile",
+        "confidence_rationale"
+      ],
+      "properties": {
+        "detector_type": { "type": "string", "enum": ["heuristic", "yara", "ioc", "module"] },
+        "rule_name": { "type": "string" },
+        "evidence_strength": { "type": "string", "enum": ["DIRECT", "CORROBORATED", "CONTEXTUAL", "INCOMPLETE"] },
+        "matched_condition": { "type": "string" },
+        "line_content": { "type": "string" },
+        "line_number": { "type": "integer" },
+        "target_path": { "type": "string" },
+        "sha256": { "type": "string" },
+        "file_mode": { "type": "integer" },
+        "owner_uid": { "type": "integer" },
+        "package_name": { "type": "string" },
+        "package_status": { "type": "string", "enum": ["unowned", "verified_package", "modified_package"] },
+        "context_profile": { "type": "string", "enum": ["standard", "doc_metadata", "package_test", "build_tree"] },
+        "corroborating_signals": { "type": "array", "items": { "type": "string" } },
+        "contributing_detectors": { "type": "array", "items": { "type": "string" } },
+        "confidence_rationale": { "type": "string" }
+      }
+    },
+    "confidence_rationale": {
+      "type": "string",
+      "description": "Explanation of assigned confidence"
+    }
+  }
+}

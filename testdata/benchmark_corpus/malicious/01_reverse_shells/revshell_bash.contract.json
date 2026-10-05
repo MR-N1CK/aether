@@ -1,0 +1,17 @@
+{
+  "id": "MAL-REV-001",
+  "name": "Bash Interactive Reverse Shell",
+  "category": "MALICIOUS",
+  "subcategory": "reverse_shells",
+  "target_path": "revshell_bash.sh",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH",
+    "expected_rules": ["Script_Reverse_Shell_Interactive"],
+    "mitre_technique": "T1059.004",
+    "expected_rationale_contains": "malware"
+  }
+}

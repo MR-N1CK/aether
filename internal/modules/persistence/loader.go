@@ -13,6 +13,7 @@ import (
 	"aether/internal/ioc"
 	"aether/internal/pkgdb"
 	"aether/internal/report"
+	"aether/internal/safeopen"
 )
 
 // CheckLoader inspects dynamic linker preload and configuration hooks.
@@ -88,10 +89,7 @@ func inspectLDPreload(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, 
 		libs := strings.Fields(line)
 		for _, lib := range libs {
 			cleanLib := filepath.Clean(lib)
-			hostLib := cleanLib
-			if rootFS != "" {
-				hostLib = filepath.Join(rootFS, strings.TrimPrefix(cleanLib, "/"))
-			}
+			hostLib, _, _, err := safeopen.ResolveUnderRoot(rootFS, cleanLib)
 
 			// Check temp or hidden path -> ALERT
 			if strings.HasPrefix(cleanLib, "/tmp/") || strings.HasPrefix(cleanLib, "/var/tmp/") || strings.HasPrefix(cleanLib, "/dev/shm/") || strings.Contains(cleanLib, "/.") {
@@ -107,7 +105,17 @@ func inspectLDPreload(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, 
 			}
 
 			// Check if library file exists (missing library = WARNING, not ALERT alone)
-			if _, sErr := os.Stat(hostLib); os.IsNotExist(sErr) {
+			if err != nil || hostLib == "" {
+				signals = append(signals, &PersistenceSignal{
+					Class:      ClassMissingTarget,
+					RuleName:   "Persistence_Loader_Preload_Missing_Library",
+					Reason:     fmt.Sprintf("Preloaded library does not exist on disk: %s", cleanLib),
+					Score:      55,
+					Severity:   report.SeverityWarning,
+					LineNumber: lineNum,
+					Snippet:    cleanLib,
+				})
+			} else if _, sErr := os.Stat(hostLib); os.IsNotExist(sErr) {
 				signals = append(signals, &PersistenceSignal{
 					Class:      ClassMissingTarget,
 					RuleName:   "Persistence_Loader_Preload_Missing_Library",
@@ -151,14 +159,12 @@ func inspectLDSoConf(rootFS string, cfg *config.Config, cov *CheckCoverage, find
 	files := []string{"/etc/ld.so.conf"}
 
 	dDir := "/etc/ld.so.conf.d"
-	hostDDir := dDir
-	if rootFS != "" {
-		hostDDir = filepath.Join(rootFS, "etc/ld.so.conf.d")
-	}
-	if entries, err := os.ReadDir(hostDDir); err == nil {
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".conf") && !e.IsDir() {
-				files = append(files, filepath.Join(dDir, e.Name()))
+	if hostDDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, dDir); err == nil {
+		if entries, err := os.ReadDir(hostDDir); err == nil {
+			for _, e := range entries {
+				if strings.HasSuffix(e.Name(), ".conf") && !e.IsDir() {
+					files = append(files, filepath.Join(dDir, e.Name()))
+				}
 			}
 		}
 	}

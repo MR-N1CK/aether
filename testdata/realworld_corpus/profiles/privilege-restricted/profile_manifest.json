@@ -1,0 +1,22 @@
+{
+  "profile_id": "privilege-restricted",
+  "version": "1.0.0",
+  "expected_status": "LIMITED_VISIBILITY",
+  "max_acceptable_alerts": 0,
+  "max_acceptable_warnings": 2,
+  "forbidden_findings": [
+    {
+      "rule_pattern": "Ransomware_*",
+      "reason": "Privilege boundary test contains no ransomware"
+    },
+    {
+      "rule_pattern": "ReverseShell_*",
+      "reason": "Privilege boundary test contains no active reverse shell"
+    }
+  ],
+  "expected_coverage_limits": [
+    "SkippedPermission",
+    "UnreadablePaths",
+    "NonRootLimited"
+  ]
+}

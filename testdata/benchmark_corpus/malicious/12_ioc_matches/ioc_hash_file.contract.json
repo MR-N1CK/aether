@@ -1,0 +1,15 @@
+{
+  "id": "MAL-IOC-001",
+  "name": "Confirmed Cryptographic Threat IOC Match",
+  "category": "MALICIOUS",
+  "subcategory": "ioc_matches",
+  "target_path": "/tmp/ioc_payload.bin",
+  "file_mode": 493,
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH"
+  }
+}

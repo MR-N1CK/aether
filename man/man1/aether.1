@@ -1,0 +1,86 @@
+.TH AETHER 1 "October 2026" "Aether 1.0.0" "User Commands"
+.SH NAME
+aether \- high-assurance Linux threat hunter and forensic triage engine
+.SH SYNOPSIS
+.B aether
+[\fB\-\-config\fR \fIPATH\fR]
+[\fB\-\-verbose\fR]
+[\fB\-\-debug\fR]
+[\fB\-\-quiet\fR]
+[\fB\-\-plain\fR]
+[\fB\-\-no\-anim\fR]
+\fICOMMAND\fR [\fIOPTIONS\fR]
+.SH DESCRIPTION
+\fBAether\fR is an executive-grade, forensic-safe, read-only Linux threat hunting and anomaly detection platform. It performs deep static heuristic analysis, embedded YARA-X signature evaluation, runtime process/network correlation, persistence inspection, and package integrity verification across Linux endpoints and cloud infrastructure.
+.PP
+Aether strictly enforces static inspection invariants: it \fBNEVER\fR executes scanned target binaries or scripts, never mutates inspected files, and requires zero external network connectivity.
+.SH COMMANDS
+.TP
+.B scan
+Perform customizable threat hunting scan on specified paths or root filesystem. See \fBaether-scan\fR(1).
+.TP
+.B quick
+Execute rapid triage scan of high-risk operational directories (/tmp, /var/tmp, /dev/shm, user home directories, persistence hooks).
+.TP
+.B full
+Execute deep, exhaustive filesystem-wide threat hunt across all mounted local partitions.
+.TP
+.B setup
+Perform automated self-test, verify permissions, inspect kernel BPF/ptrace capabilities, and test rule loading.
+.TP
+.B ack
+Acknowledge and suppress benign operational anomalies using cryptographic hash pinning. See \fBaether-ack\fR(1).
+.TP
+.B rules
+Inspect, validate, and manage embedded and custom YARA rule sets. See \fBaether-rules\fR(1).
+.TP
+.B version
+Print version metadata, git commit, build date, Go runtime, OS/architecture, and active threat engine status.
+.SH GLOBAL OPTIONS
+.TP
+.BI \-c ", " \-\-config " PATH"
+Path to custom YAML configuration file (default: \fI/etc/aether/config.yaml\fR or \fI~/.config/aether/config.yaml\fR).
+.TP
+.B \-v ", " \-\-verbose
+Enable detailed verbose event logging.
+.TP
+.B \-d ", " \-\-debug
+Enable diagnostic debug logging to standard error.
+.TP
+.B \-q ", " \-\-quiet
+Suppress interactive dashboard; emit only summary results.
+.TP
+.B \-\-plain
+Force plain non-color, non-interactive ANSI output (suitable for headless servers and cron jobs).
+.TP
+.B \-\-no\-anim
+Disable terminal spinner and layout animations.
+.SH SECURITY & FORENSIC INVARIANTS
+.TP
+.B Read-Only Inspection
+Files are opened with \fBO_NOFOLLOW | O_CLOEXEC | O_NONBLOCK | O_NOATIME\fR to prevent symlink traversal attacks, FIFO pipe blocking, and access-time metadata contamination.
+.TP
+.B Zero Scanned Execution
+Threat evaluation uses strictly static AST parsing, ELF header inspection, regex heuristics, and compiled YARA-X pattern matching. No target payload is ever dynamically invoked.
+.TP
+.B Offline Integrity
+Aether operates 100% locally and contains zero telemetry, analytics, or remote network phone-home capabilities.
+.SH FILES
+.TP
+.I /etc/aether/config.yaml
+System-wide configuration file.
+.TP
+.I /etc/aether/rules/
+System-wide custom YARA rule directory.
+.TP
+.I /var/log/aether/
+Standard destination for audit reports and scan logs.
+.TP
+.I /etc/aether/acknowledged.yaml
+System-wide triage acknowledgment registry.
+.SH DISCLAIMER & CLAIM DISCIPLINE
+Aether is an automated security audit and threat hunting tool. While engineered for rigorous detection accuracy and zero false positives on known threat patterns, no automated software can guarantee detection of all novel, customized, or zero-day attacks. Threat hunting output must be evaluated in context with comprehensive defense-in-depth security practices.
+.SH SEE ALSO
+\fBaether-scan\fR(1), \fBaether-ack\fR(1), \fBaether-rules\fR(1)
+.SH AUTHORS
+Aether Security Engineering Team.

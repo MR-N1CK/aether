@@ -95,12 +95,15 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 	var allFindings []report.Finding
 
 	// 1. Two-pass hidden module inspection (/proc/modules vs /sys/module/*/initstate)
-	moduleFindings := CheckHiddenModules(ctx, m.procRoot, m.sysRoot, m.rootFS, m.testDelay, m.pkgDB, &cov, m.logger)
-	allFindings = append(allFindings, moduleFindings...)
+	// Skip live kernel inspection when scanning an offline root without explicit procRoot
+	if m.procRoot != "" || m.rootFS == "" {
+		moduleFindings := CheckHiddenModules(ctx, m.procRoot, m.sysRoot, m.rootFS, m.testDelay, m.pkgDB, &cov, m.logger)
+		allFindings = append(allFindings, moduleFindings...)
 
-	// 2. Taint bitmask decoding (/proc/sys/kernel/tainted)
-	taintFindings := CheckTainted(m.procRoot, &cov, m.logger)
-	allFindings = append(allFindings, taintFindings...)
+		// 2. Taint bitmask decoding (/proc/sys/kernel/tainted)
+		taintFindings := CheckTainted(m.procRoot, &cov, m.logger)
+		allFindings = append(allFindings, taintFindings...)
+	}
 
 	// 3. Modprobe install & softdep configuration hooks
 	modprobeFindings := CheckModprobe(ctx, m.rootFS, cfg, &cov, m.logger)

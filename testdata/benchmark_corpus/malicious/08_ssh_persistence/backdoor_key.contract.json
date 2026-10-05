@@ -1,0 +1,15 @@
+{
+  "id": "MAL-SSH-001",
+  "name": "Malicious Unauthorized SSH Key Injection",
+  "category": "MALICIOUS",
+  "subcategory": "ssh_persistence",
+  "target_path": "/root/.ssh/authorized_keys",
+  "file_mode": 384,
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT", "WARNING"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH"
+  }
+}

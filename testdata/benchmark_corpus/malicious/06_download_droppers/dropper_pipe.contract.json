@@ -1,0 +1,15 @@
+{
+  "id": "MAL-DROP-001",
+  "name": "Download Dropper with Autostart Persistence",
+  "category": "MALICIOUS",
+  "subcategory": "download_droppers",
+  "target_path": "dropper_pipe.sh",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT", "WARNING"],
+    "evidence_strength": "StrengthCorroborated",
+    "required_corroboration": ["persistence:*"],
+    "min_confidence": "HIGH"
+  }
+}

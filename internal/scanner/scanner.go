@@ -28,7 +28,9 @@ import (
 	"aether/internal/modules/persistence"
 	"aether/internal/modules/process"
 	"aether/internal/modules/users"
+	"aether/internal/pkgdb"
 	"aether/internal/report"
+	htmlreport "aether/internal/report/html"
 	"aether/internal/safeopen"
 	"aether/internal/triage"
 	"aether/internal/yara"
@@ -48,6 +50,7 @@ type Scanner struct {
 	reporter     report.Reporter
 	bus          *events.EventBus
 	iocEngine      ioc.Engine
+	pkgDB          pkgdb.PackageDB
 	yaraEngine     yara.Engine
 	modules        []modules.Module
 	accumulator    *findingAccumulator
@@ -55,11 +58,103 @@ type Scanner struct {
 	devRpath       bool
 	startupNotices []string
 	version        string
+	commit         string
 	buildDate      string
 	binaryName     string
 
+	executiveAssessmentFn func(findings []report.Finding, sf events.ScanFinished) (string, string, []htmlreport.RemediationAction, map[string]string)
+
 	// Hardlink deduplication cache: InodeKey -> *HashStreamResult
 	hashCache sync.Map
+}
+
+type workerSlot struct {
+	id         int
+	activePath string
+	startTime  time.Time
+	abandoned  atomic.Bool
+	doneCalled atomic.Bool
+}
+
+type workerPoolTracker struct {
+	mu           sync.Mutex
+	slots        map[int]*workerSlot
+	abandoned    int
+	lastProgress time.Time
+}
+
+func newWorkerPoolTracker() *workerPoolTracker {
+	return &workerPoolTracker{
+		slots:        make(map[int]*workerSlot),
+		lastProgress: time.Now(),
+	}
+}
+
+func (t *workerPoolTracker) registerSlot(id int) *workerSlot {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	slot := &workerSlot{id: id}
+	t.slots[id] = slot
+	return slot
+}
+
+func (t *workerPoolTracker) setActive(id int, path string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if slot, ok := t.slots[id]; ok {
+		slot.activePath = path
+		slot.startTime = time.Now()
+	}
+}
+
+func (t *workerPoolTracker) clearActive(id int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if slot, ok := t.slots[id]; ok {
+		slot.activePath = ""
+		slot.startTime = time.Time{}
+	}
+	t.lastProgress = time.Now()
+}
+
+func (t *workerPoolTracker) getActivePaths() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var paths []string
+	for _, slot := range t.slots {
+		if !slot.abandoned.Load() && slot.activePath != "" {
+			paths = append(paths, slot.activePath)
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func (t *workerPoolTracker) checkTimeouts(timeout time.Duration) []*workerSlot {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var stuck []*workerSlot
+	now := time.Now()
+	for _, slot := range t.slots {
+		if !slot.abandoned.Load() && slot.activePath != "" && !slot.startTime.IsZero() {
+			if now.Sub(slot.startTime) >= timeout {
+				stuck = append(stuck, slot)
+			}
+		}
+	}
+	return stuck
+}
+
+func isSwapFile(path string) bool {
+	base := strings.ToLower(filepath.Base(path))
+	if base == "swapfile" || strings.HasPrefix(base, "swapfile") {
+		return true
+	}
+	clean := filepath.Clean(path)
+	if clean == "/swap" || clean == "/swapfile" || strings.HasPrefix(clean, "/var/swap") {
+		return true
+	}
+	return false
 }
 
 type findingRuleKey struct {
@@ -75,9 +170,14 @@ type busReporter struct {
 	mu           sync.Mutex
 	findings     map[findingRuleKey]string // (path, rule) -> module
 	all          []report.Finding
+	redactHosts  bool
+	hostname     string
 }
 
 func (r *busReporter) Report(f report.Finding) {
+	if r.redactHosts {
+		report.RedactFinding(&f, r.hostname)
+	}
 	if r.triageEngine != nil {
 		r.triageEngine.Evaluate(&f, "")
 	}
@@ -286,12 +386,33 @@ func WithStartupNotices(notices []string) ScannerOption {
 	}
 }
 
-// WithBuildInfo configures version and binary metadata for scan lifecycle events.
-func WithBuildInfo(version, buildDate, binaryName string) ScannerOption {
+// WithPackageDB overrides the package database (for testing).
+func WithPackageDB(db pkgdb.PackageDB) ScannerOption {
+	return func(s *Scanner) {
+		s.pkgDB = db
+	}
+}
+
+// WithBuildInfo configures version, commit, buildDate, and binaryName metadata for scan lifecycle events.
+func WithBuildInfo(version string, info ...string) ScannerOption {
 	return func(s *Scanner) {
 		s.version = version
-		s.buildDate = buildDate
-		s.binaryName = binaryName
+		if len(info) == 2 {
+			s.buildDate = info[0]
+			s.binaryName = info[1]
+		} else if len(info) >= 3 {
+			s.commit = info[0]
+			s.buildDate = info[1]
+			s.binaryName = info[2]
+		}
+	}
+}
+
+// WithExecutiveAssessment registers a synthesizer callback that generates executive posture, rationale,
+// prioritized remediation actions, and duration timing for HTML and executive reports.
+func WithExecutiveAssessment(fn func(findings []report.Finding, sf events.ScanFinished) (string, string, []htmlreport.RemediationAction, map[string]string)) ScannerOption {
+	return func(s *Scanner) {
+		s.executiveAssessmentFn = fn
 	}
 }
 
@@ -322,11 +443,17 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 		iocEng = &ioc.RealEngine{}
 	}
 
+	rootFS := ""
+	cleanRoot := filepath.Clean(cfg.Scan.Root)
+	if cleanRoot != "" && cleanRoot != "/" {
+		rootFS = cleanRoot
+	}
+
 	procMod := process.NewModule(iocEng, bus, logger)
-	persistMod := persistence.NewModule(iocEng, bus, logger)
-	usersMod := users.NewModule(iocEng, bus, logger)
+	persistMod := persistence.NewModuleWithRoot(rootFS, iocEng, bus, logger)
+	usersMod := users.NewModuleWithRoot(rootFS, iocEng, bus, logger)
 	netMod := network.NewModule(iocEng, bus, logger)
-	kernelMod := kernel.NewModule(iocEng, bus, logger)
+	kernelMod := kernel.NewModuleWithRoots(rootFS, "", "", iocEng, bus, logger)
 
 	isCustom := cfg.Scan.ExplicitPaths || (len(cfg.Scan.Paths) > 0 && !slicesEqual(cfg.Scan.Paths, config.DefaultScanPaths()))
 	if cfg.Scan.Quick || cfg.Scan.Full {
@@ -362,6 +489,7 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 		reporter:     rep,
 		bus:          bus,
 		iocEngine:    iocEng,
+		pkgDB:        pkgdb.New(rootFS),
 		modules:      defaultMods,
 		accumulator:  newFindingAccumulator(cfg),
 		memoryBudget: NewMemoryBudget(cfg.Scan.MemoryBudgetBytes),
@@ -380,11 +508,13 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 		if cfg.Scan.RulesDir != "" {
 			rulesDirs = append(rulesDirs, cfg.Scan.RulesDir)
 		}
-		rulesDirs = append(rulesDirs, config.DefaultRulesDirs()...)
+		if !cfg.Scan.DemoRules {
+			rulesDirs = append(rulesDirs, config.DefaultRulesDirs()...)
+		}
 
 		isRoot := os.Geteuid() == 0
 		uid := uint32(os.Getuid())
-		ruleFiles, _ := yara.DiscoverRuleFiles(rulesDirs, isRoot, uid, logger)
+		ruleFiles, _ := yara.DiscoverRuleFiles(rulesDirs, isRoot, uid, cfg.Scan.TrustRulesDir, logger)
 		if err := yEng.LoadRules(ruleFiles); err != nil {
 			logger.Warn("failed loading YARA rules", slog.Any("error", err))
 		}
@@ -398,24 +528,39 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 // Explicit --path restrictions take precedence over QuickScanTargets.
 func (s *Scanner) ResolveTargets() []string {
 	var rawTargets []string
+	cleanRoot := filepath.Clean(s.cfg.Scan.Root)
+	isOffline := cleanRoot != "" && cleanRoot != "/"
 
 	if s.cfg.Scan.ExplicitPaths || (len(s.cfg.Scan.Paths) > 0 && !slicesEqual(s.cfg.Scan.Paths, config.DefaultScanPaths())) {
 		rawTargets = s.cfg.Scan.Paths
 	} else if s.cfg.Scan.Quick {
 		rawTargets = config.QuickScanTargets()
 	} else if s.cfg.Scan.Full {
-		rawTargets = []string{"/"}
+		if isOffline {
+			rawTargets = []string{cleanRoot}
+		} else {
+			rawTargets = []string{"/"}
+		}
 	} else {
-		rawTargets = s.cfg.Scan.Paths
+		if isOffline {
+			rawTargets = []string{cleanRoot}
+		} else {
+			rawTargets = s.cfg.Scan.Paths
+		}
 	}
 
 	var resolved []string
 	seen := make(map[string]bool)
 
 	for _, target := range rawTargets {
+		hostTarget := target
+		if isOffline && !strings.HasPrefix(target, cleanRoot) {
+			hostTarget = filepath.Join(cleanRoot, strings.TrimPrefix(target, "/"))
+		}
+
 		// Safely expand globs (e.g. /home/*/.ssh, /etc/cron*)
-		if strings.ContainsAny(target, "*?[") {
-			matches, err := filepath.Glob(target)
+		if strings.ContainsAny(hostTarget, "*?[") {
+			matches, err := filepath.Glob(hostTarget)
 			if err == nil {
 				for _, m := range matches {
 					cleaned := filepath.Clean(m)
@@ -426,7 +571,7 @@ func (s *Scanner) ResolveTargets() []string {
 				}
 			}
 		} else {
-			cleaned := filepath.Clean(target)
+			cleaned := filepath.Clean(hostTarget)
 			if _, err := os.Stat(cleaned); err == nil && !seen[cleaned] {
 				seen[cleaned] = true
 				resolved = append(resolved, cleaned)
@@ -521,14 +666,44 @@ func (s *Scanner) Run(ctx context.Context) error {
 		s.logger.Warn("failed to load acknowledgment engine", slog.String("error", err.Error()))
 	}
 
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "localhost"
+	}
+
 	// 1. Run registered threat-hunting modules
 	var modulesNotRun []string
-	moduleRep := &busReporter{bus: s.bus, triageEngine: triageEng}
+	var modulesFinishedList []events.ModuleFinished
+	moduleRep := &busReporter{
+		bus:          s.bus,
+		triageEngine: triageEng,
+		redactHosts:  s.cfg.Scan.RedactHosts,
+		hostname:     hostname,
+	}
+	cleanRoot := filepath.Clean(s.cfg.Scan.Root)
+	isOffline := cleanRoot != "" && cleanRoot != "/"
+
 	for _, mod := range s.modules {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+			if isOffline && (mod.Name() == "process" || mod.Name() == "network") {
+				status := "NOT APPLICABLE (offline mode)"
+				modulesNotRun = append(modulesNotRun, fmt.Sprintf("%s (not applicable in offline mode)", mod.Name()))
+				mf := events.ModuleFinished{
+					Time:           time.Now(),
+					ModuleName:     mod.Name(),
+					Duration:       0,
+					FindingsCount:  0,
+					InspectedCount: 0,
+					Status:         status,
+				}
+				modulesFinishedList = append(modulesFinishedList, mf)
+				s.bus.Publish(mf)
+				continue
+			}
+
 			modStart := time.Now()
 			s.logger.Debug("running hunting module", slog.String("module", mod.Name()))
 			s.bus.Publish(events.ModuleStarted{
@@ -545,6 +720,9 @@ func (s *Scanner) Run(ctx context.Context) error {
 			if errors.Is(err, modules.ErrNotImplemented) {
 				status = "NOT IMPLEMENTED"
 				modulesNotRun = append(modulesNotRun, fmt.Sprintf("%s (not implemented)", mod.Name()))
+			} else if errors.Is(err, modules.ErrNotApplicable) {
+				status = "NOT APPLICABLE (offline mode)"
+				modulesNotRun = append(modulesNotRun, fmt.Sprintf("%s (not applicable in offline mode)", mod.Name()))
 			} else if err != nil {
 				status = "FAILED"
 				modulesNotRun = append(modulesNotRun, fmt.Sprintf("%s (failed)", mod.Name()))
@@ -567,7 +745,7 @@ func (s *Scanner) Run(ctx context.Context) error {
 				inspectedCount = kMod.Coverage().LoadedModulesInspected
 			}
 
-			s.bus.Publish(events.ModuleFinished{
+			mf := events.ModuleFinished{
 				Time:           time.Now(),
 				ModuleName:     mod.Name(),
 				Duration:       time.Since(modStart),
@@ -575,7 +753,9 @@ func (s *Scanner) Run(ctx context.Context) error {
 				InspectedCount: inspectedCount,
 				Err:            err,
 				Status:         status,
-			})
+			}
+			modulesFinishedList = append(modulesFinishedList, mf)
+			s.bus.Publish(mf)
 		}
 	}
 
@@ -599,13 +779,16 @@ func (s *Scanner) Run(ctx context.Context) error {
 		}
 	}
 
-	var fsFindings []report.Finding
 	var (
-		dirMu          sync.Mutex
-		totalDirCounts = make(map[string]int64)
-		oversizeMu     sync.Mutex
-		oversizeFiles  []events.OversizeFile
-		walkErr        error
+		dirMu               sync.Mutex
+		totalDirCounts      = make(map[string]int64)
+		oversizeMu          sync.Mutex
+		oversizeFiles       []events.OversizeFile
+		hashedOversizeFiles []events.OversizeFile
+		walkErr             error
+		skippedTimeout      atomic.Int64
+		hashedOversize      atomic.Int64
+		fsFindings          []report.Finding
 	)
 
 	if runFS {
@@ -617,14 +800,21 @@ func (s *Scanner) Run(ctx context.Context) error {
 		})
 
 		fileChan := make(chan string, s.cfg.Scan.Threads*10)
+		tracker := newWorkerPoolTracker()
+		var wg sync.WaitGroup
 
-		// Worker pool for scanning files
+		var nextWorkerID atomic.Int64
+		nextWorkerID.Store(int64(s.cfg.Scan.Threads))
 
-	var wg sync.WaitGroup
-	for i := 0; i < s.cfg.Scan.Threads; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
+		var runWorker func(workerID int)
+		runWorker = func(workerID int) {
+			slot := tracker.registerSlot(workerID)
+			defer func() {
+				if slot.doneCalled.CompareAndSwap(false, true) {
+					wg.Done()
+				}
+			}()
+
 			yScanner := s.yaraEngine.NewScanner()
 			defer yScanner.Destroy()
 
@@ -642,8 +832,19 @@ func (s *Scanner) Run(ctx context.Context) error {
 				case <-ctx.Done():
 					return
 				default:
+					if slot.abandoned.Load() {
+						return
+					}
+
+					tracker.setActive(workerID, path)
 					fileStart := time.Now()
-					scanned, err := s.inspectFile(ctx, path, yScanner, &skippedSuppressed)
+					scanned, isHashedOversize, err := s.inspectFileWithOversize(ctx, path, yScanner, &skippedSuppressed)
+					tracker.clearActive(workerID)
+
+					if slot.abandoned.Load() {
+						return
+					}
+
 					if err != nil {
 						var oversizeErr *safeopen.ErrOversizeFile
 						if errors.As(err, &oversizeErr) {
@@ -680,6 +881,20 @@ func (s *Scanner) Run(ctx context.Context) error {
 						continue
 					}
 
+					if isHashedOversize {
+						var sz int64
+						if st, sErr := os.Stat(path); sErr == nil {
+							sz = st.Size()
+						}
+						oversizeMu.Lock()
+						hashedOversizeFiles = append(hashedOversizeFiles, events.OversizeFile{
+							Path: path,
+							Size: sz,
+						})
+						oversizeMu.Unlock()
+						hashedOversize.Add(1)
+					}
+
 					if scanned {
 						localDirCounts[filepath.Dir(path)]++
 						count := filesScanned.Add(1)
@@ -693,22 +908,133 @@ func (s *Scanner) Run(ctx context.Context) error {
 							elapsed := time.Since(startTime)
 							rate := float64(count) / elapsed.Seconds()
 							s.bus.Publish(events.Progress{
-								Time:         time.Now(),
-								CurrentFiles: count,
-								FilesPerSec:  rate,
-								Elapsed:      elapsed,
+								Time:          time.Now(),
+								CurrentFiles:  count,
+								FilesPerSec:   rate,
+								Elapsed:       elapsed,
+								ActiveModules: []string{"filesystem"},
+								ActivePaths:   tracker.getActivePaths(),
 							})
 						}
 					}
 				}
 			}
-		}(i)
-	}
+		}
+
+		for i := 0; i < s.cfg.Scan.Threads; i++ {
+			wg.Add(1)
+			go runWorker(i)
+		}
+
+		watchdogCtx, watchdogCancel := context.WithCancel(ctx)
+		defer watchdogCancel()
+
+		fileTimeout := s.cfg.Scan.FileTimeout
+		if fileTimeout <= 0 {
+			fileTimeout = config.DefaultFileTimeout
+		}
+
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			heartbeatTicker := time.NewTicker(5 * time.Second)
+			defer heartbeatTicker.Stop()
+
+			lastProgressWarn := time.Now()
+
+			for {
+				select {
+				case <-watchdogCtx.Done():
+					return
+				case <-heartbeatTicker.C:
+					count := filesScanned.Load()
+					elapsed := time.Since(startTime)
+					rate := float64(count) / elapsed.Seconds()
+					s.bus.Publish(events.Progress{
+						Time:          time.Now(),
+						CurrentFiles:  count,
+						FilesPerSec:   rate,
+						Elapsed:       elapsed,
+						ActiveModules: []string{"filesystem"},
+						ActivePaths:   tracker.getActivePaths(),
+					})
+				case <-ticker.C:
+					stuckSlots := tracker.checkTimeouts(fileTimeout)
+					for _, ws := range stuckSlots {
+						if !ws.abandoned.Swap(true) {
+							skippedTimeout.Add(1)
+							s.logger.Warn("file read timed out",
+								slog.String("path", ws.activePath),
+								slog.Duration("timeout", fileTimeout),
+							)
+							s.bus.Publish(events.Error{
+								Time:    time.Now(),
+								Module:  "filesystem",
+								Path:    ws.activePath,
+								Err:     fmt.Errorf("file read timed out after %v", fileTimeout),
+								IsFatal: false,
+							})
+
+							if ws.doneCalled.CompareAndSwap(false, true) {
+								wg.Done()
+							}
+
+							tracker.mu.Lock()
+							tracker.abandoned++
+							abandonedCount := tracker.abandoned
+							tracker.mu.Unlock()
+
+							if abandonedCount <= 8 {
+								newID := int(nextWorkerID.Add(1))
+								wg.Add(1)
+								go runWorker(newID)
+							} else {
+								s.logger.Warn("abandoned worker cap reached (8); scanning capacity and coverage are degraded")
+								s.bus.Publish(events.Error{
+									Time:    time.Now(),
+									Module:  "filesystem",
+									Err:     errors.New("abandoned worker cap reached (8); coverage is degraded"),
+									IsFatal: false,
+								})
+							}
+						}
+					}
+
+					tracker.mu.Lock()
+					timeSinceProgress := time.Since(tracker.lastProgress)
+					tracker.mu.Unlock()
+
+					if timeSinceProgress >= 60*time.Second && time.Since(lastProgressWarn) >= 60*time.Second {
+						lastProgressWarn = time.Now()
+						activePaths := tracker.getActivePaths()
+						if len(activePaths) > 0 {
+							s.logger.Warn("no scan progress for 60s", slog.Any("active_worker_paths", activePaths))
+							fmt.Fprintf(os.Stderr, "[AETHER] [WARNING] No scan progress for 60s. Active worker paths: %v\n", activePaths)
+						}
+					}
+				}
+			}
+		}()
 
 	// Walk paths and feed the worker channel
+	isPathExcluded := func(p string) bool {
+		if s.isExcluded(p) {
+			return true
+		}
+		if isOffline {
+			if rel, err := filepath.Rel(cleanRoot, p); err == nil {
+				virt := "/" + strings.TrimPrefix(filepath.ToSlash(rel), "/")
+				if s.isExcluded(virt) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
 	var walkErr error
 	for _, rootPath := range scanTargets {
-		if s.isExcluded(rootPath) {
+		if isPathExcluded(rootPath) {
 			skippedExcluded.Add(1)
 			s.logger.Debug("skipping excluded root path", slog.String("path", rootPath))
 			continue
@@ -740,12 +1066,31 @@ func (s *Scanner) Run(ctx context.Context) error {
 				return nil
 			}
 
-			if s.isExcluded(path) {
+			if isPathExcluded(path) {
 				skippedExcluded.Add(1)
 				if d.IsDir() {
 					return filepath.SkipDir
 				}
 				return nil
+			}
+
+			// Default --full scan exclusions (when --path is not explicitly provided)
+			if !s.cfg.Scan.ExplicitPaths && d.IsDir() {
+				dirBase := d.Name()
+				if dirBase == "testdata" {
+					return filepath.SkipDir
+				}
+				cleanPath := filepath.Clean(path)
+				if strings.HasSuffix(cleanPath, "/Downloads/Aether") || strings.Contains(cleanPath, "/Downloads/Aether/") {
+					return filepath.SkipDir
+				}
+				goModPath := filepath.Join(path, "go.mod")
+				if isOffline {
+					goModPath = filepath.Join(cleanRoot, strings.TrimPrefix(path, "/"), "go.mod")
+				}
+				if fi, gErr := os.Stat(goModPath); gErr == nil && !fi.IsDir() {
+					return filepath.SkipDir
+				}
 			}
 
 			// One filesystem boundary check
@@ -815,7 +1160,11 @@ func (s *Scanner) Run(ctx context.Context) error {
 			}
 		}
 
-		for _, f := range fsFindings {
+		for i := range fsFindings {
+			if s.cfg.Scan.RedactHosts {
+				report.RedactFinding(&fsFindings[i], hostname)
+			}
+			f := fsFindings[i]
 			if triageEng != nil {
 				triageEng.Evaluate(&f, "")
 			}
@@ -825,20 +1174,23 @@ func (s *Scanner) Run(ctx context.Context) error {
 			})
 		}
 
-		s.bus.Publish(events.ModuleFinished{
+		fsMF := events.ModuleFinished{
 			Time:           time.Now(),
 			ModuleName:     "filesystem",
 			Duration:       time.Since(fsStart),
 			FindingsCount:  len(fsFindings),
 			InspectedCount: filesScanned.Load(),
 			Status:         "OK",
-		})
+		}
+		modulesFinishedList = append(modulesFinishedList, fsMF)
+		s.bus.Publish(fsMF)
 	}
 
 	// 3. Final Summary & Verdict Calculation
 	totalDuration := time.Since(startTime)
 	var totalFindings, alerts, warnings, notices, infos, affectedFiles int
 	allEmitted := append(moduleRep.all, fsFindings...)
+	allEmitted = report.CorrelateFindings(allEmitted)
 
 	var acknowledgedWarnings []report.Finding
 	var acknowledgedCount int64
@@ -895,18 +1247,24 @@ func (s *Scanner) Run(ctx context.Context) error {
 	sort.Slice(oversizeFiles, func(i, j int) bool {
 		return oversizeFiles[i].Path < oversizeFiles[j].Path
 	})
+	sort.Slice(hashedOversizeFiles, func(i, j int) bool {
+		return hashedOversizeFiles[i].Path < hashedOversizeFiles[j].Path
+	})
 
 	coverage := events.CoverageStats{
-		FilesScanned:      filesScanned.Load(),
-		SkippedOversize:   skippedOversize.Load(),
-		SkippedPermission: skippedPermission.Load(),
-		SkippedVanished:   skippedVanished.Load(),
-		SkippedNotRegular: skippedNotRegular.Load(),
-		SkippedExcluded:   skippedExcluded.Load(),
-		Suppressed:        skippedSuppressed.Load(),
-		Acknowledged:      acknowledgedCount,
-		TopInspectedDirs:  topDirs,
-		OversizeFiles:     oversizeFiles,
+		FilesScanned:        filesScanned.Load(),
+		SkippedOversize:     skippedOversize.Load(),
+		SkippedPermission:   skippedPermission.Load(),
+		SkippedVanished:     skippedVanished.Load(),
+		SkippedNotRegular:   skippedNotRegular.Load(),
+		SkippedExcluded:     skippedExcluded.Load(),
+		SkippedTimeout:      skippedTimeout.Load(),
+		HashedOversize:      hashedOversize.Load(),
+		Suppressed:          skippedSuppressed.Load(),
+		Acknowledged:        acknowledgedCount,
+		TopInspectedDirs:    topDirs,
+		OversizeFiles:       oversizeFiles,
+		HashedOversizeFiles: hashedOversizeFiles,
 	}
 
 	// Aggregate top rules (splitting composite rules by ", ")
@@ -984,7 +1342,7 @@ func (s *Scanner) Run(ctx context.Context) error {
 		return !topRules[i].Acknowledged && topRules[j].Acknowledged
 	})
 
-	verdict, verdictReason := events.ComputeVerdict(allEmitted, alerts, warnings, notices, s.cfg.Scan.VerdictNoticesThreshold)
+	verdict, verdictReason := events.ComputeVerdict(allEmitted, alerts, warnings, notices, s.cfg.Scan.VerdictNoticesThreshold, s.cfg.Scan.WeakRules)
 	partial := coverage.HasPartialCoverage() || len(modulesNotRun) > 0 || (os.Geteuid() != 0)
 
 	var procCov *events.ProcessCoverageStats
@@ -994,19 +1352,24 @@ func (s *Scanner) Run(ctx context.Context) error {
 	var kernelCov *events.KernelCoverageStats
 
 	for _, mod := range s.modules {
+		if isOffline && (mod.Name() == "process" || mod.Name() == "network") {
+			continue
+		}
 		if pMod, ok := mod.(*process.Module); ok {
 			c := pMod.Coverage()
-			procCov = &events.ProcessCoverageStats{
-				Inspected:         c.Inspected,
-				Limited:           c.Limited,
-				SkippedPermission: c.SkippedPermission,
-				SkippedVanished:   c.SkippedVanished,
-				KernelThreads:     c.KernelThreadsSkipped,
-				Zombies:           c.ZombiesSkipped,
-				NonRootLimited:    c.NonRootLimited,
-				HiddenPIDRange:    c.HiddenPIDRange,
-				NotHashed:         c.NotHashed,
-				DurationBreakdown: c.DurationBreakdown,
+			if c.Inspected > 0 || !isOffline {
+				procCov = &events.ProcessCoverageStats{
+					Inspected:         c.Inspected,
+					Limited:           c.Limited,
+					SkippedPermission: c.SkippedPermission,
+					SkippedVanished:   c.SkippedVanished,
+					KernelThreads:     c.KernelThreadsSkipped,
+					Zombies:           c.ZombiesSkipped,
+					NonRootLimited:    c.NonRootLimited,
+					HiddenPIDRange:    c.HiddenPIDRange,
+					NotHashed:         c.NotHashed,
+					DurationBreakdown: c.DurationBreakdown,
+				}
 			}
 		} else if permMod, ok := mod.(*persistence.Module); ok {
 			c := permMod.Coverage()
@@ -1036,27 +1399,31 @@ func (s *Scanner) Run(ctx context.Context) error {
 			}
 		} else if nMod, ok := mod.(*network.Module); ok {
 			c := nMod.Coverage()
-			netCov = &events.NetworkCoverageStats{
-				SocketsInspected:       c.SocketsInspected,
-				TCPListeners:           c.TCPListeners,
-				UDPListeners:           c.UDPListeners,
-				EstablishedConnections: c.EstablishedConnections,
-				RawPacketSockets:       c.RawPacketSockets,
-				KernelOwnedSockets:     c.KernelOwnedSockets,
-				UnmappedSocketsNonRoot: c.UnmappedSocketsNonRoot,
-				NonRootLimited:         c.NonRootLimited,
-				NamespaceNote:          c.NamespaceNote,
+			if c.SocketsInspected > 0 || !isOffline {
+				netCov = &events.NetworkCoverageStats{
+					SocketsInspected:       c.SocketsInspected,
+					TCPListeners:           c.TCPListeners,
+					UDPListeners:           c.UDPListeners,
+					EstablishedConnections: c.EstablishedConnections,
+					RawPacketSockets:       c.RawPacketSockets,
+					KernelOwnedSockets:     c.KernelOwnedSockets,
+					UnmappedSocketsNonRoot: c.UnmappedSocketsNonRoot,
+					NonRootLimited:         c.NonRootLimited,
+					NamespaceNote:          c.NamespaceNote,
+				}
 			}
 		} else if kMod, ok := mod.(*kernel.Module); ok {
 			c := kMod.Coverage()
-			kernelCov = &events.KernelCoverageStats{
-				LoadedModulesInspected: c.LoadedModulesInspected,
-				SysfsLoadableEntries:   c.SysfsLoadableEntries,
-				TaintValue:             c.TaintValue,
-				TaintFlags:             c.TaintFlags,
-				TaintSeverity:          c.TaintSeverity,
-				ModprobeFilesInspected: c.ModprobeFilesInspected,
-				GapsNote:               c.GapsNote,
+			if c.LoadedModulesInspected > 0 || c.ModprobeFilesInspected > 0 || !isOffline {
+				kernelCov = &events.KernelCoverageStats{
+					LoadedModulesInspected: c.LoadedModulesInspected,
+					SysfsLoadableEntries:   c.SysfsLoadableEntries,
+					TaintValue:             c.TaintValue,
+					TaintFlags:             c.TaintFlags,
+					TaintSeverity:          c.TaintSeverity,
+					ModprobeFilesInspected: c.ModprobeFilesInspected,
+					GapsNote:               c.GapsNote,
+				}
 			}
 		}
 	}
@@ -1068,6 +1435,35 @@ func (s *Scanner) Run(ctx context.Context) error {
 		modulesNotRun = append(modulesNotRun, fmt.Sprintf("yara (%s)", yCov.NotRunReason))
 	} else if yCov.DemoRulesOnly {
 		modulesNotRun = append(modulesNotRun, "yara (demo rules only, no real rule set loaded)")
+	}
+
+	if s.cfg.Scan.RedactHosts {
+		for i := range coverage.OversizeFiles {
+			coverage.OversizeFiles[i].Path = report.RedactHostsAndUsers(coverage.OversizeFiles[i].Path, hostname)
+		}
+		for i := range coverage.TopInspectedDirs {
+			coverage.TopInspectedDirs[i].Dir = report.RedactHostsAndUsers(coverage.TopInspectedDirs[i].Dir, hostname)
+		}
+		if persistCov != nil {
+			for i := range persistCov.UnreadablePaths {
+				persistCov.UnreadablePaths[i].Path = report.RedactHostsAndUsers(persistCov.UnreadablePaths[i].Path, hostname)
+				persistCov.UnreadablePaths[i].Reason = report.RedactHostsAndUsers(persistCov.UnreadablePaths[i].Reason, hostname)
+			}
+			for i := range persistCov.MaskedPaths {
+				persistCov.MaskedPaths[i] = report.RedactHostsAndUsers(persistCov.MaskedPaths[i], hostname)
+			}
+		}
+		if usersCov != nil {
+			for i := range usersCov.PrivilegedGroupMembers {
+				usersCov.PrivilegedGroupMembers[i] = report.RedactHostsAndUsers(usersCov.PrivilegedGroupMembers[i], hostname)
+			}
+			for i := range usersCov.DockerLXDMembers {
+				usersCov.DockerLXDMembers[i] = report.RedactHostsAndUsers(usersCov.DockerLXDMembers[i], hostname)
+			}
+		}
+		for i := range startupNotices {
+			startupNotices[i] = report.RedactHostsAndUsers(startupNotices[i], hostname)
+		}
 	}
 
 	s.bus.Publish(events.ScanFinished{
@@ -1096,6 +1492,89 @@ func (s *Scanner) Run(ctx context.Context) error {
 		AcknowledgedWarnings: acknowledgedWarnings,
 	})
 
+	if s.cfg.Scan.HTMLOut != "" {
+		var posture, rationale string
+		var actions []htmlreport.RemediationAction
+		var timing map[string]string
+		if s.executiveAssessmentFn != nil {
+			posture, rationale, actions, timing = s.executiveAssessmentFn(allEmitted, events.ScanFinished{
+				Time:                 time.Now(),
+				TotalDuration:        totalDuration,
+				FilesScanned:         filesScanned.Load(),
+				Coverage:             coverage,
+				TotalFindings:        totalFindings,
+				Alerts:               alerts,
+				Warnings:             warnings,
+				Notices:              notices,
+				Infos:                infos,
+				AffectedFiles:        affectedFiles,
+				Verdict:              verdict,
+				VerdictReason:        verdictReason,
+				TopRules:             topRules,
+				Partial:              partial,
+				ModulesNotRun:        modulesNotRun,
+				StartupNotices:       startupNotices,
+				ProcessCoverage:      procCov,
+				PersistenceCoverage:  persistCov,
+				UsersCoverage:        usersCov,
+				NetworkCoverage:      netCov,
+				KernelCoverage:       kernelCov,
+				YARACoverage:         &yCov,
+				AcknowledgedWarnings: acknowledgedWarnings,
+			})
+		}
+
+		reportData := htmlreport.HTMLReportData{
+			Version:              ver,
+			Commit:               s.commit,
+			BuildDate:            bDate,
+			BinaryName:           binName,
+			Hostname:             hostname,
+			ScanMode:             mode,
+			StartTime:            startTime,
+			Duration:             totalDuration,
+			TargetPaths:          scanTargets,
+			Excludes:             s.cfg.Scan.Excludes,
+			Threads:              s.cfg.Scan.Threads,
+			MaxFileSize:          s.cfg.Scan.MaxFileSize,
+			Verdict:              verdict,
+			VerdictReason:        verdictReason,
+			Partial:              partial,
+			RedactHosts:          s.cfg.Scan.RedactHosts,
+			MaxReportFindings:    s.cfg.Scan.MaxReportFindings,
+			TotalFindings:        totalFindings,
+			Alerts:               alerts,
+			Warnings:             warnings,
+			Notices:              notices,
+			Infos:                infos,
+			FilesScanned:         filesScanned.Load(),
+			AffectedFiles:        affectedFiles,
+			Coverage:             coverage,
+			ModulesRun:           modulesFinishedList,
+			ModulesNotRun:        modulesNotRun,
+			StartupNotices:       startupNotices,
+			ProcessCoverage:      procCov,
+			PersistenceCoverage:  persistCov,
+			UsersCoverage:        usersCov,
+			NetworkCoverage:      netCov,
+			KernelCoverage:       kernelCov,
+			YARACoverage:         &yCov,
+			TopRules:             topRules,
+			Findings:             allEmitted,
+			AcknowledgedWarnings: acknowledgedWarnings,
+			SystemPosture:        posture,
+			PostureRationale:     rationale,
+			RemediationPlan:      actions,
+			DurationBreakdown:    timing,
+		}
+		if err := htmlreport.WriteHTMLReport(s.cfg.Scan.HTMLOut, reportData); err != nil {
+			s.logger.Warn("failed to write HTML report", slog.Any("error", err), slog.String("path", s.cfg.Scan.HTMLOut))
+			s.bus.Publish(events.Error{Time: time.Now(), Module: "report", Path: s.cfg.Scan.HTMLOut, Err: err, IsFatal: false})
+		} else {
+			s.logger.Info("wrote HTML report", slog.String("path", s.cfg.Scan.HTMLOut))
+		}
+	}
+
 	s.logger.Info("threat hunting scan completed",
 		slog.Int64("files_inspected", filesScanned.Load()),
 		slog.Int64("skipped_total", coverage.TotalSkipped()),
@@ -1114,11 +1593,37 @@ func (s *Scanner) Run(ctx context.Context) error {
 // inspectFile opens a file race-safely, computes/caches hashes per (dev, ino),
 // evaluates heuristics, IOCs, and YARA rules from the in-memory buffer.
 func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Scanner, skippedSuppressed *atomic.Int64) (bool, error) {
-	desc, err := OpenRegularReadOnly(path, s.cfg.Scan.MaxFileSize)
+	scanned, _, err := s.inspectFileWithOversize(ctx, path, yScanner, skippedSuppressed)
+	return scanned, err
+}
+
+func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, yScanner yara.Scanner, skippedSuppressed *atomic.Int64) (bool, bool, error) {
+	if isSwapFile(path) {
+		return false, false, ErrNotRegularFile
+	}
+
+	hashOversizeMax := s.cfg.Scan.HashOversizeMax
+	if hashOversizeMax <= 0 {
+		hashOversizeMax = config.DefaultHashOversizeMax
+	}
+	if hashOversizeMax < s.cfg.Scan.MaxFileSize {
+		hashOversizeMax = s.cfg.Scan.MaxFileSize
+	}
+
+	desc, err := OpenRegularReadOnly(path, hashOversizeMax)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	defer desc.Close()
+
+	cleanRoot := filepath.Clean(s.cfg.Scan.Root)
+	isOffline := cleanRoot != "" && cleanRoot != "/"
+	virtPath := path
+	if isOffline {
+		if rel, err := filepath.Rel(cleanRoot, path); err == nil {
+			virtPath = "/" + strings.TrimPrefix(filepath.ToSlash(rel), "/")
+		}
+	}
 
 	// Hardlink deduplication: cache & reuse hashing result per (dev, ino)
 	inoKey := InodeKey{
@@ -1129,8 +1634,26 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 	var fileData []byte
 	var hashRes *HashStreamResult
 	statSize := desc.Stat.Size
+	isHashedOversize := false
 
-	if val, found := s.hashCache.Load(inoKey); found {
+	if statSize > s.cfg.Scan.MaxFileSize {
+		isHashedOversize = true
+		if val, found := s.hashCache.Load(inoKey); found {
+			hashRes = val.(*HashStreamResult)
+		} else {
+			sRes, sErr := StreamHashAndHeader(desc.File)
+			if sErr != nil {
+				return false, false, sErr
+			}
+			hashRes = sRes
+			s.hashCache.Store(inoKey, hashRes)
+		}
+		if s.yaraEngine != nil && s.yaraEngine.Enabled() {
+			if yEngine, ok := s.yaraEngine.(interface{ RecordSkipOversize() }); ok {
+				yEngine.RecordSkipOversize()
+			}
+		}
+	} else if val, found := s.hashCache.Load(inoKey); found {
 		hashRes = val.(*HashStreamResult)
 		if s.yaraEngine != nil && s.yaraEngine.Enabled() && yScanner != nil && statSize <= s.cfg.Scan.YaraMaxFileSize && statSize >= 0 {
 			buf, capSize, bErr := s.memoryBudget.Acquire(ctx, statSize)
@@ -1145,7 +1668,7 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 			// Stream hash file without buffering entire content
 			sRes, sErr := StreamHashAndHeader(desc.File)
 			if sErr != nil {
-				return false, sErr
+				return false, false, sErr
 			}
 			hashRes = sRes
 			s.hashCache.Store(inoKey, hashRes)
@@ -1154,9 +1677,9 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 					yEngine.RecordSkipOversize()
 				}
 				oversizeFinding := report.NewFinding(
-					"yara",
+					"filesystem",
 					report.SeverityInfo,
-					path,
+					virtPath,
 					fmt.Sprintf("file size (%d bytes) exceeds YARA max filesize limit (%d bytes); YARA scan skipped (stream-hashed for IOCs)", statSize, s.cfg.Scan.YaraMaxFileSize),
 					"YARA_Skipped_Oversize",
 				)
@@ -1166,25 +1689,23 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 				oversizeFinding.Metadata["size"] = statSize
 				oversizeFinding.Metadata["oversize"] = true
 				oversizeFinding.Metadata["score"] = 0
-				s.accumulator.Add(path, "YARA_Skipped_Oversize", oversizeFinding.Reason, report.SeverityInfo, 0, oversizeFinding)
+				s.accumulator.Add(virtPath, "YARA_Skipped_Oversize", oversizeFinding.Reason, report.SeverityInfo, 0, oversizeFinding)
 			}
 		} else {
 			buf, capSize, bErr := s.memoryBudget.Acquire(ctx, statSize)
 			if bErr != nil {
-				return false, bErr
+				return false, false, bErr
 			}
 			defer s.memoryBudget.Release(buf, capSize)
 
 			n, rErr := io.ReadFull(desc.File, buf)
 			if rErr != nil && rErr != io.EOF && rErr != io.ErrUnexpectedEOF {
-				return false, rErr
+				return false, false, rErr
 			}
 			data := buf[:n]
 			hashRes = HashFromBytes(data)
 			s.hashCache.Store(inoKey, hashRes)
-			if s.yaraEngine != nil && s.yaraEngine.Enabled() {
-				fileData = data
-			}
+			fileData = data
 		}
 	}
 
@@ -1201,14 +1722,14 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 	// 2. Check for known benign path suppression
 	mode := uint32(desc.Stat.Mode)
 	uid := uint32(desc.Stat.Uid)
-	isBenign, benignReason := s.iocEngine.IsKnownBenign(path, uid)
+	isBenign, benignReason := s.iocEngine.IsKnownBenign(virtPath, uid)
 
 	// 3. Evaluate Path/Filename IOC matches (run for EVERY path)
-	pathMatch := s.iocEngine.CheckPath(path)
+	pathMatch := s.iocEngine.CheckPath(virtPath)
 
 	// 4. Evaluate Heuristics (run for EVERY path)
 	hasOtherSignal := (hashMatch != nil) || (pathMatch != nil)
-	base := filepath.Base(path)
+	base := filepath.Base(virtPath)
 	isSUIDorSGID := (mode & (unix.S_ISUID | unix.S_ISGID)) != 0
 	isHiddenAndExec := strings.HasPrefix(base, ".") && (mode&0111 != 0)
 
@@ -1216,18 +1737,18 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 	canSuppress := isBenign && !isSUIDorSGID && !isHiddenAndExec && !hasOtherSignal
 
 	var hELF *HeuristicMatch
-	if !canSuppress {
-		hELF = CheckELFInTempOrDev(path, hashRes.Header, mode, uid, hasOtherSignal, s.cfg)
-	} else {
+	if !canSuppress && !isHashedOversize {
+		hELF = CheckELFInTempOrDev(virtPath, hashRes.Header, mode, uid, hasOtherSignal, s.cfg)
+	} else if canSuppress && !isHashedOversize {
 		// Suppressed files are downgraded to INFO and recorded (counted in CoverageStats.Suppressed, listed with --verbose)
-		if rawELF := CheckELFInTempOrDev(path, hashRes.Header, mode, uid, false, s.cfg); rawELF != nil {
+		if rawELF := CheckELFInTempOrDev(virtPath, hashRes.Header, mode, uid, false, s.cfg); rawELF != nil {
 			if skippedSuppressed != nil {
 				skippedSuppressed.Add(1)
 			}
 			suppressedFinding := report.NewFinding(
 				"filesystem",
 				report.SeverityInfo,
-				path,
+				virtPath,
 				fmt.Sprintf("Suppressed benign ELF file (%s)", benignReason),
 				"Benign_Suppressed_File",
 			)
@@ -1237,40 +1758,49 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 			suppressedFinding.Metadata["suppressed"] = true
 			suppressedFinding.Metadata["suppress_reason"] = benignReason
 			suppressedFinding.Metadata["score"] = 0
-			s.accumulator.Add(path, "Benign_Suppressed_File", suppressedFinding.Reason, report.SeverityInfo, 0, suppressedFinding)
+			s.accumulator.Add(virtPath, "Benign_Suppressed_File", suppressedFinding.Reason, report.SeverityInfo, 0, suppressedFinding)
 		}
 		s.logger.Debug("suppressing ELF-in-temp heuristic for known benign path",
-			slog.String("path", path),
+			slog.String("path", virtPath),
 			slog.String("reason", benignReason),
 		)
 	}
 
-	hHidden := CheckHiddenExecutableInSystemDirs(path, mode, s.cfg)
-	hSUID := CheckSuspiciousSUID(path, mode, s.cfg)
-	hWorldWritable := CheckWorldWritableInEtc(path, mode, s.cfg)
+	inspectData := hashRes.Header
+	if len(fileData) > 0 {
+		inspectData = fileData
+	}
 
-	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil {
+	hHidden := CheckHiddenExecutableInSystemDirs(virtPath, mode, s.cfg)
+	hSUID := CheckSuspiciousSUID(virtPath, mode, s.cfg)
+	hWorldWritable := CheckWorldWritableInEtc(virtPath, mode, s.cfg)
+	hKey := CheckSuspiciousPrivateKeyMaterial(virtPath, inspectData, s.pkgDB, s.cfg)
+	hScript := CheckSuspiciousScriptContent(virtPath, inspectData, s.pkgDB, s.cfg)
+
+	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil || hKey != nil || hScript != nil {
 		hasOtherSignal = true
 	}
 
 	// 5. Known-good allowlist check:
 	isAllowlisted, _ := s.iocEngine.IsAllowlisted(hashRes.Hashes.SHA256)
-	if isAllowlisted {
+	if isAllowlisted || isHashedOversize {
 		hELF = nil
 		hHidden = nil
 		hSUID = nil
 		hWorldWritable = nil
-		pathMatch = nil // Suppress path heuristics if known-good hash matches
+		hKey = nil
+		hScript = nil
+		pathMatch = nil // Suppress path heuristics if known-good hash matches or oversize
 	}
 
 	// 6. YARA scanning from buffer
 	var yaraMatches []yara.RuleMatch
-	if s.yaraEngine != nil && s.yaraEngine.Enabled() && yScanner != nil && statSize <= s.cfg.Scan.YaraMaxFileSize {
+	if s.yaraEngine != nil && s.yaraEngine.Enabled() && yScanner != nil && statSize <= s.cfg.Scan.YaraMaxFileSize && !isHashedOversize {
 		if len(fileData) > 0 || statSize == 0 {
 			target := yara.ScanTarget{
-				Path:      path,
+				Path:      virtPath,
 				Filename:  base,
-				Extension: filepath.Ext(path),
+				Extension: filepath.Ext(virtPath),
 				FileType:  "",
 				Owner:     fmt.Sprint(uid),
 				Data:      fileData,
@@ -1283,14 +1813,14 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 	}
 
 	// 7. Check if this file qualifies as a YARA rule file
-	if s.yaraEngine != nil && s.yaraEngine.Enabled() && len(yaraMatches) > 0 && looksLikeYaraRuleFile(path, fileData, hasOtherSignal, statSize) {
+	if s.yaraEngine != nil && s.yaraEngine.Enabled() && len(yaraMatches) > 0 && looksLikeYaraRuleFile(virtPath, fileData, hasOtherSignal, statSize) {
 		if yEngine, ok := s.yaraEngine.(interface{ RecordRuleFileSeen() }); ok {
 			yEngine.RecordRuleFileSeen()
 		}
 		ruleFinding := report.NewFinding(
-			"yara",
+			"filesystem",
 			report.SeverityInfo,
-			path,
+			virtPath,
 			"looks like a YARA rule file",
 			"YARA_Rule_File",
 		)
@@ -1300,7 +1830,7 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 		ruleFinding.Metadata["score"] = 0
 		ruleFinding.Metadata["is_rule_file"] = true
 		ruleFinding.Metadata["yara_rule"] = yaraMatches[0].RuleName
-		s.accumulator.Add(path, "YARA_Rule_File", ruleFinding.Reason, report.SeverityInfo, 0, ruleFinding)
+		s.accumulator.Add(virtPath, "YARA_Rule_File", ruleFinding.Reason, report.SeverityInfo, 0, ruleFinding)
 		yaraMatches = nil
 	}
 
@@ -1344,7 +1874,7 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 		updateSeverity(pathMatch.Severity)
 	}
 
-	for _, hm := range []*HeuristicMatch{hELF, hHidden, hSUID, hWorldWritable} {
+	for _, hm := range []*HeuristicMatch{hELF, hHidden, hSUID, hWorldWritable, hKey, hScript} {
 		if hm != nil {
 			matchedReasons = append(matchedReasons, hm.Reason)
 			matchedRules = append(matchedRules, hm.Name)
@@ -1354,15 +1884,31 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 		}
 	}
 
+	var yaraRuleNames []string
+	var yaraNamespaces []string
+	var yaraTags []string
+	var yaraMatchedStrings []string
+
+	var isPkgOwned bool
+	var pkgName string
+	if s.pkgDB != nil && s.pkgDB.IsAvailable() {
+		pkgName, isPkgOwned = s.pkgDB.Owner(virtPath)
+	}
+	isPentestPath := isKnownPentestToolPath(virtPath)
+
+	var hasPentestDowngrade bool
+	var hasPackageDowngrade bool
+	var originalYaraSeverities []string
+
 	for _, ym := range yaraMatches {
 		if isAllowlisted && ym.Severity < report.SeverityAlert {
 			if skippedSuppressed != nil {
 				skippedSuppressed.Add(1)
 			}
 			suppressedFinding := report.NewFinding(
-				"yara",
+				"filesystem",
 				report.SeverityInfo,
-				path,
+				virtPath,
 				fmt.Sprintf("Allowlisted file (YARA match %s suppressed)", ym.RuleName),
 				ym.RuleName,
 			)
@@ -1374,9 +1920,71 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 			suppressedFinding.Metadata["score"] = 0
 			suppressedFinding.Metadata["yara_rule"] = ym.RuleName
 			suppressedFinding.Metadata["yara_tags"] = ym.Tags
-			s.accumulator.Add(path, ym.RuleName, suppressedFinding.Reason, report.SeverityInfo, 0, suppressedFinding)
+			s.accumulator.Add(virtPath, ym.RuleName, suppressedFinding.Reason, report.SeverityInfo, 0, suppressedFinding)
 			continue
 		}
+
+		effectiveSev := ym.Severity
+		effectiveScore := ym.Score
+		isExplicitAlertOrCritical := false
+		if ym.Metadata != nil {
+			if sVal, ok := ym.Metadata["severity"].(string); ok {
+				sUpper := strings.ToUpper(strings.TrimSpace(sVal))
+				if sUpper == "ALERT" || sUpper == "CRITICAL" {
+					isExplicitAlertOrCritical = true
+				}
+			}
+		}
+
+		isDoc := strings.Contains(virtPath, ".dist-info/") || strings.Contains(virtPath, ".egg-info/") ||
+			strings.HasSuffix(virtPath, ".md") || strings.HasSuffix(virtPath, ".rst") || strings.HasSuffix(virtPath, ".txt")
+		isTestFixture := (isPkgOwned || strings.Contains(virtPath, "/usr/lib/") || strings.Contains(virtPath, "/usr/share/")) &&
+			(strings.Contains(virtPath, "/test/") || strings.Contains(virtPath, "/tests/") || strings.HasPrefix(base, "test_") || strings.Contains(base, "_test."))
+
+		if s.cfg.Scan.TrustInstalledPentestTools && isPentestPath {
+			effectiveSev = report.SeverityInfo
+			effectiveScore = 0
+			hasPentestDowngrade = true
+			originalYaraSeverities = append(originalYaraSeverities, ym.Severity.String())
+		} else if isDoc {
+			effectiveSev = report.SeverityNotice
+			if effectiveScore >= config.DefaultScoreYaraWarning {
+				effectiveScore = config.DefaultScoreYaraWarning - 1
+			}
+			hasPackageDowngrade = true
+			originalYaraSeverities = append(originalYaraSeverities, ym.Severity.String())
+		} else if isTestFixture && isPkgOwned {
+			effectiveSev = report.SeverityNotice
+			if effectiveScore >= config.DefaultScoreYaraWarning {
+				effectiveScore = config.DefaultScoreYaraWarning - 1
+			}
+			hasPackageDowngrade = true
+			originalYaraSeverities = append(originalYaraSeverities, ym.Severity.String())
+		} else if isPkgOwned && !isExplicitAlertOrCritical {
+			switch ym.Severity {
+			case report.SeverityAlert:
+				effectiveSev = report.SeverityWarning
+				if effectiveScore > config.DefaultScoreYaraStrong {
+					effectiveScore = config.DefaultScoreYaraStrong
+				}
+			case report.SeverityWarning:
+				effectiveSev = report.SeverityNotice
+				if effectiveScore >= config.DefaultScoreYaraWarning {
+					effectiveScore = config.DefaultScoreYaraWarning - 1
+				}
+			case report.SeverityNotice:
+				effectiveSev = report.SeverityNotice
+			}
+			hasPackageDowngrade = true
+			originalYaraSeverities = append(originalYaraSeverities, ym.Severity.String())
+		}
+
+		yaraRuleNames = append(yaraRuleNames, ym.RuleName)
+		if ym.Namespace != "" {
+			yaraNamespaces = append(yaraNamespaces, ym.Namespace)
+		}
+		yaraTags = append(yaraTags, ym.Tags...)
+		yaraMatchedStrings = append(yaraMatchedStrings, ym.MatchedStrings...)
 
 		reasonStr := fmt.Sprintf("YARA match: %s", ym.RuleName)
 		if len(ym.MatchedStrings) > 0 {
@@ -1384,9 +1992,9 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 		}
 		matchedReasons = append(matchedReasons, reasonStr)
 		matchedRules = append(matchedRules, ym.RuleName)
-		ruleSeverities[ym.RuleName] = ym.Severity.String()
-		totalScore += ym.Score
-		updateSeverity(ym.Severity)
+		ruleSeverities[ym.RuleName] = effectiveSev.String()
+		totalScore += effectiveScore
+		updateSeverity(effectiveSev)
 		if strings.EqualFold(ym.Confidence, "high") {
 			hasConfidenceHigh = true
 		}
@@ -1394,10 +2002,14 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 
 	// If any matches occurred, add to accumulator for grouping by (rule, parentDir)
 	if len(matchedReasons) > 0 {
-		ruleName := strings.Join(matchedRules, ", ")
 		reason := strings.Join(matchedReasons, " | ")
+		primaryRule := matchedRules[0]
+		var contributing []string
+		if len(matchedRules) > 1 {
+			contributing = matchedRules[1:]
+		}
 
-		f := report.NewFinding("filesystem", highestSeverity, path, reason, ruleName)
+		f := report.NewFinding("filesystem", highestSeverity, virtPath, reason, primaryRule)
 		f.Hashes["MD5"] = hashRes.Hashes.MD5
 		f.Hashes["SHA1"] = hashRes.Hashes.SHA1
 		f.Hashes["SHA256"] = hashRes.Hashes.SHA256
@@ -1407,11 +2019,73 @@ func (s *Scanner) inspectFile(ctx context.Context, path string, yScanner yara.Sc
 		if hasConfidenceHigh {
 			f.Metadata["confidence"] = "high"
 		}
+		if len(yaraRuleNames) > 0 {
+			f.Metadata["yara_rules"] = yaraRuleNames
+			f.Metadata["yara_rule"] = yaraRuleNames[0]
+		}
+		if len(yaraNamespaces) > 0 {
+			f.Metadata["yara_namespaces"] = yaraNamespaces
+		}
+		if len(yaraTags) > 0 {
+			f.Metadata["yara_tags"] = yaraTags
+		}
+		if len(yaraMatchedStrings) > 0 {
+			f.Metadata["yara_matched_strings"] = yaraMatchedStrings
+		}
+		if isPkgOwned {
+			f.Metadata["known_package_owned"] = true
+			f.Metadata["package_name"] = pkgName
+		}
+		if hasPentestDowngrade {
+			f.Metadata["pentest_tool_path"] = true
+			if len(originalYaraSeverities) > 0 {
+				f.Metadata["original_severity"] = originalYaraSeverities[0]
+			}
+		} else if hasPackageDowngrade {
+			if len(originalYaraSeverities) > 0 {
+				f.Metadata["original_severity"] = originalYaraSeverities[0]
+			}
+		}
 
-		s.accumulator.Add(path, ruleName, reason, highestSeverity, totalScore, f)
+		detectorType := "heuristic"
+		if len(yaraRuleNames) > 0 {
+			detectorType = "yara"
+		} else if hashMatch != nil || pathMatch != nil {
+			detectorType = "ioc"
+		}
+
+		pkgStatus := "unowned"
+		if isPkgOwned {
+			pkgStatus = "verified_package"
+		}
+
+		f.EvidenceRecord = &report.EvidenceRecord{
+			DetectorType:          detectorType,
+			RuleName:              primaryRule,
+			TargetPath:            virtPath,
+			SHA256:                hashRes.Hashes.SHA256,
+			FileMode:              mode,
+			OwnerUID:              uid,
+			PackageName:           pkgName,
+			PackageStatus:         pkgStatus,
+			ContributingDetectors: contributing,
+		}
+
+		isDoc := strings.Contains(virtPath, ".dist-info/") || strings.Contains(virtPath, ".egg-info/") ||
+			strings.HasSuffix(virtPath, ".md") || strings.HasSuffix(virtPath, ".rst") || strings.HasSuffix(virtPath, ".txt")
+		isTestFixture := (isPkgOwned || strings.Contains(virtPath, "/usr/lib/") || strings.Contains(virtPath, "/usr/share/")) &&
+			(strings.Contains(virtPath, "/test/") || strings.Contains(virtPath, "/tests/") || strings.HasPrefix(base, "test_") || strings.Contains(base, "_test."))
+
+		if hELF != nil && hELF.Name == "Heuristic_ELF_In_Temp_BuildTree" {
+			f.EvidenceRecord.ContextProfile = "build_tree"
+		}
+
+		report.DetermineVerdict(&f, s.pkgDB, (mode&0111) != 0, isDoc, isTestFixture, nil)
+
+		s.accumulator.Add(virtPath, primaryRule, reason, f.Severity, totalScore, f)
 	}
 
-	return true, nil
+	return true, isHashedOversize, nil
 }
 
 // looksLikeYaraRuleFile determines if a file qualifies as a YARA rule file.
@@ -1445,13 +2119,44 @@ func looksLikeYaraRuleFile(path string, data []byte, hasOtherSignal bool, descSi
 	return true
 }
 
-// isExcluded determines whether a path matches any configured exclude prefixes.
+var pentestToolPathPrefixes = []string{
+	"/usr/share/metasploit-framework",
+	"/usr/share/windows-resources",
+	"/usr/share/powershell-empire",
+	"/usr/share/exploitdb",
+	"/usr/share/peass",
+	"/usr/lib/python3/dist-packages/pypykatz",
+	"/usr/lib/python3/dist-packages/nxc",
+}
+
+func isKnownPentestToolPath(path string) bool {
+	clean := filepath.Clean(path)
+	for _, prefix := range pentestToolPathPrefixes {
+		if clean == prefix || strings.HasPrefix(clean, prefix+"/") || strings.HasPrefix(clean, prefix+"-") || strings.HasPrefix(clean, prefix+".") {
+			return true
+		}
+	}
+	return false
+}
+
+// isExcluded determines whether a path matches any configured exclude prefixes or configured rules directories.
 func (s *Scanner) isExcluded(path string) bool {
 	cleaned := filepath.Clean(path)
 	for _, exc := range s.cfg.Scan.Excludes {
 		excClean := filepath.Clean(exc)
 		if cleaned == excClean || strings.HasPrefix(cleaned, excClean+string(filepath.Separator)) {
 			return true
+		}
+	}
+	if s.cfg != nil {
+		for _, rDir := range s.cfg.Scan.ConfiguredRulesDirs() {
+			if rDir == "" {
+				continue
+			}
+			rClean := filepath.Clean(rDir)
+			if cleaned == rClean || strings.HasPrefix(cleaned, rClean+string(filepath.Separator)) {
+				return true
+			}
 		}
 	}
 	return false

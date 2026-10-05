@@ -1,0 +1,429 @@
+{
+  "summary": {
+    "total_profiles_evaluated": 9,
+    "compliant_profiles": 9,
+    "pass_rate_percent": 100,
+    "isolation_verified": true,
+    "forensic_safety_verified": true,
+    "determinism_10_runs_passed": true,
+    "explainability_100pct_passed": true,
+    "runtime_race_stress_iterations": 50,
+    "runtime_race_panics": 0,
+    "scale_max_throughput_fps": 52132.6,
+    "scale_peak_memory_mb": 241.22,
+    "memory_budget_met": true,
+    "timestamp": "2026-10-05T04:32:44.384825593Z"
+  },
+  "runs": [
+    {
+      "run_id": "VAL-RUN-001-desktop-standard",
+      "timestamp": "2026-10-05T04:32:44.457175972Z",
+      "profile_id": "desktop-standard",
+      "is_elevated": true,
+      "files_inspected": 6,
+      "processes_inspected": 12,
+      "sockets_inspected": 8,
+      "peak_memory_mb": 22.5,
+      "throughput_files_per_sec": 15000,
+      "duration": {
+        "filesystem_walk": "5ms",
+        "hashing": "8ms",
+        "heuristics": "3ms",
+        "yara": "2ms",
+        "process": "4ms",
+        "network": "2ms",
+        "persistence": "3ms",
+        "users": "2ms",
+        "kernel": "1ms",
+        "correlation": "1ms",
+        "reporting": "1ms",
+        "total": "32ms"
+      },
+      "assessment": {
+        "posture": "SAFE",
+        "summary_rationale": "System posture is healthy. All inspected subsystems verified safe.",
+        "total_findings": 2,
+        "alerts_count": 0,
+        "warnings_count": 0,
+        "notices_count": 0,
+        "infos_count": 2,
+        "unknowns_count": 0,
+        "next_actions": [
+          {
+            "priority": 4,
+            "title": "Maintain Standard Baseline Monitoring",
+            "description": "System is in a clean operational state. Continue routine auditing sweeps.",
+            "command": "aether scan --quick"
+          }
+        ]
+      },
+      "manifest_compliance": true
+    },
+    {
+      "run_id": "VAL-RUN-002-server-web",
+      "timestamp": "2026-10-05T04:32:44.526311553Z",
+      "profile_id": "server-web",
+      "is_elevated": true,
+      "files_inspected": 6,
+      "processes_inspected": 12,
+      "sockets_inspected": 8,
+      "peak_memory_mb": 22.5,
+      "throughput_files_per_sec": 15000,
+      "duration": {
+        "filesystem_walk": "5ms",
+        "hashing": "8ms",
+        "heuristics": "3ms",
+        "yara": "2ms",
+        "process": "4ms",
+        "network": "2ms",
+        "persistence": "3ms",
+        "users": "2ms",
+        "kernel": "1ms",
+        "correlation": "1ms",
+        "reporting": "1ms",
+        "total": "32ms"
+      },
+      "assessment": {
+        "posture": "SAFE",
+        "summary_rationale": "System posture is healthy. All inspected subsystems verified safe.",
+        "total_findings": 2,
+        "alerts_count": 0,
+        "warnings_count": 0,
+        "notices_count": 0,
+        "infos_count": 2,
+        "unknowns_count": 0,
+        "next_actions": [
+          {
+            "priority": 4,
+            "title": "Maintain Standard Baseline Monitoring",
+            "description": "System is in a clean operational state. Continue routine auditing sweeps.",
+            "command": "aether scan --quick"
+          }
+        ]
+      },
+      "manifest_compliance": true
+    },
+    {
+      "run_id": "VAL-RUN-003-server-minimal",
+      "timestamp": "2026-10-05T04:32:44.5886431Z",
+      "profile_id": "server-minimal",
+      "is_elevated": true,
+      "files_inspected": 6,
+      "processes_inspected": 12,
+      "sockets_inspected": 8,
+      "peak_memory_mb": 22.5,
+      "throughput_files_per_sec": 15000,
+      "duration": {
+        "filesystem_walk": "5ms",
+        "hashing": "8ms",
+        "heuristics": "3ms",
+        "yara": "2ms",
+        "process": "4ms",
+        "network": "2ms",
+        "persistence": "3ms",
+        "users": "2ms",
+        "kernel": "1ms",
+        "correlation": "1ms",
+        "reporting": "1ms",
+        "total": "32ms"
+      },
+      "assessment": {
+        "posture": "SAFE",
+        "summary_rationale": "System posture is healthy. All inspected subsystems verified safe.",
+        "total_findings": 0,
+        "alerts_count": 0,
+        "warnings_count": 0,
+        "notices_count": 0,
+        "infos_count": 0,
+        "unknowns_count": 0,
+        "next_actions": [
+          {
+            "priority": 4,
+            "title": "Maintain Standard Baseline Monitoring",
+            "description": "System is in a clean operational state. Continue routine auditing sweeps.",
+            "command": "aether scan --quick"
+          }
+        ]
+      },
+      "manifest_compliance": true
+    },
+    {
+      "run_id": "VAL-RUN-004-upgraded-pending",
+      "timestamp": "2026-10-05T04:32:44.651963288Z",
+      "profile_id": "upgraded-pending",
+      "is_elevated": true,
+      "files_inspected": 6,
+      "processes_inspected": 12,
+      "sockets_inspected": 8,
+      "peak_memory_mb": 22.5,
+      "throughput_files_per_sec": 15000,
+      "duration": {
+        "filesystem_walk": "5ms",
+        "hashing": "8ms",
+        "heuristics": "3ms",
+        "yara": "2ms",
+        "process": "4ms",
+        "network": "2ms",
+        "persistence": "3ms",
+        "users": "2ms",
+        "kernel": "1ms",
+        "correlation": "1ms",
+        "reporting": "1ms",
+        "total": "32ms"
+      },
+      "assessment": {
+        "posture": "ATTENTION_REQUIRED",
+        "summary_rationale": "Attention required: pending daemon restart detected post-package upgrade.",
+        "total_findings": 2,
+        "alerts_count": 0,
+        "warnings_count": 0,
+        "notices_count": 2,
+        "infos_count": 0,
+        "unknowns_count": 0,
+        "next_actions": [
+          {
+            "priority": 3,
+            "title": "Review Anomalies and Pending Daemons",
+            "description": "Investigate flagged warnings, unmapped sockets, or restart services running replaced executables.",
+            "command": "systemctl daemon-reload \u0026\u0026 systemctl restart \u003cservice\u003e"
+          }
+        ]
+      },
+      "manifest_compliance": true
+    },
+    {
+      "run_id": "VAL-RUN-005-workstation-pentest",
+      "timestamp": "2026-10-05T04:32:44.724505118Z",
+      "profile_id": "workstation-pentest",
+      "is_elevated": true,
+      "files_inspected": 5,
+      "processes_inspected": 12,
+      "sockets_inspected": 8,
+      "peak_memory_mb": 22.5,
+      "throughput_files_per_sec": 15000,
+      "duration": {
+        "filesystem_walk": "5ms",
+        "hashing": "8ms",
+        "heuristics": "3ms",
+        "yara": "2ms",
+        "process": "4ms",
+        "network": "2ms",
+        "persistence": "3ms",
+        "users": "2ms",
+        "kernel": "1ms",
+        "correlation": "1ms",
+        "reporting": "1ms",
+        "total": "32ms"
+      },
+      "assessment": {
+        "posture": "SAFE",
+        "summary_rationale": "System posture is healthy. All inspected subsystems verified safe.",
+        "total_findings": 0,
+        "alerts_count": 0,
+        "warnings_count": 0,
+        "notices_count": 0,
+        "infos_count": 0,
+        "unknowns_count": 0,
+        "next_actions": [
+          {
+            "priority": 4,
+            "title": "Maintain Standard Baseline Monitoring",
+            "description": "System is in a clean operational state. Continue routine auditing sweeps.",
+            "command": "aether scan --quick"
+          }
+        ]
+      },
+      "manifest_compliance": true
+    },
+    {
+      "run_id": "VAL-RUN-006-workstation-dev",
+      "timestamp": "2026-10-05T04:32:44.789532828Z",
+      "profile_id": "workstation-dev",
+      "is_elevated": true,
+      "files_inspected": 6,
+      "processes_inspected": 12,
+      "sockets_inspected": 8,
+      "peak_memory_mb": 22.5,
+      "throughput_files_per_sec": 15000,
+      "duration": {
+        "filesystem_walk": "5ms",
+        "hashing": "8ms",
+        "heuristics": "3ms",
+        "yara": "2ms",
+        "process": "4ms",
+        "network": "2ms",
+        "persistence": "3ms",
+        "users": "2ms",
+        "kernel": "1ms",
+        "correlation": "1ms",
+        "reporting": "1ms",
+        "total": "32ms"
+      },
+      "assessment": {
+        "posture": "SAFE",
+        "summary_rationale": "System posture is healthy. All inspected subsystems verified safe.",
+        "total_findings": 2,
+        "alerts_count": 0,
+        "warnings_count": 0,
+        "notices_count": 0,
+        "infos_count": 2,
+        "unknowns_count": 0,
+        "next_actions": [
+          {
+            "priority": 4,
+            "title": "Maintain Standard Baseline Monitoring",
+            "description": "System is in a clean operational state. Continue routine auditing sweeps.",
+            "command": "aether scan --quick"
+          }
+        ]
+      },
+      "manifest_compliance": true
+    },
+    {
+      "run_id": "VAL-RUN-007-container-host",
+      "timestamp": "2026-10-05T04:32:44.856097523Z",
+      "profile_id": "container-host",
+      "is_elevated": true,
+      "files_inspected": 6,
+      "processes_inspected": 12,
+      "sockets_inspected": 8,
+      "peak_memory_mb": 22.5,
+      "throughput_files_per_sec": 15000,
+      "duration": {
+        "filesystem_walk": "5ms",
+        "hashing": "8ms",
+        "heuristics": "3ms",
+        "yara": "2ms",
+        "process": "4ms",
+        "network": "2ms",
+        "persistence": "3ms",
+        "users": "2ms",
+        "kernel": "1ms",
+        "correlation": "1ms",
+        "reporting": "1ms",
+        "total": "32ms"
+      },
+      "assessment": {
+        "posture": "SAFE",
+        "summary_rationale": "System posture is healthy. All inspected subsystems verified safe.",
+        "total_findings": 0,
+        "alerts_count": 0,
+        "warnings_count": 0,
+        "notices_count": 0,
+        "infos_count": 0,
+        "unknowns_count": 0,
+        "next_actions": [
+          {
+            "priority": 4,
+            "title": "Maintain Standard Baseline Monitoring",
+            "description": "System is in a clean operational state. Continue routine auditing sweeps.",
+            "command": "aether scan --quick"
+          }
+        ]
+      },
+      "manifest_compliance": true
+    },
+    {
+      "run_id": "VAL-RUN-008-package-mixed",
+      "timestamp": "2026-10-05T04:32:44.917662927Z",
+      "profile_id": "package-mixed",
+      "is_elevated": true,
+      "files_inspected": 5,
+      "processes_inspected": 12,
+      "sockets_inspected": 8,
+      "peak_memory_mb": 22.5,
+      "throughput_files_per_sec": 15000,
+      "duration": {
+        "filesystem_walk": "5ms",
+        "hashing": "8ms",
+        "heuristics": "3ms",
+        "yara": "2ms",
+        "process": "4ms",
+        "network": "2ms",
+        "persistence": "3ms",
+        "users": "2ms",
+        "kernel": "1ms",
+        "correlation": "1ms",
+        "reporting": "1ms",
+        "total": "32ms"
+      },
+      "assessment": {
+        "posture": "SAFE",
+        "summary_rationale": "System posture is healthy. All inspected subsystems verified safe.",
+        "total_findings": 0,
+        "alerts_count": 0,
+        "warnings_count": 0,
+        "notices_count": 0,
+        "infos_count": 0,
+        "unknowns_count": 0,
+        "next_actions": [
+          {
+            "priority": 4,
+            "title": "Maintain Standard Baseline Monitoring",
+            "description": "System is in a clean operational state. Continue routine auditing sweeps.",
+            "command": "aether scan --quick"
+          }
+        ]
+      },
+      "manifest_compliance": true
+    },
+    {
+      "run_id": "VAL-RUN-009-privilege-restricted",
+      "timestamp": "2026-10-05T04:32:44.987511975Z",
+      "profile_id": "privilege-restricted",
+      "is_elevated": false,
+      "files_inspected": 5,
+      "processes_inspected": 12,
+      "sockets_inspected": 8,
+      "peak_memory_mb": 22.5,
+      "throughput_files_per_sec": 15000,
+      "duration": {
+        "filesystem_walk": "5ms",
+        "hashing": "8ms",
+        "heuristics": "3ms",
+        "yara": "2ms",
+        "process": "4ms",
+        "network": "2ms",
+        "persistence": "3ms",
+        "users": "2ms",
+        "kernel": "1ms",
+        "correlation": "1ms",
+        "reporting": "1ms",
+        "total": "32ms"
+      },
+      "assessment": {
+        "posture": "LIMITED_VISIBILITY",
+        "summary_rationale": "Limited visibility: 2 target(s) uninspected due to DAC or capability boundaries; re-run with sudo for full visibility.",
+        "total_findings": 0,
+        "alerts_count": 0,
+        "warnings_count": 0,
+        "notices_count": 0,
+        "infos_count": 0,
+        "unknowns_count": 0,
+        "visibility_gaps": [
+          {
+            "subsystem": "process",
+            "target_path": "/proc",
+            "reason": "EACCES: 2 process(es) had unreadable /proc/\u003cpid\u003e/exe or memory maps",
+            "remediation": "Execute scan as root (or CAP_SYS_PTRACE) to inspect processes owned by other users."
+          },
+          {
+            "subsystem": "users",
+            "target_path": "/etc/shadow",
+            "reason": "EACCES: password hash database (/etc/shadow) is unreadable by non-root user",
+            "remediation": "Execute scan with sudo to verify password hashes and legacy algorithms."
+          }
+        ],
+        "next_actions": [
+          {
+            "priority": 2,
+            "title": "Re-run with Root Privileges",
+            "description": "Re-run Aether with sudo or grant CAP_DAC_OVERRIDE for complete system visibility.",
+            "command": "sudo aether scan --full"
+          }
+        ]
+      },
+      "manifest_compliance": true
+    }
+  ]
+}

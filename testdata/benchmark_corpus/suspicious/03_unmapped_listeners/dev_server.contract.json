@@ -1,0 +1,14 @@
+{
+  "id": "SUSP-LISTEN-001",
+  "name": "Unmapped Wildcard Network Listener",
+  "category": "SUSPICIOUS",
+  "subcategory": "unmapped_listeners",
+  "target_path": "dev_server.py",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SUSPICIOUS",
+    "allowed_severities": ["WARNING", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "MEDIUM"
+  }
+}

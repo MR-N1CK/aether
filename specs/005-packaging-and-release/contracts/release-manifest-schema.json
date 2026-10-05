@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AetherReleaseManifest",
+  "description": "Schema for Aether v1.0.0 release manifest and build provenance metadata",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "version",
+    "commit_sha",
+    "build_date",
+    "go_version",
+    "compiler_toolchain",
+    "artifacts",
+    "quality_gates",
+    "environment"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?$"
+    },
+    "commit_sha": {
+      "type": "string",
+      "minLength": 7,
+      "maxLength": 40
+    },
+    "build_date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "go_version": {
+      "type": "string"
+    },
+    "compiler_toolchain": {
+      "type": "string"
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "arch",
+          "format",
+          "variant",
+          "size_bytes",
+          "sha256",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "arch": {
+            "type": "string",
+            "enum": ["amd64", "arm64", "x86_64", "aarch64", "all"]
+          },
+          "format": {
+            "type": "string",
+            "enum": ["tar.gz", "deb", "rpm"]
+          },
+          "variant": {
+            "type": "string",
+            "enum": ["PURE_GO", "STATIC_YARAX", "NONE"]
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "quality_gates": {
+      "type": "object",
+      "required": [
+        "unit_tests_passed",
+        "yara_tests_passed",
+        "race_detector_passed",
+        "benchmark_precision",
+        "benchmark_recall",
+        "benchmark_fpr",
+        "benchmark_determinism",
+        "realworld_validation_passed",
+        "total_profiles_tested"
+      ],
+      "properties": {
+        "unit_tests_passed": {
+          "type": "boolean",
+          "const": true
+        },
+        "yara_tests_passed": {
+          "type": "boolean",
+          "const": true
+        },
+        "race_detector_passed": {
+          "type": "boolean",
+          "const": true
+        },
+        "benchmark_precision": {
+          "type": "number",
+          "minimum": 1.0,
+          "maximum": 1.0
+        },
+        "benchmark_recall": {
+          "type": "number",
+          "minimum": 1.0,
+          "maximum": 1.0
+        },
+        "benchmark_fpr": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 0.0
+        },
+        "benchmark_determinism": {
+          "type": "number",
+          "minimum": 1.0,
+          "maximum": 1.0
+        },
+        "realworld_validation_passed": {
+          "type": "boolean",
+          "const": true
+        },
+        "total_profiles_tested": {
+          "type": "integer",
+          "minimum": 8
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": [
+        "builder_os",
+        "builder_kernel",
+        "source_date_epoch",
+        "clean_worktree"
+      ],
+      "properties": {
+        "builder_os": {
+          "type": "string"
+        },
+        "builder_kernel": {
+          "type": "string"
+        },
+        "source_date_epoch": {
+          "type": "integer"
+        },
+        "clean_worktree": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    }
+  }
+}

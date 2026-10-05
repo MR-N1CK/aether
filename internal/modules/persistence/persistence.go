@@ -2,9 +2,13 @@ package persistence
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"aether/internal/config"
@@ -12,6 +16,7 @@ import (
 	"aether/internal/ioc"
 	"aether/internal/pkgdb"
 	"aether/internal/report"
+	"aether/internal/safeopen"
 )
 
 // CheckCoverage tracks inspection counts for a single persistence area.
@@ -28,7 +33,12 @@ type CheckCoverage struct {
 
 // RecordUnreadable records an unreadable file and classifies the error reason.
 func (c *CheckCoverage) RecordUnreadable(path string, err error) {
-	if c == nil {
+	if c == nil || err == nil {
+		return
+	}
+	if os.IsNotExist(err) || errors.Is(err, safeopen.ErrVanished) || errors.Is(err, os.ErrNotExist) {
+		c.NotPresent++
+		c.Missing++
 		return
 	}
 	clean := filepath.Clean(path)
@@ -169,6 +179,10 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 		}
 	}
 
+	// Correlate multi-vector persistence
+	correlFindings := correlateMultiVectorPersistence(allFindings, m.rootFS, m.pkgDB)
+	allFindings = append(allFindings, correlFindings...)
+
 	// Filter and report findings
 	for _, f := range allFindings {
 		// Allowlist check: if allowlisted, suppress heuristic finding
@@ -238,3 +252,173 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 
 	return nil
 }
+
+func correlateMultiVectorPersistence(allFindings []report.Finding, rootFS string, pkgDB pkgdb.PackageDB) []report.Finding {
+	// target -> map[artifact]map[file]bool
+	targetRefs := make(map[string]map[string]map[string]bool)
+
+	for _, f := range allFindings {
+		// Determine artifact type
+		artifact := ""
+		if artVal, ok := f.Metadata["artifact"].(string); ok && artVal != "" {
+			artifact = artVal
+		} else {
+			if strings.Contains(f.RuleName, "Cron") {
+				artifact = "cron"
+			} else if strings.Contains(f.RuleName, "Systemd") {
+				artifact = "systemd"
+			} else if strings.Contains(f.RuleName, "SSH") {
+				artifact = "ssh"
+			} else if strings.Contains(f.RuleName, "Profile") {
+				artifact = "profile"
+			} else if strings.Contains(f.RuleName, "Loader") {
+				artifact = "loader"
+			} else if strings.Contains(f.RuleName, "PAM") {
+				artifact = "pam"
+			} else if strings.Contains(f.RuleName, "InitD") {
+				artifact = "init.d"
+			} else if strings.Contains(f.RuleName, "RCD") {
+				artifact = "rc.d"
+			} else if strings.Contains(f.RuleName, "MOTD") {
+				artifact = "update-motd"
+			} else if strings.Contains(f.RuleName, "Udev") {
+				artifact = "udev"
+			} else if strings.Contains(f.RuleName, "Sudoers") {
+				artifact = "sudoers"
+			} else if strings.Contains(f.RuleName, "APT") {
+				artifact = "apt_hook"
+			} else {
+				artifact = "persistence"
+			}
+		}
+
+		sourceFile := f.Path
+		if fileVal, ok := f.Metadata["file"].(string); ok && fileVal != "" {
+			sourceFile = fileVal
+		}
+
+		var candidates []string
+		if execTargets, ok := f.Metadata["exec_targets"].([]string); ok {
+			candidates = append(candidates, execTargets...)
+		}
+		if tgt, ok := f.Metadata["target"].(string); ok && tgt != "" {
+			candidates = append(candidates, tgt)
+		}
+
+		for _, cand := range candidates {
+			cand = strings.TrimSpace(cand)
+			if cand == "" || cand == "/" || cand == "." || cand == "/bin" || cand == "/usr/bin" {
+				continue
+			}
+			p := filepath.Clean(cand)
+			base := filepath.Base(p)
+
+			// 1. Ignore interpreters and shells as payloads
+			if isInterpreterOrShell(base) {
+				continue
+			}
+
+			// 2. Only correlate payloads that are hidden, missing on disk, or unowned by any package
+			isHidden := strings.Contains(p, "/.") || strings.HasPrefix(base, ".")
+
+			hostP := p
+			if rootFS != "" && strings.HasPrefix(p, "/") {
+				hostP = filepath.Join(rootFS, strings.TrimPrefix(p, "/"))
+			}
+			_, statErr := os.Stat(hostP)
+			isMissing := errors.Is(statErr, os.ErrNotExist) || os.IsNotExist(statErr)
+
+			isUnowned := false
+			if pkgDB != nil && pkgDB.IsAvailable() {
+				if _, ok := pkgDB.Owner(p); !ok {
+					isUnowned = true
+				}
+			}
+
+			if !isHidden && !isMissing && !isUnowned {
+				// Benign package-owned binary on disk: do not correlate
+				continue
+			}
+
+			if targetRefs[p] == nil {
+				targetRefs[p] = make(map[string]map[string]bool)
+			}
+			if targetRefs[p][artifact] == nil {
+				targetRefs[p][artifact] = make(map[string]bool)
+			}
+			targetRefs[p][artifact][sourceFile] = true
+
+			// If payload is located inside a hidden system directory, also index the hidden directory
+			if hDir := extractHiddenDirPrefix(p); hDir != "" && hDir != p && hDir != "/" {
+				if targetRefs[hDir] == nil {
+					targetRefs[hDir] = make(map[string]map[string]bool)
+				}
+				if targetRefs[hDir][artifact] == nil {
+					targetRefs[hDir][artifact] = make(map[string]bool)
+				}
+				targetRefs[hDir][artifact][sourceFile] = true
+			}
+		}
+	}
+
+	var results []report.Finding
+	var sortedTargets []string
+	for p := range targetRefs {
+		sortedTargets = append(sortedTargets, p)
+	}
+	sort.Strings(sortedTargets)
+
+	for _, p := range sortedTargets {
+		artMap := targetRefs[p]
+		if len(artMap) >= 3 {
+			var artList []string
+			var fileList []string
+			for art, files := range artMap {
+				artList = append(artList, art)
+				for file := range files {
+					fileList = append(fileList, file)
+				}
+			}
+			sort.Strings(artList)
+			sort.Strings(fileList)
+
+			reason := fmt.Sprintf("Multi-vector persistence: payload %s referenced across %d distinct persistence mechanisms: %s (files: %s)",
+				p, len(artList), strings.Join(artList, ", "), strings.Join(fileList, ", "))
+
+			f := report.NewFinding("persistence", report.SeverityAlert, p, reason, "Persistence_Multi_Vector_Persistence")
+			f.Metadata["score"] = 95
+			f.Metadata["high_confidence"] = true
+			f.Metadata["payload"] = p
+			f.Metadata["mechanisms"] = artList
+			f.Metadata["referencing_files"] = fileList
+			f.Metadata["classes_count"] = len(artList)
+			f.Metadata["distinct_strong_classes"] = len(artList)
+
+			results = append(results, f)
+		}
+	}
+
+	return results
+}
+
+func extractHiddenDirPrefix(p string) string {
+	clean := filepath.Clean(p)
+	parts := strings.Split(clean, "/")
+	var res []string
+	foundHidden := false
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		res = append(res, part)
+		if strings.HasPrefix(part, ".") && part != "." && part != ".." {
+			foundHidden = true
+			break
+		}
+	}
+	if foundHidden && len(res) > 0 {
+		return "/" + strings.Join(res, "/")
+	}
+	return ""
+}
+

@@ -1,0 +1,15 @@
+{
+  "id": "SUSP-UPGRADE-001",
+  "name": "Process Running Deleted Binary After Package Upgrade",
+  "category": "SUSPICIOUS",
+  "subcategory": "deleted_binaries_upgraded",
+  "target_path": "deleted_daemon.txt",
+  "is_package_owned": true,
+  "package_name": "nginx",
+  "expected": {
+    "verdict": "SUSPICIOUS",
+    "allowed_severities": ["NOTICE", "INFO"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

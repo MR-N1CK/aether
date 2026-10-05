@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AetherBenchmarkCorpusCase",
+  "description": "Schema definition for an individual benchmark test case in the Aether detection validation suite",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "category",
+    "subcategory",
+    "target_path",
+    "expected"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Z0-9_-]+$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 3
+    },
+    "category": {
+      "type": "string",
+      "enum": ["BENIGN", "MALICIOUS", "SUSPICIOUS", "EDGE_CASE", "PARTIAL_VISIBILITY"]
+    },
+    "subcategory": {
+      "type": "string",
+      "minLength": 2
+    },
+    "target_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "file_mode": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 511
+    },
+    "owner_uid": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "is_package_owned": {
+      "type": "boolean"
+    },
+    "package_name": {
+      "type": "string"
+    },
+    "expected": {
+      "type": "object",
+      "required": [
+        "verdict",
+        "allowed_severities",
+        "evidence_strength",
+        "min_confidence"
+      ],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["MALICIOUS", "SUSPICIOUS", "SAFE", "UNKNOWN"]
+        },
+        "allowed_severities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["ALERT", "WARNING", "NOTICE", "INFO"]
+          },
+          "minItems": 1
+        },
+        "evidence_strength": {
+          "type": "string",
+          "enum": ["StrengthDirect", "StrengthCorroborated", "StrengthContextual", "StrengthIncomplete", "DIRECT", "CORROBORATED", "CONTEXTUAL", "INCOMPLETE"]
+        },
+        "required_corroboration": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "min_confidence": {
+          "type": "string",
+          "enum": ["HIGH", "MEDIUM", "LOW"]
+        },
+        "expected_rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mitre_technique": {
+          "type": "string"
+        },
+        "expected_rationale_contains": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

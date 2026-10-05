@@ -1,0 +1,15 @@
+{
+  "id": "EDGE-TROJAN-001",
+  "name": "Direct Malware Injection into Verified Package File",
+  "category": "EDGE_CASE",
+  "subcategory": "trojanized_packages",
+  "target_path": "trojan_package_file.py",
+  "is_package_owned": true,
+  "package_name": "python3-distro-util",
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH"
+  }
+}

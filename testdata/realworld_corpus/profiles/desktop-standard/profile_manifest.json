@@ -1,0 +1,28 @@
+{
+  "profile_id": "desktop-standard",
+  "version": "1.0.0",
+  "expected_status": "SAFE",
+  "max_acceptable_alerts": 0,
+  "max_acceptable_warnings": 2,
+  "acceptable_findings": [
+    {
+      "rule_name": "Network_Loopback_Listener",
+      "path_pattern": "/proc/*/fd/*",
+      "expected_severity": "INFO",
+      "expected_verdict": "SAFE",
+      "reason": "PulseAudio / PipeWire / systemd desktop loopback listeners"
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "rule_pattern": "Ransomware_*",
+      "severity": "ALERT",
+      "reason": "No ransomware on clean desktop"
+    },
+    {
+      "rule_pattern": "*Reverse_Shell*",
+      "severity": "ALERT",
+      "reason": "No reverse shells on clean desktop"
+    }
+  ]
+}

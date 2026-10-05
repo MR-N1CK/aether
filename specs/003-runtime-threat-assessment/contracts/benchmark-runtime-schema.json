@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AetherBenchmarkRuntimeFixture",
+  "description": "JSON schema for hermetic synthetic runtime state fixtures used in Feature 002 Benchmark extension",
+  "type": "object",
+  "required": ["case_id"],
+  "properties": {
+    "case_id": {
+      "type": "string"
+    },
+    "mock_procfs_rel_path": {
+      "type": "string",
+      "description": "Relative path to mock /proc directory fixture containing stat, cmdline, maps, fd, net tables"
+    },
+    "mock_processes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["pid", "comm", "exe", "euid"],
+        "properties": {
+          "pid": { "type": "integer" },
+          "ppid": { "type": "integer" },
+          "comm": { "type": "string" },
+          "exe": { "type": "string" },
+          "cmdline": { "type": "array", "items": { "type": "string" } },
+          "cwd": { "type": "string" },
+          "euid": { "type": "integer" },
+          "is_deleted": { "type": "boolean" },
+          "is_memfd": { "type": "boolean" },
+          "has_elf_header": { "type": "boolean" },
+          "mnt_ns": { "type": "string" }
+        }
+      }
+    },
+    "mock_sockets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["protocol", "local_ip", "local_port", "state", "inode"],
+        "properties": {
+          "protocol": { "type": "string", "enum": ["TCP", "TCP6", "UDP", "UDP6", "RAW", "PACKET"] },
+          "local_ip": { "type": "string" },
+          "local_port": { "type": "integer" },
+          "remote_ip": { "type": "string" },
+          "remote_port": { "type": "integer" },
+          "state": { "type": "string" },
+          "inode": { "type": "integer" },
+          "owning_pid": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

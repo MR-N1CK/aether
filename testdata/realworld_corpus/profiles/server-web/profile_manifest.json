@@ -1,0 +1,27 @@
+{
+  "profile_id": "server-web",
+  "version": "1.0.0",
+  "expected_status": "SAFE",
+  "max_acceptable_alerts": 0,
+  "max_acceptable_warnings": 1,
+  "acceptable_findings": [
+    {
+      "rule_name": "Network_Wildcard_Listener",
+      "expected_severity": "INFO",
+      "expected_verdict": "SAFE",
+      "reason": "Authorized web ports 80/443 and SSH port 22 owned by verified packages"
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "rule_pattern": "*Reverse_Shell*",
+      "severity": "ALERT",
+      "reason": "No reverse shells on clean web server"
+    },
+    {
+      "rule_pattern": "Webshell_*",
+      "severity": "ALERT",
+      "reason": "No webshells on clean web server"
+    }
+  ]
+}

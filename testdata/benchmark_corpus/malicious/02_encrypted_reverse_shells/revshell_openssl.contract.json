@@ -1,0 +1,15 @@
+{
+  "id": "MAL-REV-002",
+  "name": "OpenSSL Encrypted Reverse Shell",
+  "category": "MALICIOUS",
+  "subcategory": "encrypted_reverse_shells",
+  "target_path": "revshell_openssl.sh",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH",
+    "expected_rules": ["Script_OpenSSL_Reverse_Shell"]
+  }
+}

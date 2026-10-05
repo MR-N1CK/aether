@@ -110,7 +110,7 @@ func NewModel(ctx context.Context, cancel context.CancelFunc, sub *events.Subscr
 		noAnim:        noAnim,
 		state:         initialState,
 		splashFrame:   0,
-		maxSplash:     20, // ~1s at 50ms per step
+		maxSplash:     14, // ~560ms at 40ms per step
 		startTime:     time.Now(),
 		mode:          strings.ToUpper(mode),
 		threads:       threads,
@@ -155,7 +155,7 @@ func (m Model) tick30FPS() tea.Cmd {
 }
 
 func (m Model) tickSplash(frame int) tea.Cmd {
-	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(40*time.Millisecond, func(t time.Time) tea.Msg {
 		return splashTickMsg(frame + 1)
 	})
 }
@@ -173,7 +173,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == stateSplash {
 			m.splashFrame = int(msg)
 			if m.splashFrame >= m.maxSplash {
-				m.state = stateDashboard
+				if m.scanFinished {
+					m.state = stateFinished
+				} else {
+					m.state = stateDashboard
+				}
 			} else {
 				cmds = append(cmds, m.tickSplash(m.splashFrame))
 			}
@@ -247,16 +251,20 @@ func (m *Model) handleScanEvent(e events.Event) {
 		m.finishEvent = &ev
 		m.filesScanned = ev.FilesScanned
 		m.elapsed = ev.TotalDuration
-		if m.state != stateDetail {
+		if m.state != stateDetail && m.state != stateSplash {
 			m.state = stateFinished
 		}
 	}
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
-	// Any key during splash skips to dashboard
+	// Any key during splash skips to dashboard or finished view
 	if m.state == stateSplash {
-		m.state = stateDashboard
+		if m.scanFinished {
+			m.state = stateFinished
+		} else {
+			m.state = stateDashboard
+		}
 		return nil
 	}
 

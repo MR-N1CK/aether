@@ -15,6 +15,7 @@ import (
 	"aether/internal/ioc"
 	"aether/internal/pkgdb"
 	"aether/internal/report"
+	"aether/internal/safeopen"
 )
 
 // CheckSystemd inspects systemd unit files, timers, and wants/requires symlinks.
@@ -42,9 +43,9 @@ func CheckSystemd(ctx context.Context, rootFS string, cfg *config.Config, pkgDB 
 		default:
 		}
 
-		hostDir := dir
-		if rootFS != "" {
-			hostDir = filepath.Join(rootFS, strings.TrimPrefix(dir, "/"))
+		hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, dir)
+		if err != nil {
+			continue
 		}
 
 		_ = filepath.WalkDir(hostDir, func(path string, d os.DirEntry, err error) error {
@@ -160,7 +161,7 @@ func inspectSystemdUnit(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 			signals = append(signals, symSig)
 		}
 		if sErr != nil {
-			if errors.Is(sErr, ErrSymlinkEscapesRoot) {
+			if errors.Is(sErr, ErrSymlinkEscapesRoot) || errors.Is(sErr, safeopen.ErrSymlinkEscapesRoot) {
 				if len(signals) == 0 {
 					signals = append(signals, &PersistenceSignal{
 						Class:      ClassSymlinkHijack,
@@ -185,7 +186,22 @@ func inspectSystemdUnit(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 					*findings = append(*findings, *f)
 				}
 			} else {
-				cov.RecordUnreadable(virtPath, sErr)
+				if len(signals) > 0 {
+					meta := map[string]any{
+						"artifact": "systemd",
+						"file":     virtPath,
+						"target":   targetVirtPath,
+						"is_owned": false,
+					}
+					if wantsSymlink != "" {
+						meta["wants_symlink"] = wantsSymlink
+					}
+					if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
+						*findings = append(*findings, *f)
+					}
+				} else if !os.IsNotExist(sErr) && !errors.Is(sErr, safeopen.ErrVanished) {
+					cov.RecordUnreadable(virtPath, sErr)
+				}
 			}
 			return
 		}
@@ -244,10 +260,26 @@ func inspectSystemdUnit(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 	// Read unit content
 	data, _, rErr := SafeReadRegularFile(rootFS, targetVirtPath, 1024*1024)
 	if rErr != nil {
-		cov.RecordUnreadable(virtPath, rErr)
+		if len(signals) > 0 {
+			meta := map[string]any{
+				"artifact": "systemd",
+				"file":     virtPath,
+				"target":   targetVirtPath,
+				"is_owned": isPackageOwned,
+			}
+			if wantsSymlink != "" {
+				meta["wants_symlink"] = wantsSymlink
+			}
+			if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
+				*findings = append(*findings, *f)
+			}
+		} else if !os.IsNotExist(rErr) && !errors.Is(rErr, safeopen.ErrVanished) {
+			cov.RecordUnreadable(virtPath, rErr)
+		}
 		return
 	}
 
+	fileGuards := ExtractGuardedPaths(string(data))
 	// Parse Exec directives
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	lineNum := 0
@@ -271,7 +303,7 @@ func inspectSystemdUnit(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 			cmd = strings.TrimPrefix(cmd, "-")
 			cmd = strings.TrimPrefix(cmd, "@")
 
-			cmdSignals := CheckSuspiciousCommand(cmd, lineNum, cfg, rootFS, isSystemContext, pkgDB)
+			cmdSignals := CheckSuspiciousCommand(cmd, lineNum, cfg, rootFS, isSystemContext, pkgDB, fileGuards)
 			execTargets, _ := ExtractExecTargets(cmd)
 			allExecTargets = append(allExecTargets, execTargets...)
 			for _, cs := range cmdSignals {
@@ -289,7 +321,7 @@ func inspectSystemdUnit(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 			"file":         virtPath,
 			"target":       targetVirtPath,
 			"is_owned":     isPackageOwned,
-			"exec_targets": allExecTargets,
+			"exec_targets": dedupeSlice(allExecTargets),
 		}
 		if wantsSymlink != "" {
 			meta["wants_symlink"] = wantsSymlink
@@ -303,15 +335,12 @@ func inspectSystemdUnit(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 func findUserSystemdDirs(rootFS string) []string {
 	var dirs []string
 	homeDir := "/home"
-	if rootFS != "" {
-		homeDir = filepath.Join(rootFS, "home")
-	}
-
-	entries, err := os.ReadDir(homeDir)
-	if err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				dirs = append(dirs, filepath.Join("/home", e.Name(), ".config/systemd/user"))
+	if hostHome, _, _, err := safeopen.ResolveUnderRoot(rootFS, homeDir); err == nil {
+		if entries, err := os.ReadDir(hostHome); err == nil {
+			for _, e := range entries {
+				if e.IsDir() {
+					dirs = append(dirs, filepath.Join("/home", e.Name(), ".config/systemd/user"))
+				}
 			}
 		}
 	}

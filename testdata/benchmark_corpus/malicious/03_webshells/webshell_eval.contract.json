@@ -1,0 +1,14 @@
+{
+  "id": "MAL-WEB-001",
+  "name": "PHP Generic Webshell Backdoor",
+  "category": "MALICIOUS",
+  "subcategory": "webshells",
+  "target_path": "webshell_eval.php",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RealWorldProfileManifest",
+  "type": "object",
+  "required": [
+    "profile_id",
+    "version",
+    "expected_status",
+    "max_acceptable_alerts",
+    "max_acceptable_warnings"
+  ],
+  "properties": {
+    "profile_id": {
+      "type": "string",
+      "enum": [
+        "desktop-standard",
+        "workstation-dev",
+        "workstation-pentest",
+        "server-web",
+        "server-minimal",
+        "container-host",
+        "package-mixed",
+        "upgraded-pending"
+      ]
+    },
+    "version": {
+      "type": "string"
+    },
+    "expected_status": {
+      "type": "string",
+      "enum": ["SAFE", "ATTENTION_REQUIRED", "HIGH_RISK", "LIMITED_VISIBILITY"]
+    },
+    "max_acceptable_alerts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_acceptable_warnings": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "acceptable_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule_name", "expected_severity", "expected_verdict"],
+        "properties": {
+          "rule_name": { "type": "string" },
+          "path_pattern": { "type": "string" },
+          "expected_severity": { "type": "string" },
+          "expected_verdict": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "forbidden_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule_pattern", "reason"],
+        "properties": {
+          "rule_pattern": { "type": "string" },
+          "severity": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "expected_coverage_limits": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "dual_use_software": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tool_name", "primary_binary", "expected_passive_verdict"],
+        "properties": {
+          "tool_name": { "type": "string" },
+          "primary_binary": { "type": "string" },
+          "standard_paths": { "type": "array", "items": { "type": "string" } },
+          "expected_passive_severity": { "type": "string" },
+          "expected_passive_verdict": { "type": "string" },
+          "corroborating_attack_indicators": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

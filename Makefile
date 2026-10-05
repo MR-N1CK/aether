@@ -3,12 +3,24 @@ YARA_BINARY_NAME := aether-yara
 YARA_DEV_BINARY_NAME := aether-yara-dev
 YARA_STATIC_BINARY_NAME := aether-yara-static
 BIN_DIR := bin
-VERSION ?= 0.1.0-dev
-COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "standalone")
-BUILD_DATE := $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
+DIST_DIR := dist
+VERSION ?= 1.0.0
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)$(if $(shell git status --porcelain 2>/dev/null),-dirty)
+
+# Reproducible timestamp derivation from SOURCE_DATE_EPOCH if present
+BUILD_DATE := $(shell if [ -n "$$SOURCE_DATE_EPOCH" ]; then \
+    date -u -d "@$$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || \
+    date -u -r "$$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null; \
+else \
+    date -u +%Y-%m-%dT%H:%M:%SZ; \
+fi)
+
 DEV_RPATH ?= 0
 
-export PKG_CONFIG_PATH := /usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$(HOME)/.local/lib/pkgconfig:$(HOME)/.local/lib/x86_64-linux-gnu/pkgconfig:$(PKG_CONFIG_PATH)
+USER_HOME := $(if $(SUDO_USER),$(shell getent passwd $(SUDO_USER) | cut -d: -f6),$(HOME))
+EXTRA_PKG_CONFIG := $(wildcard $(USER_HOME)/.local/lib/*/pkgconfig) $(wildcard $(USER_HOME)/.local/lib/pkgconfig) $(wildcard /home/*/.local/lib/*/pkgconfig) $(wildcard /home/*/.local/lib/pkgconfig)
+
+export PKG_CONFIG_PATH := /usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$(shell echo $(EXTRA_PKG_CONFIG) | tr ' ' ':'):$(PKG_CONFIG_PATH)
 export LD_LIBRARY_PATH := /usr/local/lib:/usr/local/lib64:/usr/lib/x86_64-linux-gnu:$(HOME)/.local/lib:$(HOME)/.local/lib/x86_64-linux-gnu:$(LD_LIBRARY_PATH)
 
 LDFLAGS := -s -w \
@@ -18,73 +30,103 @@ LDFLAGS := -s -w \
 
 ifeq ($(DEV_RPATH),1)
 	YARA_TARGET_BIN := $(BIN_DIR)/$(YARA_DEV_BINARY_NAME)
-	# DEV_RPATH includes user-home rpaths for local unprivileged development.
-	# WARNING: Binary compiled with dev rpath refuses to run YARA when executed as root (euid 0).
 	YARA_RPATH_FLAGS := -Wl,-rpath,/usr/local/lib -Wl,-rpath,/usr/local/lib64 -Wl,-rpath,$(HOME)/.local/lib -Wl,-rpath,$(HOME)/.local/lib/x86_64-linux-gnu
 	YARA_EXTRA_LDFLAGS := -X 'main.devRpath=1'
 else
 	YARA_TARGET_BIN := $(BIN_DIR)/$(YARA_BINARY_NAME)
-	# Production root-safe build: strictly system paths only
 	YARA_RPATH_FLAGS := -Wl,-rpath,/usr/local/lib -Wl,-rpath,/usr/local/lib64
 	YARA_EXTRA_LDFLAGS :=
 endif
 
-.PHONY: all build build-yara build-yara-static test test-yara lint clean help
+.PHONY: all build build-static build-pure build-yara-static build-cross test test-yara test-fixtures test-packaging benchmark lint clean package package-clean release-verify release help
 
-all: build test
+all: build
 
 help:
-	@echo "Aether Build Targets:"
-	@echo "  build             - Compile static Linux binary (CGO_ENABLED=0)"
-	@echo "  build-yara        - Compile Linux binary with YARA-X support (-tags yara)"
-	@echo "                      Default: system rpaths only (bin/aether-yara)"
-	@echo "                      DEV_RPATH=1: dev rpath build (bin/aether-yara-dev, refuses root)"
-	@echo "  build-yara-static - Compile binary with static libyara_x_capi.a (no dynamic rpath)"
-	@echo "  test              - Run all unit tests (pure Go)"
-	@echo "  test-yara         - Run all unit and integration tests with -tags yara"
-	@echo "  lint              - Run linter (golangci-lint or go vet)"
+	@echo "Aether Build & Packaging Targets:"
+	@echo "  build             - Compile Aether binary (detects YARA-X library or falls back to pure Go)"
+	@echo "  build-pure        - Compile pure Go static binary (CGO_ENABLED=0)"
+	@echo "  build-yara-static - Compile static YARA-X binary (CGO_ENABLED=1, tags yara, linux/amd64)"
+	@echo "  build-cross       - Compile pure Go static binaries for linux/amd64 and linux/arm64"
+	@echo "  package           - Assemble 7 distributable software packages + release-manifest.json + SHA256SUMS"
+	@echo "  package-clean     - Remove dist/ packaging directory"
+	@echo "  release-verify    - Execute pre-release quality gate test suites offline"
+	@echo "  release           - Verify quality gates and assemble release packages in dist/"
+	@echo "  install           - Install compiled aether binary to /usr/local/bin or ~/.local/bin"
+	@echo "  test              - Run all unit tests"
+	@echo "  test-yara         - Run unit tests with YARA-X engine tag"
+	@echo "  test-packaging    - Run packaging verification test suite"
+	@echo "  test-fixtures     - Run golden-fixture offline scan test suite"
+	@echo "  benchmark         - Execute detection accuracy & validation benchmark suite"
+	@echo "  lint              - Run linter (go vet / golangci-lint)"
 	@echo "  clean             - Remove compiled binaries and artifacts"
 
 build:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/$(BINARY_NAME)
-	@echo "Static binary compiled: $(BIN_DIR)/$(BINARY_NAME)"
-
-build-yara:
-	@mkdir -p $(BIN_DIR)
-	@if ! pkg-config --exists yara_x_capi 2>/dev/null; then \
-		echo "========================================================================"; \
-		echo "ERROR: libyara_x_capi / yara_x_capi.pc not found via pkg-config."; \
-		echo "To build Aether with YARA-X support:"; \
-		echo "  1. Install Rust toolchain: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"; \
-		echo "  2. Install cargo-c: cargo install cargo-c"; \
-		echo "  3. Clone & install yara-x-capi:"; \
-		echo "       git clone https://github.com/VirusTotal/yara-x && cd yara-x"; \
-		echo "       cargo cinstall -p yara-x-capi --release --prefix=/usr/local"; \
-		echo "  4. Ensure PKG_CONFIG_PATH includes the installed pkgconfig directory."; \
-		echo "See docs/BUILDING.md for detailed instructions."; \
-		echo "========================================================================"; \
-		exit 1; \
+	@if pkg-config --exists yara_x_capi 2>/dev/null || [ -f /usr/local/lib/libyara_x_capi.a ] || [ -f /usr/lib/libyara_x_capi.a ] || [ -f $(USER_HOME)/.local/lib/x86_64-linux-gnu/libyara_x_capi.a ]; then \
+		echo "Building unified Aether binary with static YARA-X and embedded rules..."; \
+		CGO_ENABLED=1 CGO_LDFLAGS="-Wl,-Bstatic -lyara_x_capi -lstdc++ -Wl,-Bdynamic -lpthread -ldl -lm" go build -tags yara -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/$(BINARY_NAME); \
+	else \
+		echo "Building pure Go Aether binary (libyara_x_capi.a not found)..."; \
+		CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/$(BINARY_NAME); \
 	fi
-	CGO_ENABLED=1 CGO_LDFLAGS="$(YARA_RPATH_FLAGS)" go build -tags yara -trimpath -ldflags="$(LDFLAGS) $(YARA_EXTRA_LDFLAGS)" -o $(YARA_TARGET_BIN) ./cmd/$(BINARY_NAME)
-	@echo "YARA-X enabled binary compiled: $(YARA_TARGET_BIN)"
-	@echo "--- ldd output for $(YARA_TARGET_BIN) ---"
-	@ldd $(YARA_TARGET_BIN) || true
-	@echo "----------------------------------------------------"
+	@echo "Binary compiled: $(BIN_DIR)/$(BINARY_NAME)"
+
+build-pure:
+	@mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/$(BINARY_NAME)
+	@echo "Pure Go static binary compiled: $(BIN_DIR)/$(BINARY_NAME)"
 
 build-yara-static:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=1 CGO_LDFLAGS="-Wl,-Bstatic -lyara_x_capi -Wl,-Bdynamic -lpthread -ldl -lm" go build -tags yara -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(YARA_STATIC_BINARY_NAME) ./cmd/$(BINARY_NAME)
-	@echo "Statically linked YARA-X binary compiled: $(BIN_DIR)/$(YARA_STATIC_BINARY_NAME)"
-	@echo "--- ldd output for $(BIN_DIR)/$(YARA_STATIC_BINARY_NAME) ---"
-	@ldd $(BIN_DIR)/$(YARA_STATIC_BINARY_NAME) || true
-	@echo "----------------------------------------------------"
+	CGO_ENABLED=1 CGO_LDFLAGS="-Wl,-Bstatic -lyara_x_capi -lstdc++ -Wl,-Bdynamic -lpthread -ldl -lm" go build -tags yara -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(YARA_STATIC_BINARY_NAME) ./cmd/$(BINARY_NAME)
+	@echo "Static YARA-X binary compiled: $(BIN_DIR)/$(YARA_STATIC_BINARY_NAME)"
+
+build-cross:
+	@mkdir -p $(BIN_DIR)
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/aether-linux-amd64 ./cmd/$(BINARY_NAME)
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/aether-linux-arm64 ./cmd/$(BINARY_NAME)
+	@echo "Cross-compiled Pure-Go binaries: $(BIN_DIR)/aether-linux-amd64, $(BIN_DIR)/aether-linux-arm64"
+
+package:
+	@bash scripts/package.sh
+
+package-clean:
+	rm -rf $(DIST_DIR)
+	@echo "Cleaned dist/ directory."
+
+release-verify:
+	@bash scripts/verify-release.sh
+
+release: release-verify package
+	@echo "Release build and packaging completed successfully in $(DIST_DIR)/"
+
+install: build
+	@echo "Installing Aether..."
+	@if [ "$$(id -u)" -eq 0 ]; then \
+		install -m 0755 $(BIN_DIR)/$(BINARY_NAME) /usr/local/bin/$(BINARY_NAME); \
+		echo "Aether successfully installed to /usr/local/bin/$(BINARY_NAME)"; \
+	else \
+		mkdir -p $(HOME)/.local/bin; \
+		install -m 0755 $(BIN_DIR)/$(BINARY_NAME) $(HOME)/.local/bin/$(BINARY_NAME); \
+		echo "Aether successfully installed to $(HOME)/.local/bin/$(BINARY_NAME)"; \
+		echo "Ensure $(HOME)/.local/bin is in your PATH"; \
+	fi
 
 test:
 	go test -v ./...
 
 test-yara:
 	CGO_LDFLAGS="-Wl,-rpath,/usr/local/lib -Wl,-rpath,/usr/local/lib64 -Wl,-rpath,$(HOME)/.local/lib -Wl,-rpath,$(HOME)/.local/lib/x86_64-linux-gnu" go test -v -tags yara ./...
+
+test-packaging:
+	go test -v ./test/packaging/...
+
+test-fixtures:
+	go test -v -run TestFixtures ./internal/scanner/...
+
+benchmark:
+	go test -v ./test/benchmark/...
 
 lint:
 	@if command -v golangci-lint >/dev/null 2>&1; then \
@@ -95,5 +137,5 @@ lint:
 	fi
 
 clean:
-	rm -rf $(BIN_DIR)
+	rm -rf $(BIN_DIR) $(DIST_DIR)
 	@echo "Cleaned build artifacts."

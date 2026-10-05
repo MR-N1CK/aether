@@ -1,0 +1,15 @@
+{
+  "profile_id": "server-minimal",
+  "version": "1.0.0",
+  "expected_status": "SAFE",
+  "max_acceptable_alerts": 0,
+  "max_acceptable_warnings": 0,
+  "acceptable_findings": [
+    {
+      "rule_name": "Network_Wildcard_Listener",
+      "expected_severity": "INFO",
+      "expected_verdict": "SAFE",
+      "reason": "Authorized SSH port 22 listener"
+    }
+  ]
+}

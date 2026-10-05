@@ -1,0 +1,15 @@
+{
+  "id": "BENIGN-DAEMON-001",
+  "name": "Standard Systemd SSH Service",
+  "category": "BENIGN",
+  "subcategory": "system_daemons",
+  "target_path": "sshd.service",
+  "is_package_owned": true,
+  "package_name": "openssh-server",
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

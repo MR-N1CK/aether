@@ -7,7 +7,6 @@ import (
 	"net"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"aether/internal/config"
 	"aether/internal/ioc"
@@ -169,31 +168,27 @@ func EvaluateNetworkDetections(
 					reason := fmt.Sprintf("%s [active %s %s connection from %s:%d to %s:%d by %s]",
 						match.Reason, s.Protocol, s.State, s.LocalIP, s.LocalPort, s.RemIP, s.RemPort, procDesc)
 
-					f := report.Finding{
-						Timestamp: time.Now(),
-						Module:    "network",
-						Severity:  match.Severity,
-						Path:      fmt.Sprintf("/proc/net/%s", s.Protocol),
-						Reason:    reason,
-						RuleName:  match.RuleName,
-						Count:     1,
-						Paths:     []string{fmt.Sprintf("/proc/net/%s", s.Protocol)},
-						Metadata: map[string]interface{}{
-							"remote_ip":       s.RemIP.String(),
-							"remote_port":     s.RemPort,
-							"local_ip":        s.LocalIP.String(),
-							"local_port":      s.LocalPort,
-							"state":           s.State,
-							"protocol":        s.Protocol,
-							"is_ioc_match":    true,
-							"high_confidence": match.IsHighConf,
-							"score":           match.Score,
-						},
-					}
+					f := report.NewFinding("network", match.Severity, fmt.Sprintf("/proc/net/%s", s.Protocol), reason, match.RuleName)
+					f.Metadata["remote_ip"] = s.RemIP.String()
+					f.Metadata["remote_port"] = s.RemPort
+					f.Metadata["local_ip"] = s.LocalIP.String()
+					f.Metadata["local_port"] = s.LocalPort
+					f.Metadata["state"] = s.State
+					f.Metadata["protocol"] = s.Protocol
+					f.Metadata["is_ioc_match"] = true
+					f.Metadata["high_confidence"] = match.IsHighConf
+					f.Metadata["score"] = match.Score
 					if s.Owner != nil {
 						f.Metadata["pid"] = s.Owner.PID
 						f.Metadata["comm"] = s.Owner.Comm
 						f.Metadata["exe"] = s.Owner.ExePath
+						if f.EvidenceRecord != nil {
+							f.EvidenceRecord.PID = s.Owner.PID
+							f.EvidenceRecord.Comm = s.Owner.Comm
+							f.EvidenceRecord.TargetPath = s.Owner.ExePath
+							f.EvidenceRecord.SocketInfo = fmt.Sprintf("%s:%d", s.LocalIP, s.LocalPort)
+							f.EvidenceRecord.MountNamespace = s.Owner.MntNs
+						}
 					}
 					findings = append(findings, f)
 				}
@@ -219,25 +214,29 @@ func EvaluateNetworkDetections(
 		// Rule: NOTICE only as root, ONLY when a process owns the socket and it is NOT in the allowlist; NEVER as non-root. Show process name in notice.
 		if isListener && isWildcardIP(s.LocalIP) && isRoot && s.Owner != nil && !s.Owner.IsKernel {
 			if !isListenerAllowed(s.Owner, listenerAllowlist) {
-				findings = append(findings, report.Finding{
-					Timestamp: time.Now(),
-					Module:    "network",
-					Severity:  report.SeverityNotice,
-					Path:      fmt.Sprintf("/proc/net/%s", s.Protocol),
-					Reason:    fmt.Sprintf("Wildcard network listener on %s:%d owned by process %q (PID %d) is not in the listener allowlist", s.LocalIP, s.LocalPort, s.Owner.Comm, s.Owner.PID),
-					RuleName:  "Network_Wildcard_Listener_Unrecognized_Process",
-					Count:     1,
-					Paths:     []string{fmt.Sprintf("/proc/net/%s", s.Protocol)},
-					Metadata: map[string]interface{}{
-						"protocol":   s.Protocol,
-						"local_ip":   s.LocalIP.String(),
-						"local_port": s.LocalPort,
-						"pid":        s.Owner.PID,
-						"comm":       s.Owner.Comm,
-						"exe":        s.Owner.ExePath,
-						"score":      35,
-					},
-				})
+				f := report.NewFinding(
+					"network",
+					report.SeverityNotice,
+					fmt.Sprintf("/proc/net/%s", s.Protocol),
+					fmt.Sprintf("Wildcard network listener on %s:%d owned by process %q (PID %d) is not in the listener allowlist", s.LocalIP, s.LocalPort, s.Owner.Comm, s.Owner.PID),
+					"Network_Wildcard_Listener_Unrecognized_Process",
+				)
+				f.Metadata["protocol"] = s.Protocol
+				f.Metadata["local_ip"] = s.LocalIP.String()
+				f.Metadata["local_port"] = s.LocalPort
+				f.Metadata["pid"] = s.Owner.PID
+				f.Metadata["comm"] = s.Owner.Comm
+				f.Metadata["exe"] = s.Owner.ExePath
+				f.Metadata["score"] = 35
+				if f.EvidenceRecord != nil {
+					f.EvidenceRecord.PID = s.Owner.PID
+					f.EvidenceRecord.Comm = s.Owner.Comm
+					f.EvidenceRecord.TargetPath = s.Owner.ExePath
+					f.EvidenceRecord.SocketInfo = fmt.Sprintf("%s:%d", s.LocalIP, s.LocalPort)
+					f.EvidenceRecord.MountNamespace = s.Owner.MntNs
+					f.EvidenceRecord.EvidenceStrength = report.StrengthContextual
+				}
+				findings = append(findings, f)
 			}
 		}
 
@@ -245,23 +244,27 @@ func EvaluateNetworkDetections(
 		if s.Protocol == "raw" || s.Protocol == "raw6" || s.Protocol == "packet" {
 			if s.Owner != nil && !s.Owner.IsKernel {
 				if !isRawSocketAllowed(s.Owner) {
-					findings = append(findings, report.Finding{
-						Timestamp: time.Now(),
-						Module:    "network",
-						Severity:  report.SeverityNotice,
-						Path:      fmt.Sprintf("/proc/net/%s", s.Protocol),
-						Reason:    fmt.Sprintf("Process %q (PID %d) opened raw/packet socket (%s) outside standard network tools allowlist", s.Owner.Comm, s.Owner.PID, s.Protocol),
-						RuleName:  "Network_Suspicious_Raw_Packet_Socket",
-						Count:     1,
-						Paths:     []string{fmt.Sprintf("/proc/net/%s", s.Protocol)},
-						Metadata: map[string]interface{}{
-							"protocol": s.Protocol,
-							"pid":      s.Owner.PID,
-							"comm":     s.Owner.Comm,
-							"exe":      s.Owner.ExePath,
-							"score":    35,
-						},
-					})
+					f := report.NewFinding(
+						"network",
+						report.SeverityNotice,
+						fmt.Sprintf("/proc/net/%s", s.Protocol),
+						fmt.Sprintf("Process %q (PID %d) opened raw/packet socket (%s) outside standard network tools allowlist", s.Owner.Comm, s.Owner.PID, s.Protocol),
+						"Network_Suspicious_Raw_Packet_Socket",
+					)
+					f.Metadata["protocol"] = s.Protocol
+					f.Metadata["pid"] = s.Owner.PID
+					f.Metadata["comm"] = s.Owner.Comm
+					f.Metadata["exe"] = s.Owner.ExePath
+					f.Metadata["score"] = 35
+					if f.EvidenceRecord != nil {
+						f.EvidenceRecord.PID = s.Owner.PID
+						f.EvidenceRecord.Comm = s.Owner.Comm
+						f.EvidenceRecord.TargetPath = s.Owner.ExePath
+						f.EvidenceRecord.SocketInfo = fmt.Sprintf("%s:%d", s.LocalIP, s.LocalPort)
+						f.EvidenceRecord.MountNamespace = s.Owner.MntNs
+						f.EvidenceRecord.EvidenceStrength = report.StrengthContextual
+					}
+					findings = append(findings, f)
 				}
 			}
 		}
@@ -284,21 +287,23 @@ func EvaluateNetworkDetections(
 		if len(descParts) > 3 {
 			sampleStr = fmt.Sprintf("%s, %s, %s (and %d more)", descParts[0], descParts[1], descParts[2], len(descParts)-3)
 		}
-		findings = append(findings, report.Finding{
-			Timestamp: time.Now(),
-			Module:    "network",
-			Severity:  report.SeverityInfo,
-			Path:      "/proc/net/tcp",
-			Reason:    fmt.Sprintf("Found %d loopback listener(s): %s", len(loopbackListeners), sampleStr),
-			RuleName:  "Network_Loopback_Listener",
-			Count:     len(loopbackListeners),
-			Paths:     []string{"/proc/net/tcp", "/proc/net/udp"},
-			Metadata: map[string]interface{}{
-				"count":     len(loopbackListeners),
-				"listeners": listItems,
-				"score":     10,
-			},
-		})
+		f := report.NewFinding(
+			"network",
+			report.SeverityInfo,
+			"/proc/net/tcp",
+			fmt.Sprintf("Found %d loopback listener(s): %s", len(loopbackListeners), sampleStr),
+			"Network_Loopback_Listener",
+		)
+		f.Count = len(loopbackListeners)
+		f.Paths = []string{"/proc/net/tcp", "/proc/net/udp"}
+		f.Metadata["count"] = len(loopbackListeners)
+		f.Metadata["listeners"] = listItems
+		f.Metadata["score"] = 10
+		if f.EvidenceRecord != nil {
+			f.EvidenceRecord.EvidenceStrength = report.StrengthContextual
+			f.EvidenceRecord.PackageStatus = "verified_package"
+		}
+		findings = append(findings, f)
 	}
 
 	return findings

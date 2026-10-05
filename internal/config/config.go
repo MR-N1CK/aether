@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,6 +15,9 @@ const (
 	ToolName          = "aether"
 	DefaultMaxFileSize = 50 * 1024 * 1024 // 50MB
 	DefaultNice       = 0
+	DefaultMaxReportFindings = 5000
+	DefaultFileTimeout     = 30 * time.Second
+	DefaultHashOversizeMax = 2 * 1024 * 1024 * 1024 // 2GB
 
 	// Default heuristic score thresholds
 	DefaultScoreELFInTemp          = 55 // WARNING
@@ -23,6 +27,7 @@ const (
 	DefaultScoreHiddenExe          = 65 // WARNING
 	DefaultScoreSuspiciousSUID     = 85 // ALERT
 	DefaultScoreWorldWritableEtc   = 60 // WARNING
+	DefaultScoreSuspiciousPrivateKey = 70 // WARNING
 
 	// Default process hunting score thresholds
 	DefaultScoreProcDeletedExePkg     = 25 // NOTICE (package upgrade restart needed)
@@ -59,6 +64,7 @@ const (
 	DefaultScorePersistRemoteTunnel      = 65 // WARNING
 	DefaultScorePersistRemoteTunnelBoost = 10 // Boost within WARNING
 	DefaultScorePersistInsecureSSH       = 25 // NOTICE
+	DefaultVerdictNoticesThreshold       = 3  // 3 or more notices escalates verdict to SUSPICIOUS
 
 	// Default YARA configuration
 	DefaultYaraMaxFileSize  = 20 * 1024 * 1024 // 20MB
@@ -74,6 +80,8 @@ var DefaultHomeWellKnownHiddenDirs = []string{
 	".config",
 	".local",
 	".cache",
+	".ssh",
+	".gnupg",
 	".cargo",
 	".rustup",
 	".nvm",
@@ -122,6 +130,20 @@ var DefaultListenerAllowlist = []string{
 	"systemd-resolved",
 }
 
+// DefaultWeakRules returns the default list of rules considered weak for verdict escalation.
+func DefaultWeakRules() []string {
+	return []string{
+		"Persistence_Missing_Target_File",
+		"Persistence_Systemd_Unowned_Unit",
+		"Persistence_InitD_Unowned_Script",
+		"Persistence_RCD_Unowned_Script",
+		"Persistence_Cron_Unowned_Drop",
+		"Persistence_Cron_Unowned_File",
+		"Persistence_Update_MOTD_Unowned_Script",
+		"Persistence_Udev_Unowned_Rule",
+	}
+}
+
 // ValidModules defines the recognized hunting modules for --modules flag.
 var ValidModules = []string{
 	"filesystem",
@@ -159,6 +181,7 @@ type Config struct {
 // ScanConfig holds scan targets, exclusions, and resource governance limits.
 type ScanConfig struct {
 	Paths              []string `yaml:"paths"`
+	Root               string   `yaml:"root"`
 	ExplicitPaths      bool     `yaml:"-"` // Set to true when --path is explicitly provided by the user
 	Modules            []string `yaml:"modules"`
 	Excludes           []string `yaml:"excludes"`
@@ -168,6 +191,9 @@ type ScanConfig struct {
 	Threads            int      `yaml:"threads"`
 	Nice               int      `yaml:"nice"`
 	JSONOut            string   `yaml:"json_out"`
+	HTMLOut            string   `yaml:"html_out"`
+	RedactHosts        bool     `yaml:"redact_hosts"`
+	MaxReportFindings  int      `yaml:"max_report_findings"`
 	IOCDir             string   `yaml:"ioc_dir"`
 	AllowlistPath      string   `yaml:"allowlist"`
 	OneFileSystem      bool     `yaml:"one_file_system"`
@@ -215,6 +241,7 @@ type ScanConfig struct {
 	ScorePersistPAMExec           int      `yaml:"score_persist_pam_exec"`
 	ScorePersistPAMUnownedSO      int      `yaml:"score_persist_pam_unowned_so"`
 	ScorePersistHooksSuspicious   int      `yaml:"score_persist_hooks_suspicious"`
+	ScoreSuspiciousPrivateKey     int      `yaml:"score_suspicious_private_key"`
 	VerdictNoticesThreshold       int      `yaml:"verdict_notices_threshold"`
 	HomeWellKnownHiddenDirs       []string `yaml:"home_well_known_hidden_dirs"`
 	ScorePersistRemoteTunnel      int      `yaml:"score_persist_remote_tunnel"`
@@ -227,16 +254,21 @@ type ScanConfig struct {
 	BuildOutputDirs               []string `yaml:"build_output_dirs"`
 
 	// YARA Configuration
-	DemoRules         bool     `yaml:"demo_rules"`
-	RulesDir          string   `yaml:"rules_dir"`
-	YaraMaxFileSize   int64    `yaml:"yara_max_filesize"`
-	YaraTimeoutMs     int      `yaml:"yara_timeout_ms"`
-	YaraWarningScore  int      `yaml:"yara_warning_score"`
-	YaraStrongScore   int      `yaml:"yara_strong_score"`
-	YaraAlertScore    int      `yaml:"yara_alert_score"`
-	DisabledRules     []string `yaml:"disabled_rules"`
-	DisabledTags      []string `yaml:"disabled_tags"`
-	MemoryBudgetBytes int64    `yaml:"memory_budget_bytes"`
+	DemoRules                 bool     `yaml:"demo_rules"`
+	RulesDir                  string   `yaml:"rules_dir"`
+	TrustRulesDir             bool     `yaml:"trust_rules_dir"`
+	TrustInstalledPentestTools bool    `yaml:"trust_installed_pentest_tools"`
+	YaraMaxFileSize           int64    `yaml:"yara_max_filesize"`
+	YaraTimeoutMs             int      `yaml:"yara_timeout_ms"`
+	YaraWarningScore          int      `yaml:"yara_warning_score"`
+	YaraStrongScore           int      `yaml:"yara_strong_score"`
+	YaraAlertScore            int      `yaml:"yara_alert_score"`
+	DisabledRules             []string `yaml:"disabled_rules"`
+	DisabledTags              []string `yaml:"disabled_tags"`
+	MemoryBudgetBytes int64         `yaml:"memory_budget_bytes"`
+	FileTimeout       time.Duration `yaml:"file_timeout"`
+	HashOversizeMax   int64         `yaml:"hash_oversize_max"`
+	WeakRules         []string      `yaml:"weak_rules"`
 }
 
 // LoggingConfig holds structured logging parameters.
@@ -287,6 +319,7 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		Scan: ScanConfig{
 			Paths:         DefaultScanPaths(),
+			Root:          "/",
 			ExplicitPaths: false,
 			Excludes: []string{
 				"/proc",
@@ -300,6 +333,9 @@ func NewDefaultConfig() *Config {
 			Threads:                 cpus,
 			Nice:                    DefaultNice,
 			JSONOut:                 "",
+			HTMLOut:                 "",
+			RedactHosts:             false,
+			MaxReportFindings:       DefaultMaxReportFindings,
 			IOCDir:                  "",
 			AllowlistPath:           "",
 			OneFileSystem:           false, // Enabled by default on --full, configurable
@@ -339,7 +375,8 @@ func NewDefaultConfig() *Config {
 			ScorePersistPAMExec:           DefaultScorePersistPAMExec,
 			ScorePersistPAMUnownedSO:      DefaultScorePersistPAMUnownedSO,
 			ScorePersistHooksSuspicious:   DefaultScorePersistHooksSuspicious,
-			VerdictNoticesThreshold:       0,
+			ScoreSuspiciousPrivateKey:     DefaultScoreSuspiciousPrivateKey,
+			VerdictNoticesThreshold:       DefaultVerdictNoticesThreshold,
 			HomeWellKnownHiddenDirs:       append([]string{}, DefaultHomeWellKnownHiddenDirs...),
 			ScorePersistRemoteTunnel:      DefaultScorePersistRemoteTunnel,
 			ScorePersistRemoteTunnelBoost: DefaultScorePersistRemoteTunnelBoost,
@@ -351,22 +388,37 @@ func NewDefaultConfig() *Config {
 			BuildOutputDirs:               append([]string{}, DefaultBuildOutputDirs...),
 			DockerLXDAllowlist:            []string{},
 			ListenerAllowlist:             append([]string{}, DefaultListenerAllowlist...),
-			DemoRules:                 false,
-			RulesDir:                  "",
-			YaraMaxFileSize:           DefaultYaraMaxFileSize,
-			YaraTimeoutMs:             DefaultYaraTimeoutMs,
-			YaraWarningScore:          DefaultScoreYaraWarning,
-			YaraStrongScore:           DefaultScoreYaraStrong,
-			YaraAlertScore:            DefaultScoreYaraAlert,
-			DisabledRules:             nil,
-			DisabledTags:              nil,
-			MemoryBudgetBytes:         DefaultMemoryBudget,
+			DemoRules:                  false,
+			RulesDir:                   "",
+			TrustRulesDir:              false,
+			TrustInstalledPentestTools: true,
+			YaraMaxFileSize:            DefaultYaraMaxFileSize,
+			YaraTimeoutMs:              DefaultYaraTimeoutMs,
+			YaraWarningScore:           DefaultScoreYaraWarning,
+			YaraStrongScore:            DefaultScoreYaraStrong,
+			YaraAlertScore:             DefaultScoreYaraAlert,
+			DisabledRules:              nil,
+			DisabledTags:               nil,
+			MemoryBudgetBytes:          DefaultMemoryBudget,
+			FileTimeout:                DefaultFileTimeout,
+			HashOversizeMax:            DefaultHashOversizeMax,
+			WeakRules:                  append([]string{}, DefaultWeakRules()...),
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "text",
 		},
 	}
+}
+
+// ConfiguredRulesDirs returns all configured rules directories (custom --rules-dir if set + defaults).
+func (c *ScanConfig) ConfiguredRulesDirs() []string {
+	var dirs []string
+	if c.RulesDir != "" {
+		dirs = append(dirs, c.RulesDir)
+	}
+	dirs = append(dirs, DefaultRulesDirs()...)
+	return dirs
 }
 
 // DefaultRulesDirs returns standard directories searched for YARA rule files:

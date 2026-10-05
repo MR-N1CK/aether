@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AetherRuntimeFinding",
+  "description": "JSON schema for runtime and correlated threat findings emitted by Aether",
+  "type": "object",
+  "required": [
+    "module",
+    "rule_name",
+    "path",
+    "reason",
+    "severity",
+    "verdict",
+    "confidence",
+    "evidence_record"
+  ],
+  "properties": {
+    "module": {
+      "type": "string",
+      "enum": ["scanner", "process", "network", "persistence", "kernel", "users"]
+    },
+    "rule_name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["ALERT", "WARNING", "NOTICE", "INFO"]
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["MALICIOUS", "SUSPICIOUS", "SAFE", "UNKNOWN"]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["HIGH", "MEDIUM", "LOW"]
+    },
+    "confidence_rationale": {
+      "type": "string"
+    },
+    "mitre_attack": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tactic", "technique", "technique_name"],
+        "properties": {
+          "tactic": { "type": "string" },
+          "technique": { "type": "string" },
+          "technique_name": { "type": "string" }
+        }
+      }
+    },
+    "evidence_record": {
+      "type": "object",
+      "required": [
+        "detector_type",
+        "rule_name",
+        "evidence_strength",
+        "package_status"
+      ],
+      "properties": {
+        "detector_type": { "type": "string" },
+        "rule_name": { "type": "string" },
+        "target_path": { "type": "string" },
+        "pid": { "type": "integer" },
+        "comm": { "type": "string" },
+        "cmdline": { "type": "string" },
+        "socket_info": { "type": "string" },
+        "mount_namespace": { "type": "string" },
+        "package_name": { "type": "string" },
+        "package_status": {
+          "type": "string",
+          "enum": ["verified_package", "modified_package", "unowned", "unknown"]
+        },
+        "context_profile": {
+          "type": "string",
+          "enum": ["standard", "doc_metadata", "package_test", "build_tree", "container_namespace"]
+        },
+        "evidence_strength": {
+          "type": "string",
+          "enum": ["DIRECT", "CORROBORATED", "CONTEXTUAL", "INCOMPLETE", "StrengthDirect", "StrengthCorroborated", "StrengthContextual", "StrengthIncomplete"]
+        },
+        "corroborating_signals": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "corroboration_details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["domain", "rule_name", "target_ref"],
+            "properties": {
+              "domain": { "type": "string", "enum": ["filesystem", "process", "network", "persistence", "ioc"] },
+              "rule_name": { "type": "string" },
+              "description": { "type": "string" },
+              "target_ref": { "type": "string" },
+              "confidence": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

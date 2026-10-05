@@ -1,0 +1,14 @@
+{
+  "id": "MAL-MEM-001",
+  "name": "Fileless Memory Execution Artifact",
+  "category": "MALICIOUS",
+  "subcategory": "memory_execution",
+  "target_path": "memfd_runner.c",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "MALICIOUS",
+    "allowed_severities": ["ALERT"],
+    "evidence_strength": "StrengthDirect",
+    "min_confidence": "HIGH"
+  }
+}

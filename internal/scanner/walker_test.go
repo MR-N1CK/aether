@@ -486,6 +486,7 @@ func TestScanner_OversizeFileSkippedAndCounted(t *testing.T) {
 	cfg := config.NewDefaultConfig()
 	cfg.Scan.Paths = []string{tmpDir}
 	cfg.Scan.MaxFileSize = 512
+	cfg.Scan.HashOversizeMax = 512
 	cfg.Scan.Threads = 1
 
 	bus := events.NewEventBus()
@@ -1697,6 +1698,7 @@ func TestScanner_Oversize_SparseFilesBoundary(t *testing.T) {
 	cfg := config.NewDefaultConfig()
 	cfg.Scan.Paths = []string{tmpDir}
 	cfg.Scan.MaxFileSize = 10 * 1024 * 1024
+	cfg.Scan.HashOversizeMax = 10 * 1024 * 1024
 	cfg.Scan.YaraMaxFileSize = 2 * 1024 * 1024
 	cfg.Scan.Threads = 1
 
@@ -2145,6 +2147,549 @@ func TestScanner_FailingModuleSurfacesNoticeAndStatus(t *testing.T) {
 		t.Errorf("expected Final Verdict to mention 'modules not run: test_failing_module (failed)', got:\n%s", plainOutput)
 	}
 }
+
+func TestScanner_OversizeStreamingHash(t *testing.T) {
+	tmpDir := t.TempDir()
+	largeFile := filepath.Join(tmpDir, "large_data.bin")
+
+	// Create 100KB file
+	data := make([]byte, 100*1024)
+	for i := range data {
+		data[i] = byte(i % 256)
+	}
+	if err := os.WriteFile(largeFile, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.Paths = []string{tmpDir}
+	cfg.Scan.MaxFileSize = 50 * 1024       // 50KB: file exceeds MaxFileSize
+	cfg.Scan.HashOversizeMax = 200 * 1024 // 200KB: file is under HashOversizeMax
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	var finishedEv *events.ScanFinished
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			if sf, ok := ev.(events.ScanFinished); ok {
+				finishedEv = &sf
+				return
+			}
+		}
+	}()
+
+	s := scanner.NewScanner(cfg, bus, nil, nil, scanner.WithModules(nil))
+	err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("scanner Run failed: %v", err)
+	}
+	<-done
+
+	if finishedEv == nil {
+		t.Fatalf("expected ScanFinished event")
+	}
+
+	if finishedEv.Coverage.HashedOversize != 1 {
+		t.Errorf("expected HashedOversize == 1, got %d", finishedEv.Coverage.HashedOversize)
+	}
+
+	if len(finishedEv.Coverage.HashedOversizeFiles) != 1 {
+		t.Fatalf("expected 1 HashedOversizeFiles entry, got %d", len(finishedEv.Coverage.HashedOversizeFiles))
+	}
+
+	of := finishedEv.Coverage.HashedOversizeFiles[0]
+	if of.Path != largeFile {
+		t.Errorf("expected path %s, got %s", largeFile, of.Path)
+	}
+	if of.Size != int64(len(data)) {
+		t.Errorf("expected size %d, got %d", len(data), of.Size)
+	}
+}
+
+func TestScanner_OversizeBeyondMax_NotHashed(t *testing.T) {
+	tmpDir := t.TempDir()
+	hugeFile := filepath.Join(tmpDir, "huge_data.bin")
+
+	data := make([]byte, 100*1024)
+	if err := os.WriteFile(hugeFile, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.Paths = []string{tmpDir}
+	cfg.Scan.MaxFileSize = 10 * 1024     // 10KB
+	cfg.Scan.HashOversizeMax = 50 * 1024 // 50KB: 100KB file exceeds HashOversizeMax
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	var finishedEv *events.ScanFinished
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			if sf, ok := ev.(events.ScanFinished); ok {
+				finishedEv = &sf
+				return
+			}
+		}
+	}()
+
+	s := scanner.NewScanner(cfg, bus, nil, nil, scanner.WithModules(nil))
+	err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("scanner Run failed: %v", err)
+	}
+	<-done
+
+	if finishedEv == nil {
+		t.Fatalf("expected ScanFinished event")
+	}
+
+	if finishedEv.Coverage.SkippedOversize != 1 {
+		t.Errorf("expected SkippedOversize == 1, got %d", finishedEv.Coverage.SkippedOversize)
+	}
+	if finishedEv.Coverage.HashedOversize != 0 {
+		t.Errorf("expected HashedOversize == 0, got %d", finishedEv.Coverage.HashedOversize)
+	}
+}
+
+func TestScanner_RulesDirSelfMatching_Excluded(t *testing.T) {
+	tmpDir := t.TempDir()
+	rulesDir := filepath.Join(tmpDir, "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a rule file containing literal matching patterns
+	ruleContent := `rule Test_Self_Match {
+    strings:
+        $s = "MALICIOUS_BACKDOOR_SIGNATURE_STRING"
+    condition:
+        $s
+}`
+	rulePath := filepath.Join(rulesDir, "test.yar")
+	if err := os.WriteFile(rulePath, []byte(ruleContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.RulesDir = rulesDir
+	cfg.Scan.TrustRulesDir = true
+	cfg.Scan.Paths = []string{rulesDir} // Explicitly targeting rules directory
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	var findings []report.Finding
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			if fe, ok := ev.(events.FindingRaised); ok {
+				findings = append(findings, fe.Finding)
+			}
+			if _, ok := ev.(events.ScanFinished); ok {
+				return
+			}
+		}
+	}()
+
+	s := scanner.NewScanner(cfg, bus, nil, nil, scanner.WithModules(nil))
+	err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("scanner Run failed: %v", err)
+	}
+	<-done
+
+	// Verify ZERO findings produced for the rule file itself
+	if len(findings) != 0 {
+		t.Fatalf("expected 0 findings for file inside configured rules dir, got %d: %+v", len(findings), findings)
+	}
+}
+
+type mockPkgDB struct {
+	owners map[string]string
+}
+
+func (m *mockPkgDB) Owner(path string) (string, bool) {
+	pkg, ok := m.owners[filepath.Clean(path)]
+	return pkg, ok
+}
+func (m *mockPkgDB) IsAvailable() bool  { return true }
+func (m *mockPkgDB) StatusNote() string { return "mock" }
+
+func TestScanner_YARA_PackageOwnership_Downgrade(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetFile := filepath.Join(tmpDir, "packaged_tool.sh")
+	content := []byte("#!/bin/bash\necho 'MALICIOUS_PATTERN_XYZ'")
+	if err := os.WriteFile(targetFile, content, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.Paths = []string{targetFile}
+	cfg.Scan.ExplicitPaths = true
+	cfg.Scan.TrustInstalledPentestTools = false // Isolate package ownership downgrade
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	var findings []report.Finding
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			if fe, ok := ev.(events.FindingRaised); ok {
+				findings = append(findings, fe.Finding)
+			}
+			if _, ok := ev.(events.ScanFinished); ok {
+				return
+			}
+		}
+	}()
+
+	mockYScanner := &mockYaraScannerImpl{
+		matches: []yara.RuleMatch{
+			{
+				RuleName: "Threat_Rule_NoAlertMeta",
+				Severity: report.SeverityAlert,
+				Score:    90,
+				Metadata: map[string]interface{}{"description": "test threat"},
+			},
+		},
+	}
+	mockEngine := &mockYaraEngineImpl{scanner: mockYScanner, enabled: true}
+
+	s := scanner.NewScanner(cfg, bus, nil, nil,
+		scanner.WithModules(nil),
+		scanner.WithYARAEngine(mockEngine),
+		scanner.WithPackageDB(&mockPkgDB{
+			owners: map[string]string{filepath.Clean(targetFile): "coreutils"},
+		}),
+	)
+
+	err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("scanner Run failed: %v", err)
+	}
+	<-done
+
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	f := findings[0]
+	// Alert should be downgraded to WARNING because it's package-owned and not explicit alert in meta
+	if f.Severity != report.SeverityWarning {
+		t.Errorf("expected downgraded severity WARNING, got %s", f.Severity)
+	}
+	if f.Metadata["known_package_owned"] != true {
+		t.Errorf("expected known_package_owned: true in metadata, got %v", f.Metadata["known_package_owned"])
+	}
+	if f.Metadata["package_name"] != "coreutils" {
+		t.Errorf("expected package_name: 'coreutils', got %v", f.Metadata["package_name"])
+	}
+	if f.Metadata["original_severity"] != "ALERT" {
+		t.Errorf("expected original_severity: 'ALERT', got %v", f.Metadata["original_severity"])
+	}
+}
+
+func TestScanner_YARA_PackageOwnership_ExplicitAlert_NotDowngraded(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetFile := filepath.Join(tmpDir, "ransomware_tool.sh")
+	content := []byte("#!/bin/bash\necho 'MALICIOUS_PATTERN_RANSOM'")
+	if err := os.WriteFile(targetFile, content, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.Paths = []string{targetFile}
+	cfg.Scan.ExplicitPaths = true
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	var findings []report.Finding
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			if fe, ok := ev.(events.FindingRaised); ok {
+				findings = append(findings, fe.Finding)
+			}
+			if _, ok := ev.(events.ScanFinished); ok {
+				return
+			}
+		}
+	}()
+
+	mockYScanner := &mockYaraScannerImpl{
+		matches: []yara.RuleMatch{
+			{
+				RuleName: "Ransomware_Critical",
+				Severity: report.SeverityAlert,
+				Score:    95,
+				Metadata: map[string]interface{}{"severity": "CRITICAL"}, // Explicit critical meta
+			},
+		},
+	}
+	mockEngine := &mockYaraEngineImpl{scanner: mockYScanner, enabled: true}
+
+	s := scanner.NewScanner(cfg, bus, nil, nil,
+		scanner.WithModules(nil),
+		scanner.WithYARAEngine(mockEngine),
+		scanner.WithPackageDB(&mockPkgDB{
+			owners: map[string]string{filepath.Clean(targetFile): "coreutils"},
+		}),
+	)
+
+	err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("scanner Run failed: %v", err)
+	}
+	<-done
+
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	f := findings[0]
+	// Should NOT be downgraded because of severity=CRITICAL
+	if f.Severity != report.SeverityAlert {
+		t.Errorf("expected severity ALERT to remain, got %s", f.Severity)
+	}
+}
+
+func TestScanner_YARA_PentestTool_DowngradeToInfo(t *testing.T) {
+	tmpDir := t.TempDir()
+	pentestRelPath := "usr/share/metasploit-framework/modules/exploits/test.rb"
+	pentestHostPath := filepath.Join(tmpDir, pentestRelPath)
+	_ = os.MkdirAll(filepath.Dir(pentestHostPath), 0755)
+	_ = os.WriteFile(pentestHostPath, []byte("exploit_payload_data"), 0644)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.Root = tmpDir
+	cfg.Scan.Paths = []string{"/usr/share/metasploit-framework/modules/exploits/test.rb"}
+	cfg.Scan.ExplicitPaths = true
+	cfg.Scan.TrustInstalledPentestTools = true
+
+	mockYScanner := &mockYaraScannerImpl{
+		matches: []yara.RuleMatch{
+			{
+				RuleName: "Exploit_Metasploit_Payload",
+				Severity: report.SeverityWarning,
+				Score:    75,
+				Metadata: map[string]interface{}{"description": "metasploit payload"},
+			},
+		},
+	}
+	mockEngine := &mockYaraEngineImpl{scanner: mockYScanner, enabled: true}
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	var findings []report.Finding
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			if fe, ok := ev.(events.FindingRaised); ok {
+				findings = append(findings, fe.Finding)
+			}
+			if _, ok := ev.(events.ScanFinished); ok {
+				return
+			}
+		}
+	}()
+
+	s := scanner.NewScanner(cfg, bus, nil, nil,
+		scanner.WithModules(nil),
+		scanner.WithYARAEngine(mockEngine),
+		scanner.WithPackageDB(&mockPkgDB{
+			owners: map[string]string{"/usr/share/metasploit-framework/modules/exploits/test.rb": "metasploit-framework"},
+		}),
+	)
+
+	err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("scanner Run failed: %v", err)
+	}
+	<-done
+
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	f := findings[0]
+	// Pentest tool match should be downgraded to INFO
+	if f.Severity != report.SeverityInfo {
+		t.Errorf("expected downgraded severity INFO for pentest tool, got %s", f.Severity)
+	}
+	if f.Metadata["pentest_tool_path"] != true {
+		t.Errorf("expected pentest_tool_path: true in metadata, got %v", f.Metadata["pentest_tool_path"])
+	}
+	if f.Metadata["original_severity"] != "WARNING" {
+		t.Errorf("expected original_severity: 'WARNING', got %v", f.Metadata["original_severity"])
+	}
+}
+
+func TestScanner_FullScan_WorkspaceExclusions(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Regular directory
+	normalDir := filepath.Join(tmpDir, "etc")
+	_ = os.MkdirAll(normalDir, 0755)
+	_ = os.WriteFile(filepath.Join(normalDir, "test.conf"), []byte("data"), 0644)
+
+	// 2. testdata directory
+	testdataDir := filepath.Join(tmpDir, "testdata")
+	_ = os.MkdirAll(testdataDir, 0755)
+	_ = os.WriteFile(filepath.Join(testdataDir, "sample.txt"), []byte("testdata"), 0644)
+
+	// 3. Downloads/Aether directory
+	downloadsDir := filepath.Join(tmpDir, "Downloads", "Aether")
+	_ = os.MkdirAll(downloadsDir, 0755)
+	_ = os.WriteFile(filepath.Join(downloadsDir, "binary"), []byte("bin"), 0644)
+
+	// 4. Directory containing go.mod
+	goModDir := filepath.Join(tmpDir, "dev_project")
+	_ = os.MkdirAll(goModDir, 0755)
+	_ = os.WriteFile(filepath.Join(goModDir, "go.mod"), []byte("module mymod\n"), 0644)
+	_ = os.WriteFile(filepath.Join(goModDir, "main.go"), []byte("package main\n"), 0644)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.Paths = []string{tmpDir}
+	cfg.Scan.Full = true
+	cfg.Scan.ExplicitPaths = false // Default full scan mode
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	var finishedEv *events.ScanFinished
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			if sf, ok := ev.(events.ScanFinished); ok {
+				finishedEv = &sf
+				return
+			}
+		}
+	}()
+
+	s := scanner.NewScanner(cfg, bus, nil, nil, scanner.WithModules(nil))
+	err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("scanner Run failed: %v", err)
+	}
+	<-done
+
+	if finishedEv == nil {
+		t.Fatalf("expected ScanFinished event")
+	}
+
+	// Only test.conf in etc/ should be inspected (1 file). testdata, Downloads/Aether, and dev_project (go.mod) are skipped!
+	if finishedEv.FilesScanned != 1 {
+		t.Errorf("expected 1 file inspected (test.conf), got %d (skipped: testdata, Downloads/Aether, go.mod dir)", finishedEv.FilesScanned)
+	}
+}
+
+type mockYaraScannerImpl struct {
+	matches []yara.RuleMatch
+}
+
+func (m *mockYaraScannerImpl) Scan(target yara.ScanTarget) ([]yara.RuleMatch, error) {
+	return m.matches, nil
+}
+func (m *mockYaraScannerImpl) Destroy() {}
+
+type mockYaraEngineImpl struct {
+	scanner yara.Scanner
+	enabled bool
+}
+
+func (m *mockYaraEngineImpl) LoadRules(paths []string) error { return nil }
+func (m *mockYaraEngineImpl) NewScanner() yara.Scanner       { return m.scanner }
+func (m *mockYaraEngineImpl) Coverage() events.YARACoverageStats {
+	return events.YARACoverageStats{RulesLoaded: 1}
+}
+func (m *mockYaraEngineImpl) Enabled() bool { return m.enabled }
+func (m *mockYaraEngineImpl) Close() error  { return nil }
+
+func TestScanner_HeuristicSafety_GhostKeyNotDowngraded(t *testing.T) {
+	tmpDir := t.TempDir()
+	keyRelPath := "usr/lib/systemd/.systemd-resolved-updater/.ssh/ghost_key"
+	keyHostPath := filepath.Join(tmpDir, keyRelPath)
+	_ = os.MkdirAll(filepath.Dir(keyHostPath), 0755)
+	keyContent := []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----\n")
+	if err := os.WriteFile(keyHostPath, keyContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.Root = tmpDir
+	cfg.Scan.Paths = []string{"/usr/lib/systemd/.systemd-resolved-updater/.ssh/ghost_key"}
+	cfg.Scan.ExplicitPaths = true
+	cfg.Scan.TrustInstalledPentestTools = true // Pentest tools trust is enabled
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	var findings []report.Finding
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			if fe, ok := ev.(events.FindingRaised); ok {
+				findings = append(findings, fe.Finding)
+			}
+			if _, ok := ev.(events.ScanFinished); ok {
+				return
+			}
+		}
+	}()
+
+	s := scanner.NewScanner(cfg, bus, nil, nil,
+		scanner.WithModules(nil),
+	)
+
+	err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("scanner Run failed: %v", err)
+	}
+	<-done
+
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding for ghost_key, got %d", len(findings))
+	}
+	f := findings[0]
+	// Must strictly remain WARNING (never downgraded to NOTICE or INFO)
+	if f.Severity != report.SeverityWarning {
+		t.Errorf("expected File_Suspicious_Private_Key_Location to remain WARNING, got %s", f.Severity)
+	}
+	if f.RuleName != "File_Suspicious_Private_Key_Location" {
+		t.Errorf("expected rule File_Suspicious_Private_Key_Location, got %s", f.RuleName)
+	}
+}
+
+
 
 
 

@@ -1,0 +1,3 @@
+# Simulated permission-denied /etc/shadow inspection
+# Mode 0600 scanned by unprivileged user
+# EACCES: Permission denied

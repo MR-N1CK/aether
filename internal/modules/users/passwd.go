@@ -29,12 +29,7 @@ type PasswdEntry struct {
 
 // readLoginDefsUIDMin reads UID_MIN from /etc/login.defs, defaulting to 1000 if not found.
 func readLoginDefsUIDMin(rootFS string) uint32 {
-	defsPath := "/etc/login.defs"
-	if rootFS != "" {
-		defsPath = filepath.Join(rootFS, "etc/login.defs")
-	}
-
-	data, err := os.ReadFile(defsPath)
+	data, err := safeopen.ReadFileReadOnlyUnderRoot(rootFS, "/etc/login.defs", 256*1024)
 	if err != nil {
 		return 1000
 	}
@@ -58,12 +53,7 @@ func readLoginDefsUIDMin(rootFS string) uint32 {
 // loadValidShells reads /etc/shells.
 func loadValidShells(rootFS string) map[string]bool {
 	shells := make(map[string]bool)
-	shellsPath := "/etc/shells"
-	if rootFS != "" {
-		shellsPath = filepath.Join(rootFS, "etc/shells")
-	}
-
-	data, err := os.ReadFile(shellsPath)
+	data, err := safeopen.ReadFileReadOnlyUnderRoot(rootFS, "/etc/shells", 256*1024)
 	if err != nil {
 		// Standard fallbacks
 		return map[string]bool{
@@ -100,14 +90,14 @@ func hasAccountAuthorizedKeys(rootFS, homeDir string) bool {
 		return false
 	}
 	sshDir := filepath.Join(homeDir, ".ssh")
-	if rootFS != "" {
-		sshDir = filepath.Join(rootFS, strings.TrimPrefix(sshDir, "/"))
-	}
 
 	for _, name := range []string{"authorized_keys", "authorized_keys2"} {
 		keyPath := filepath.Join(sshDir, name)
-		if fi, err := os.Stat(keyPath); err == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
-			return true
+		hostPath, _, _, err := safeopen.ResolveUnderRoot(rootFS, keyPath)
+		if err == nil {
+			if fi, err := os.Stat(hostPath); err == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
+				return true
+			}
 		}
 	}
 	return false
@@ -118,12 +108,7 @@ func CheckPasswd(ctx context.Context, rootFS string, cfg *config.Config, pkgDB p
 	var findings []report.Finding
 
 	passwdPath := "/etc/passwd"
-	hostPath := passwdPath
-	if rootFS != "" {
-		hostPath = filepath.Join(rootFS, "etc/passwd")
-	}
-
-	data, err := safeopen.ReadFileReadOnly(hostPath, 1024*1024)
+	data, err := safeopen.ReadFileReadOnlyUnderRoot(rootFS, passwdPath, 1024*1024)
 	if err != nil {
 		return findings
 	}

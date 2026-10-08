@@ -77,25 +77,130 @@ type workerSlot struct {
 }
 
 type workerPoolTracker struct {
-	mu           sync.Mutex
-	slots        map[int]*workerSlot
-	abandoned    int
-	lastProgress time.Time
+	mu            sync.Mutex
+	slots         map[int]*workerSlot
+	activeWorkers int
+	abandoned     int
+	feedingDone   bool
+	doneChan      chan struct{}
+	closedDone    bool
+	lastProgress  time.Time
 }
 
 func newWorkerPoolTracker() *workerPoolTracker {
 	return &workerPoolTracker{
 		slots:        make(map[int]*workerSlot),
+		doneChan:     make(chan struct{}),
 		lastProgress: time.Now(),
 	}
 }
 
+// registerSlot registers a worker slot if not already present.
 func (t *workerPoolTracker) registerSlot(id int) *workerSlot {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	slot := &workerSlot{id: id}
-	t.slots[id] = slot
+	slot, exists := t.slots[id]
+	if !exists {
+		slot = &workerSlot{id: id}
+		t.slots[id] = slot
+		t.activeWorkers++
+	}
 	return slot
+}
+
+// startWorker registers a worker slot and increments active worker count.
+// Returns false if feeding is already closed or id is already registered.
+func (t *workerPoolTracker) startWorker(id int) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.feedingDone {
+		return false
+	}
+	if _, exists := t.slots[id]; exists {
+		return false
+	}
+	t.slots[id] = &workerSlot{id: id}
+	t.activeWorkers++
+	return true
+}
+
+// workerFinished records worker exit. It decrements activeWorkers only once per slot.
+// If feeding is done and activeWorkers reaches 0, it closes doneChan.
+func (t *workerPoolTracker) workerFinished(id int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	slot, ok := t.slots[id]
+	if !ok {
+		return
+	}
+	if slot.doneCalled.CompareAndSwap(false, true) {
+		t.activeWorkers--
+		if t.feedingDone && t.activeWorkers == 0 && !t.closedDone {
+			t.closedDone = true
+			close(t.doneChan)
+		}
+	}
+}
+
+// abandonWorker attempts to logically abandon a worker slot that timed out.
+// Returns abandoned=true only if this call successfully marked the worker as abandoned
+// and decremented activeWorkers. If the worker already exited or was already abandoned,
+// abandoned returns false.
+func (t *workerPoolTracker) abandonWorker(id int, nextID *atomic.Int64) (newID int, spawn bool, capExceeded bool, path string, abandoned bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	slot, ok := t.slots[id]
+	if !ok {
+		return 0, false, false, "", false
+	}
+
+	if slot.abandoned.Swap(true) {
+		return 0, false, false, "", false
+	}
+
+	if !slot.doneCalled.CompareAndSwap(false, true) {
+		return 0, false, false, "", false
+	}
+
+	path = slot.activePath
+	t.activeWorkers--
+	t.abandoned++
+
+	if t.feedingDone && t.activeWorkers == 0 && !t.closedDone {
+		t.closedDone = true
+		close(t.doneChan)
+	}
+
+	capExceeded = t.abandoned > 8
+	// Spawn a replacement worker if feeding is still active AND
+	// either the abandonment cap has not been exceeded OR activeWorkers would otherwise drop to 0.
+	if !t.feedingDone && (t.abandoned <= 8 || t.activeWorkers == 0) {
+		newID = int(nextID.Add(1))
+		t.slots[newID] = &workerSlot{id: newID}
+		t.activeWorkers++
+		return newID, true, capExceeded, path, true
+	}
+
+	return 0, false, capExceeded, path, true
+}
+
+// CloseFeeding marks feeding as complete, closes fileChan, and closes doneChan if activeWorkers is 0.
+// Must be called exactly once by the main scanner goroutine when directory traversal finishes.
+func (t *workerPoolTracker) CloseFeeding(fileChan chan string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.feedingDone = true
+	close(fileChan)
+	if t.activeWorkers == 0 && !t.closedDone {
+		t.closedDone = true
+		close(t.doneChan)
+	}
+}
+
+// Done returns the channel that is closed when feeding is complete and all active workers have finished or been abandoned.
+func (t *workerPoolTracker) Done() <-chan struct{} {
+	return t.doneChan
 }
 
 func (t *workerPoolTracker) setActive(id int, path string) {
@@ -801,19 +906,19 @@ func (s *Scanner) Run(ctx context.Context) error {
 
 		fileChan := make(chan string, s.cfg.Scan.Threads*10)
 		tracker := newWorkerPoolTracker()
-		var wg sync.WaitGroup
 
 		var nextWorkerID atomic.Int64
-		nextWorkerID.Store(int64(s.cfg.Scan.Threads))
+		nextWorkerID.Store(int64(s.cfg.Scan.Threads - 1))
 
 		var runWorker func(workerID int)
 		runWorker = func(workerID int) {
-			slot := tracker.registerSlot(workerID)
-			defer func() {
-				if slot.doneCalled.CompareAndSwap(false, true) {
-					wg.Done()
-				}
-			}()
+			tracker.mu.Lock()
+			slot := tracker.slots[workerID]
+			tracker.mu.Unlock()
+			if slot == nil {
+				return
+			}
+			defer tracker.workerFinished(workerID)
 
 			yScanner := s.yaraEngine.NewScanner()
 			defer yScanner.Destroy()
@@ -922,8 +1027,9 @@ func (s *Scanner) Run(ctx context.Context) error {
 		}
 
 		for i := 0; i < s.cfg.Scan.Threads; i++ {
-			wg.Add(1)
-			go runWorker(i)
+			if tracker.startWorker(i) {
+				go runWorker(i)
+			}
 		}
 
 		watchdogCtx, watchdogCancel := context.WithCancel(ctx)
@@ -961,42 +1067,33 @@ func (s *Scanner) Run(ctx context.Context) error {
 				case <-ticker.C:
 					stuckSlots := tracker.checkTimeouts(fileTimeout)
 					for _, ws := range stuckSlots {
-						if !ws.abandoned.Swap(true) {
-							skippedTimeout.Add(1)
-							s.logger.Warn("file read timed out",
-								slog.String("path", ws.activePath),
-								slog.Duration("timeout", fileTimeout),
-							)
+						newID, spawn, capExceeded, path, abandoned := tracker.abandonWorker(ws.id, &nextWorkerID)
+						if !abandoned {
+							continue
+						}
+						skippedTimeout.Add(1)
+						s.logger.Warn("file read timed out",
+							slog.String("path", path),
+							slog.Duration("timeout", fileTimeout),
+						)
+						s.bus.Publish(events.Error{
+							Time:    time.Now(),
+							Module:  "filesystem",
+							Path:    path,
+							Err:     fmt.Errorf("file read timed out after %v", fileTimeout),
+							IsFatal: false,
+						})
+
+						if spawn {
+							go runWorker(newID)
+						} else if capExceeded {
+							s.logger.Warn("abandoned worker cap reached (8); scanning capacity and coverage are degraded")
 							s.bus.Publish(events.Error{
 								Time:    time.Now(),
 								Module:  "filesystem",
-								Path:    ws.activePath,
-								Err:     fmt.Errorf("file read timed out after %v", fileTimeout),
+								Err:     errors.New("abandoned worker cap reached (8); coverage is degraded"),
 								IsFatal: false,
 							})
-
-							if ws.doneCalled.CompareAndSwap(false, true) {
-								wg.Done()
-							}
-
-							tracker.mu.Lock()
-							tracker.abandoned++
-							abandonedCount := tracker.abandoned
-							tracker.mu.Unlock()
-
-							if abandonedCount <= 8 {
-								newID := int(nextWorkerID.Add(1))
-								wg.Add(1)
-								go runWorker(newID)
-							} else {
-								s.logger.Warn("abandoned worker cap reached (8); scanning capacity and coverage are degraded")
-								s.bus.Publish(events.Error{
-									Time:    time.Now(),
-									Module:  "filesystem",
-									Err:     errors.New("abandoned worker cap reached (8); coverage is degraded"),
-									IsFatal: false,
-								})
-							}
 						}
 					}
 
@@ -1124,8 +1221,15 @@ func (s *Scanner) Run(ctx context.Context) error {
 		}
 	}
 
-		close(fileChan)
-		wg.Wait()
+		tracker.CloseFeeding(fileChan)
+		select {
+		case <-tracker.Done():
+		case <-ctx.Done():
+			if walkErr == nil {
+				walkErr = ctx.Err()
+			}
+		}
+		watchdogCancel()
 
 		// Flush and deduplicate filesystem findings
 		rawFSFindings := s.accumulator.Flush()

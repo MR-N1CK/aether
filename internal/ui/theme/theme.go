@@ -22,16 +22,16 @@ const (
 
 // Palette definitions - Premium Executive Studio Palette (Apple Pro / Stripe / Linear luxury clarity)
 var (
-	ColorObsidian = lipgloss.Color("#0B0F17") // Deep void black
-	ColorSurface  = lipgloss.Color("#161B22") // Card background
-	ColorBorder   = lipgloss.Color("#334155") // Sleek titanium slate border
-	ColorBorderLit= lipgloss.Color("#3B82F6") // Focused azure border
-	ColorTextPrim = lipgloss.Color("#FFFFFF") // Crisp platinum white text
-	ColorTextSec  = lipgloss.Color("#F1F5F9") // Soft silver text
-	ColorTextMute = lipgloss.Color("#94A3B8") // Refined slate gray
-	ColorAccent   = lipgloss.Color("#3B82F6") // Luminous Royal Azure
-	ColorIndigo   = lipgloss.Color("#6366F1") // Electric Indigo
-	ColorCyan     = lipgloss.Color("#0EA5E9") // Bright Sapphire Sky
+	ColorObsidian  = lipgloss.Color("#0B0F17") // Deep void black
+	ColorSurface   = lipgloss.Color("#161B22") // Card background
+	ColorBorder    = lipgloss.Color("#334155") // Sleek titanium slate border
+	ColorBorderLit = lipgloss.Color("#3B82F6") // Focused azure border
+	ColorTextPrim  = lipgloss.Color("#FFFFFF") // Crisp platinum white text
+	ColorTextSec   = lipgloss.Color("#F1F5F9") // Soft silver text
+	ColorTextMute  = lipgloss.Color("#94A3B8") // Refined slate gray
+	ColorAccent    = lipgloss.Color("#3B82F6") // Luminous Royal Azure
+	ColorIndigo    = lipgloss.Color("#6366F1") // Electric Indigo
+	ColorCyan      = lipgloss.Color("#0EA5E9") // Bright Sapphire Sky
 
 	// Executive severity colors - vibrant, distinct, harmonious
 	ColorInfo    = lipgloss.Color("#0EA5E9") // Sapphire Blue
@@ -45,13 +45,13 @@ type Theme struct {
 	NoColor bool
 
 	// Layout and Card styles
-	AppContainer lipgloss.Style
-	HeaderBox    lipgloss.Style
-	LogoText     lipgloss.Style
+	AppContainer  lipgloss.Style
+	HeaderBox     lipgloss.Style
+	LogoText      lipgloss.Style
 	SubHeaderText lipgloss.Style
-	CardBox      lipgloss.Style
-	CardActive   lipgloss.Style
-	StatusBar    lipgloss.Style
+	CardBox       lipgloss.Style
+	CardActive    lipgloss.Style
+	StatusBar     lipgloss.Style
 
 	// Finding list styles
 	FindingRowNormal   lipgloss.Style
@@ -62,8 +62,8 @@ type Theme struct {
 	FindingReason      lipgloss.Style
 
 	// Modal / detail styles
-	ModalBox     lipgloss.Style
-	ModalHeader  lipgloss.Style
+	ModalBox      lipgloss.Style
+	ModalHeader   lipgloss.Style
 	ModalFieldKey lipgloss.Style
 	ModalFieldVal lipgloss.Style
 
@@ -83,12 +83,27 @@ type Theme struct {
 	BrandTitle       lipgloss.Style
 	BrandTagline     lipgloss.Style
 	StatValueSafe    lipgloss.Style
+	StatValueNotice  lipgloss.Style
 	StatValueWarn    lipgloss.Style
 	StatValueAlert   lipgloss.Style
 	KeyHint          lipgloss.Style
 	KeyDesc          lipgloss.Style
 	SectionHeader    lipgloss.Style
 	SubSectionHeader lipgloss.Style
+	TabActive        lipgloss.Style
+	TabInactive      lipgloss.Style
+	ToastBox         lipgloss.Style
+	CommandPalette   lipgloss.Style
+
+	// Executive Pill Badges & Table Headings
+	PillAlert   lipgloss.Style
+	PillWarn    lipgloss.Style
+	PillNotice  lipgloss.Style
+	PillInfo    lipgloss.Style
+	PillNeutral lipgloss.Style
+	PillKey     lipgloss.Style
+	TableHead   lipgloss.Style
+	Divider     lipgloss.Style
 }
 
 // DetectNoColor returns true if NO_COLOR environment variable is set per no-color.org.
@@ -136,12 +151,25 @@ func NewTheme(noColor bool) *Theme {
 		t.BrandTitle = lipgloss.NewStyle().Bold(true)
 		t.BrandTagline = lipgloss.NewStyle()
 		t.StatValueSafe = lipgloss.NewStyle().Bold(true)
+		t.StatValueNotice = lipgloss.NewStyle().Bold(true)
 		t.StatValueWarn = lipgloss.NewStyle().Bold(true)
 		t.StatValueAlert = lipgloss.NewStyle().Bold(true)
 		t.KeyHint = lipgloss.NewStyle().Bold(true)
 		t.KeyDesc = lipgloss.NewStyle()
 		t.SectionHeader = lipgloss.NewStyle().Bold(true)
 		t.SubSectionHeader = lipgloss.NewStyle().Bold(true)
+		t.TabActive = lipgloss.NewStyle().Bold(true)
+		t.TabInactive = lipgloss.NewStyle()
+		t.ToastBox = lipgloss.NewStyle().Bold(true).Border(lipgloss.RoundedBorder()).Padding(0, 1)
+		t.CommandPalette = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2)
+		t.PillAlert = lipgloss.NewStyle().Bold(true)
+		t.PillWarn = lipgloss.NewStyle().Bold(true)
+		t.PillNotice = lipgloss.NewStyle().Bold(true)
+		t.PillInfo = lipgloss.NewStyle().Bold(true)
+		t.PillNeutral = lipgloss.NewStyle()
+		t.PillKey = lipgloss.NewStyle().Bold(true)
+		t.TableHead = lipgloss.NewStyle().Bold(true)
+		t.Divider = lipgloss.NewStyle()
 		return t
 	}
 
@@ -198,8 +226,8 @@ func NewTheme(noColor bool) *Theme {
 		Foreground(ColorTextSec)
 
 	t.FindingRowSelected = lipgloss.NewStyle().
-		Foreground(ColorTextPrim).
-		Background(lipgloss.Color("#1E293B")).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#1E3A8A")).
 		Bold(true)
 
 	t.FindingTimestamp = lipgloss.NewStyle().
@@ -276,6 +304,10 @@ func NewTheme(noColor bool) *Theme {
 		Foreground(ColorNotice).
 		Bold(true)
 
+	t.StatValueNotice = lipgloss.NewStyle().
+		Foreground(ColorNotice).
+		Bold(true)
+
 	t.StatValueWarn = lipgloss.NewStyle().
 		Foreground(ColorWarning).
 		Bold(true)
@@ -299,10 +331,76 @@ func NewTheme(noColor bool) *Theme {
 		Foreground(ColorCyan).
 		Bold(true)
 
+	t.TabActive = lipgloss.NewStyle().
+		Bold(true).
+		Background(ColorAccent).
+		Foreground(ColorTextPrim).
+		Padding(0, 1)
+
+	t.TabInactive = lipgloss.NewStyle().
+		Foreground(ColorTextMute).
+		Background(lipgloss.Color("#1E293B")).
+		Padding(0, 1)
+
+	t.ToastBox = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorTextPrim).
+		Background(ColorAccent).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorderLit).
+		Padding(0, 2)
+
+	t.CommandPalette = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorderLit).
+		Background(ColorSurface).
+		Padding(1, 2)
+
+	t.PillAlert = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorAlert).
+		Background(lipgloss.Color("#450A0A")).
+		Padding(0, 1)
+
+	t.PillWarn = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorWarning).
+		Background(lipgloss.Color("#451A03")).
+		Padding(0, 1)
+
+	t.PillNotice = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorNotice).
+		Background(lipgloss.Color("#064E3B")).
+		Padding(0, 1)
+
+	t.PillInfo = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorInfo).
+		Background(lipgloss.Color("#0C4A6E")).
+		Padding(0, 1)
+
+	t.PillNeutral = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorTextPrim).
+		Background(lipgloss.Color("#1E293B")).
+		Padding(0, 1)
+
+	t.PillKey = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorCyan)
+
+	t.TableHead = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorCyan)
+
+	t.Divider = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#334155"))
+
 	return t
 }
 
-// SeverityBadge renders a styled badge with brackets for the given severity.
+// SeverityBadge renders a styled badge with distinct colorblind textual markers for the given severity.
 func (t *Theme) SeverityBadge(sev report.Severity) string {
 	var s lipgloss.Style
 	var label string
@@ -310,16 +408,16 @@ func (t *Theme) SeverityBadge(sev report.Severity) string {
 	switch sev {
 	case report.SeverityAlert:
 		s = t.BadgeAlert
-		label = "ALERT"
+		label = "! ALERT"
 	case report.SeverityWarning:
 		s = t.BadgeWarning
-		label = "WARN "
+		label = "? WARN "
 	case report.SeverityNotice:
 		s = t.BadgeNotice
-		label = "NOTE "
+		label = "* NOTE "
 	case report.SeverityInfo:
 		s = t.BadgeInfo
-		label = "INFO "
+		label = "i INFO "
 	default:
 		s = t.BadgeInfo
 		label = string(sev)
@@ -397,4 +495,3 @@ func (t *Theme) StatusPill(label string, active bool) string {
 func CleanANSI(s string) string {
 	return strings.ReplaceAll(s, "\x1b", "")
 }
-

@@ -62,7 +62,7 @@ func RenderScanHeader(w io.Writer, ev events.ScanStarted, th *theme.Theme) {
 		Foreground(lipgloss.Color("#8B949E"))
 
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#7C3AED")).
+		Foreground(lipgloss.Color("#38BDF8")).
 		Bold(true)
 
 	valStyle := lipgloss.NewStyle().

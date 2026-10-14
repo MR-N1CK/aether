@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"aether/internal/events"
 	"aether/internal/report"
@@ -29,18 +31,30 @@ func (m Model) View() string {
 		}
 	}
 
+	if m.showPalette {
+		return m.renderCommandPalette()
+	}
+
+	var baseView string
 	switch m.state {
 	case stateSplash:
 		return m.renderSplash()
 	case stateDetail:
-		return m.renderDetailModal()
+		baseView = m.renderDetailModal()
 	case stateFinished:
-		return m.renderFinished()
+		baseView = m.renderFinished()
 	case stateDashboard:
 		fallthrough
 	default:
-		return m.renderDashboard()
+		baseView = m.renderDashboard()
 	}
+
+	if m.toastMessage != "" && time.Now().Before(m.toastUntil) {
+		toast := m.theme.ToastBox.Render("  ✓ " + m.toastMessage + "  ")
+		baseView = baseView + "\n" + toast
+	}
+
+	return baseView
 }
 
 func (m Model) renderTooSmall() string {
@@ -59,23 +73,68 @@ func (m Model) renderTooSmall() string {
 
 func (m Model) renderSplash() string {
 	var b strings.Builder
-	revealRatio := float64(m.splashFrame) / float64(m.maxSplash)
-	linesToShow := int(revealRatio * float64(len(asciiLogo)+2))
-
 	b.WriteString("\n\n")
+
+	// Determine styling based on animation phase
+	var logoStyle lipgloss.Style
+	if m.theme.NoColor {
+		logoStyle = lipgloss.NewStyle().Bold(true)
+	} else if m.splashFrame <= 6 {
+		// Phase 1: Deep Navy wipe
+		logoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2563EB")).Bold(true)
+	} else if m.splashFrame <= 12 {
+		// Phase 2: Bright Cyan
+		logoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
+	} else {
+		// Phase 3: Crisp Platinum White / Azure Glow
+		logoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+	}
+
+	linesToShow := len(asciiLogo)
+	if m.splashFrame <= 6 {
+		ratio := float64(m.splashFrame) / 6.0
+		linesToShow = int(ratio * float64(len(asciiLogo)))
+		if linesToShow < 1 {
+			linesToShow = 1
+		}
+	}
+
 	for i, line := range asciiLogo {
-		if i <= linesToShow {
-			b.WriteString(m.theme.LogoText.Render(line) + "\n")
+		if i < linesToShow {
+			b.WriteString(logoStyle.Render(line) + "\n")
 		} else {
 			b.WriteString("\n")
 		}
 	}
-
 	b.WriteString("\n")
-	if linesToShow >= len(asciiLogo) {
-		sub := m.theme.SubHeaderText.Render("LINUX-NATIVE DEFENSIVE THREAT HUNTING ENGINE")
+
+	// Typewriter tagline during Phase 2 and 3
+	fullTagline := "LINUX-NATIVE DEFENSIVE THREAT HUNTING ENGINE"
+	if m.splashFrame >= 6 {
+		var tagline string
+		if m.splashFrame < 13 {
+			typedLen := int(float64(m.splashFrame-6) / 6.0 * float64(len(fullTagline)))
+			if typedLen > len(fullTagline) {
+				typedLen = len(fullTagline)
+			}
+			tagline = fullTagline[:typedLen] + "█"
+		} else {
+			tagline = fullTagline
+		}
+		sub := m.theme.BrandTagline.Render(tagline)
 		b.WriteString(sub + "\n\n")
-		hint := m.theme.FindingTimestamp.Render("Press any key to skip...")
+
+		// Hairline progress track
+		trackWidth := 46
+		filled := (m.splashFrame * trackWidth) / m.maxSplash
+		if filled > trackWidth {
+			filled = trackWidth
+		}
+		bar := lipgloss.NewStyle().Foreground(theme.ColorCyan).Render(strings.Repeat("━", filled)) +
+			lipgloss.NewStyle().Foreground(theme.ColorBorder).Render(strings.Repeat("─", trackWidth-filled))
+		b.WriteString(bar + "\n\n")
+
+		hint := m.theme.FindingTimestamp.Render("Press any key to enter command center...")
 		b.WriteString(hint + "\n")
 	}
 
@@ -131,9 +190,10 @@ func (m Model) renderDashboard() string {
 	b.WriteString(m.theme.CardBox.Width(cardWidth).Render(modRow.String()) + "\n")
 
 	// 3. Progress / Stats Bar
-	statText := fmt.Sprintf("Files Inspected: %s", m.formatNumber(m.filesScanned))
+	statText := fmt.Sprintf("Files Inspected: %s", m.formatNumber(int64(m.smoothFilesScanned)))
 	if m.filesPerSec > 0 {
-		statText += fmt.Sprintf("  │  Velocity: %.0f files/sec", m.filesPerSec)
+		spark := m.renderSparkline(m.velocitySamples)
+		statText += fmt.Sprintf("  │  Velocity: %.0f files/sec [%s]", m.filesPerSec, spark)
 	}
 
 	// Render custom smooth progress track
@@ -149,14 +209,24 @@ func (m Model) renderDashboard() string {
 	b.WriteString(findingsView + "\n")
 
 	// 5. Status / Keybinding Footer
-	footerText := fmt.Sprintf("%s Navigate   %s Inspect Finding   %s Filter   %s Cancel/Exit",
-		m.theme.KeyHint.Render("[↑/↓/j/k]"),
+	footerText := fmt.Sprintf("%s Nav   %s Dossier   %s Filter   %s Yank   %s Shortcuts   %s Cancel",
+		m.theme.KeyHint.Render("[j/k]"),
 		m.theme.KeyHint.Render("[Enter]"),
 		m.theme.KeyHint.Render("[/]"),
+		m.theme.KeyHint.Render("[y/h/c]"),
+		m.theme.KeyHint.Render("[?]"),
 		m.theme.KeyHint.Render("[q]"),
 	)
 	if m.isFiltering {
-		footerText = fmt.Sprintf("Search Filter: %s█  (Press [Enter] to apply, [Esc] to clear)", m.filterQuery)
+		footerText = fmt.Sprintf("Search Filter: %s█  (Press [Enter] to apply, [Esc] to cancel)", m.filterQuery)
+	} else if m.filterQuery != "" {
+		footerText = fmt.Sprintf("Filter: %q (%s Clear)   %s Nav   %s Dossier   %s Yank Cmd",
+			m.filterQuery,
+			m.theme.KeyHint.Render("[Esc]"),
+			m.theme.KeyHint.Render("[j/k]"),
+			m.theme.KeyHint.Render("[Enter]"),
+			m.theme.KeyHint.Render("[c]"),
+		)
 	}
 	b.WriteString(m.theme.StatusBar.Width(cardWidth).Render(footerText))
 
@@ -195,22 +265,78 @@ func (m Model) renderRiskGauge(width int, alerts, warnings int) string {
 	var fillStyle lipgloss.Style
 
 	if alerts > 0 {
-		percent = 60 + alerts*10
+		baseScore := 80
+		alertCount := 0
+		for _, f := range m.findings {
+			if f.Severity == report.SeverityAlert || f.Severity == report.SeverityCritical {
+				alertCount++
+				score := 80
+				if f.Confidence == report.ConfidenceHigh || f.Verdict == report.VerdictMalicious {
+					score = 90
+				} else if f.Confidence == report.ConfidenceMedium {
+					score = 85
+				}
+				if f.EvidenceRecord != nil && f.EvidenceRecord.EvidenceStrength == report.StrengthDirect {
+					score = 95
+				}
+				if score > baseScore {
+					baseScore = score
+				}
+			}
+		}
+		if alertCount == 0 {
+			alertCount = alerts
+		}
+		percent = baseScore + (alertCount-1)*4
 		if percent > 100 {
 			percent = 100
 		}
-		label = fmt.Sprintf("%d%% CRITICAL RISK", percent)
+		label = fmt.Sprintf("%d%% CRITICAL COMPROMISE RISK", percent)
 		fillStyle = m.theme.StatValueAlert
 	} else if warnings > 0 {
-		percent = 25 + warnings*10
+		baseScore := 35
+		warnCount := 0
+		for _, f := range m.findings {
+			if f.Severity == report.SeverityWarning || f.Severity == report.SeverityHigh || f.Severity == report.SeverityMedium {
+				warnCount++
+				score := 35
+				if f.Confidence == report.ConfidenceHigh {
+					score = 55
+				} else if f.Confidence == report.ConfidenceMedium {
+					score = 45
+				}
+				if score > baseScore {
+					baseScore = score
+				}
+			}
+		}
+		if warnCount == 0 {
+			warnCount = warnings
+		}
+		percent = baseScore + (warnCount-1)*3
 		if percent > 85 {
 			percent = 85
 		}
-		label = fmt.Sprintf("%d%% ELEVATED RISK", percent)
+		label = fmt.Sprintf("%d%% ELEVATED ANOMALY RISK", percent)
 		fillStyle = m.theme.StatValueWarn
 	} else {
-		label = "0% (CLEAN & SECURE)"
-		fillStyle = m.theme.StatValueSafe
+		noticeCount := 0
+		for _, f := range m.findings {
+			if f.Severity == report.SeverityNotice || f.Severity == report.SeverityLow {
+				noticeCount++
+			}
+		}
+		if noticeCount > 0 {
+			percent = 10 + noticeCount*2
+			if percent > 20 {
+				percent = 20
+			}
+			label = fmt.Sprintf("%d%% LOW AUDIT NOTICE", percent)
+			fillStyle = m.theme.StatValueNotice
+		} else {
+			label = "0% (CLEAN & SECURE)"
+			fillStyle = m.theme.StatValueSafe
+		}
 	}
 
 	filled := (percent * gaugeWidth) / 100
@@ -223,15 +349,124 @@ func (m Model) renderRiskGauge(width int, alerts, warnings int) string {
 	return fmt.Sprintf("Threat Level: [%s] %s", bar, fillStyle.Render(label))
 }
 
+func (m Model) renderSparkline(samples []float64) string {
+	if len(samples) == 0 {
+		return "      "
+	}
+	blocks := []rune{' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	max := 1.0
+	for _, v := range samples {
+		if v > max {
+			max = v
+		}
+	}
+	var b strings.Builder
+	for _, v := range samples {
+		idx := int((v / max) * 7)
+		if idx < 0 {
+			idx = 0
+		} else if idx > 7 {
+			idx = 7
+		}
+		b.WriteRune(blocks[idx])
+	}
+	return m.theme.KeyHint.Render(b.String())
+}
+
+func (m Model) renderDonutChart(alerts, warnings, notices, safe int) string {
+	if m.theme.NoColor {
+		return "[DONUT]\n" + fmt.Sprintf("A:%d W:%d S:%d", alerts, warnings, safe)
+	}
+
+	total := alerts + warnings + notices + safe
+	if total <= 0 {
+		total = 1
+		safe = 1
+	}
+
+	// 8 perimeter segments in clockwise order:
+	// 0: Top (▀), 1: Top-Right (▜), 2: Right (▐), 3: Bottom-Right (▟),
+	// 4: Bottom (▄), 5: Bottom-Left (▙), 6: Left (▌), 7: Top-Left (▛)
+	numAlerts := int(float64(alerts) / float64(total) * 8.0)
+	if alerts > 0 && numAlerts == 0 {
+		numAlerts = 1
+	}
+	numWarns := int(float64(warnings) / float64(total) * 8.0)
+	if warnings > 0 && numWarns == 0 {
+		numWarns = 1
+	}
+	numNotices := int(float64(notices) / float64(total) * 8.0)
+	if notices > 0 && numNotices == 0 {
+		numNotices = 1
+	}
+
+	// Clamp total non-safe segments to at most 8
+	if numAlerts+numWarns+numNotices > 8 {
+		overflow := (numAlerts + numWarns + numNotices) - 8
+		if numNotices >= overflow {
+			numNotices -= overflow
+		} else {
+			overflow -= numNotices
+			numNotices = 0
+			if numWarns >= overflow {
+				numWarns -= overflow
+			} else {
+				numWarns = 0
+			}
+		}
+	}
+
+	styles := make([]lipgloss.Style, 8)
+	for i := 0; i < 8; i++ {
+		if i < numAlerts {
+			styles[i] = m.theme.StatValueAlert
+		} else if i < numAlerts+numWarns {
+			styles[i] = m.theme.StatValueWarn
+		} else if i < numAlerts+numWarns+numNotices {
+			styles[i] = m.theme.StatValueNotice
+		} else {
+			styles[i] = m.theme.StatValueSafe
+		}
+	}
+
+	centerChar := "✓"
+	centerStyle := m.theme.StatValueSafe
+	if alerts > 0 {
+		centerChar = "!"
+		centerStyle = m.theme.StatValueAlert
+	} else if warnings > 0 {
+		centerChar = "?"
+		centerStyle = m.theme.StatValueWarn
+	} else if notices > 0 {
+		centerChar = "*"
+		centerStyle = m.theme.StatValueNotice
+	}
+
+	r1 := fmt.Sprintf("%s%s%s", styles[7].Render("▛"), styles[0].Render("▀"), styles[1].Render("▜"))
+	r2 := fmt.Sprintf("%s%s%s", styles[6].Render("▌"), centerStyle.Render(centerChar), styles[2].Render("▐"))
+	r3 := fmt.Sprintf("%s%s%s", styles[5].Render("▙"), styles[4].Render("▄"), styles[3].Render("▟"))
+
+	return fmt.Sprintf("%s\n%s\n%s", r1, r2, r3)
+}
+
 func (m Model) renderExecutiveSummaryMatrix(width int, alerts, warnings, notices, infos int, filesScanned int64) string {
 	cleanFiles := filesScanned - int64(alerts) - int64(warnings)
 	if cleanFiles < 0 {
 		cleanFiles = 0
 	}
 
-	colWidth := (width - 10) / 3
-	if colWidth < 20 {
-		colWidth = 20
+	donut := m.renderDonutChart(alerts, warnings, notices, int(cleanFiles))
+	donutBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.ColorBorderLit).
+		Background(lipgloss.Color("#161B22")).
+		Padding(0, 1).
+		Align(lipgloss.Center).
+		Render(fmt.Sprintf("%s\n%s", m.theme.KeyHint.Render("DONUT"), donut))
+
+	colWidth := (width - 18) / 3
+	if colWidth < 18 {
+		colWidth = 18
 	}
 
 	maliciousBox := lipgloss.NewStyle().
@@ -281,12 +516,49 @@ func (m Model) renderExecutiveSummaryMatrix(width int, alerts, warnings, notices
 	)
 
 	cols := lipgloss.JoinHorizontal(lipgloss.Top,
+		donutBox, " ",
 		maliciousBox.Render(malText), " ",
 		suspiciousBox.Render(suspText), " ",
 		safeBox.Render(safeText),
 	)
 
 	return cols
+}
+
+func formatPathCol(p string, width int) string {
+	w := runewidth.StringWidth(p)
+	if w <= width {
+		return p + strings.Repeat(" ", width-w)
+	}
+	if width <= 12 {
+		return runewidth.Truncate(p, width, "…")
+	}
+	base := filepath.Base(p)
+	baseW := runewidth.StringWidth(base)
+	if baseW+8 <= width {
+		prefixW := width - baseW - 5
+		if prefixW < 3 {
+			prefixW = 3
+		}
+		prefix := runewidth.Truncate(p, prefixW, "")
+		res := fmt.Sprintf("%s.../%s", prefix, base)
+		pad := width - runewidth.StringWidth(res)
+		if pad > 0 {
+			res += strings.Repeat(" ", pad)
+		}
+		return res
+	}
+	tailLen := width - 3
+	tail := ""
+	if tailLen > 0 && len(p) >= tailLen {
+		tail = p[len(p)-tailLen:]
+	}
+	res := "..." + tail
+	pad := width - runewidth.StringWidth(res)
+	if pad > 0 {
+		res += strings.Repeat(" ", pad)
+	}
+	return res
 }
 
 func (m Model) renderFindingsFeed(width int) string {
@@ -298,12 +570,51 @@ func (m Model) renderFindingsFeed(width int) string {
 		header += fmt.Sprintf(", %d matched filter %q", len(list), m.filterQuery)
 	}
 	header += "):"
-	b.WriteString(m.theme.SectionHeader.Render(header) + "\n")
+	b.WriteString(m.theme.SectionHeader.Render(header) + "\n\n")
 
 	if len(list) == 0 {
 		b.WriteString(m.theme.StatValueSafe.Render("  ✓ No security indicators or anomalies detected. All inspected files verified clean.") + "\n")
 		return m.theme.CardBox.Width(width).Render(b.String())
 	}
+
+	// Calculate inner usable width inside CardBox (accounting for borders and padding)
+	innerWidth := width - 6
+	if innerWidth < 64 {
+		innerWidth = 64
+	}
+
+	// Dynamic column layout
+	// prefix: 2 | badge: 9 | space: 1 | ts: 8 | div1: 3 | mod: 11 | div2: 3 | div3: 3 = 40 runes
+	fixedOverhead := 40
+	availForPathReason := innerWidth - fixedOverhead
+	if availForPathReason < 24 {
+		availForPathReason = 24
+	}
+
+	pathWidth := availForPathReason * 42 / 100
+	if pathWidth < 18 {
+		pathWidth = 18
+	}
+	reasonWidth := availForPathReason - pathWidth
+	if reasonWidth < 14 {
+		reasonWidth = 14
+	}
+
+	// Table Column Header row
+	div := m.theme.Divider.Render("│")
+	tblHeader := fmt.Sprintf("  %s %s %s %-11s %s %-*s %s %-*s",
+		m.theme.TableHead.Render("SEVERITY "),
+		m.theme.TableHead.Render("  TIME  "),
+		div,
+		m.theme.TableHead.Render("MODULE"),
+		div,
+		pathWidth, m.theme.TableHead.Render("TARGET PATH"),
+		div,
+		reasonWidth, m.theme.TableHead.Render("OBSERVED EVIDENCE / DETAILS"),
+	)
+	b.WriteString(tblHeader + "\n")
+	sepLine := strings.Repeat("─", innerWidth)
+	b.WriteString(m.theme.Divider.Render(sepLine) + "\n")
 
 	// Determine vertical window to display
 	maxVisible := 5
@@ -326,16 +637,27 @@ func (m Model) renderFindingsFeed(width int) string {
 		ts := f.Timestamp.Format("15:04:05")
 		prefix := "  "
 		if i == m.selectedIndex {
-			prefix = "> "
+			prefix = "▶ "
 		}
 
-		path := f.Path
-		if len(path) > 34 {
-			path = "..." + path[len(path)-31:]
+		pathStr := formatPathCol(f.Path, pathWidth)
+		reasonStr := runewidth.Truncate(f.Reason, reasonWidth, "…")
+		reasonPad := reasonWidth - runewidth.StringWidth(reasonStr)
+		if reasonPad > 0 {
+			reasonStr += strings.Repeat(" ", reasonPad)
 		}
 
-		reason := f.Reason
-		line := fmt.Sprintf("%s%s  %s  %-10s  %-34s  %s", prefix, badge, ts, f.Module, path, reason)
+		line := fmt.Sprintf("%s%s %s %s %-11s %s %s %s %s",
+			prefix,
+			badge,
+			m.theme.FindingTimestamp.Render(ts),
+			div,
+			m.theme.FindingModule.Render(runewidth.Truncate(f.Module, 11, "")),
+			div,
+			m.theme.FindingPath.Render(pathStr),
+			div,
+			m.theme.FindingReason.Render(reasonStr),
+		)
 
 		if i == m.selectedIndex {
 			b.WriteString(m.theme.FindingRowSelected.Render(line) + "\n")
@@ -351,16 +673,33 @@ func (m Model) renderFindingsFeed(width int) string {
 	if sel != nil {
 		report.PopulateFindingDetails(sel)
 		var p strings.Builder
-		pTitle := fmt.Sprintf("🔍 SELECTED THREAT PREVIEW: %s %s", m.theme.SeverityBadge(sel.Severity), sel.Title)
-		p.WriteString(m.theme.SubSectionHeader.Render(pTitle) + "\n")
-		p.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Path:       "), sel.Path))
+		pTitle := fmt.Sprintf("🔍 THREAT PREVIEW  •  %s  %s", m.theme.SeverityBadge(sel.Severity), m.theme.BrandTitle.Render(sel.Title))
+		p.WriteString(pTitle + "\n")
+
+		p.WriteString(fmt.Sprintf("  %s %s\n",
+			m.theme.ModalFieldKey.Render("Target File: "),
+			m.theme.FindingPath.Render(sel.Path),
+		))
 		if sel.Why != "" {
-			p.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Assessment: "), sel.Why))
+			whyText := runewidth.Truncate(sel.Why, width-20, "…")
+			p.WriteString(fmt.Sprintf("  %s %s\n",
+				m.theme.ModalFieldKey.Render("Assessment:  "),
+				m.theme.FindingRowNormal.Render(whyText),
+			))
 		}
 		if len(sel.Remediation) > 0 {
-			p.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Remediation:"), sel.Remediation[0]))
+			remText := runewidth.Truncate(sel.Remediation[0], width-20, "…")
+			p.WriteString(fmt.Sprintf("  %s %s\n",
+				m.theme.ModalFieldKey.Render("Containment: "),
+				m.theme.FindingReason.Render(remText),
+			))
 		}
-		p.WriteString(m.theme.KeyHint.Render("💡 Press [Enter] for Full Forensic Dossier with Hashes, Line Evidence & MITRE ATT&CK"))
+		p.WriteString("  " + m.theme.ModalFieldKey.Render("Actions:     ") +
+			m.theme.KeyHint.Render("[Enter]") + m.theme.FindingReason.Render(" Open Dossier  •  ") +
+			m.theme.KeyHint.Render("[y]") + m.theme.FindingReason.Render(" Yank Path  •  ") +
+			m.theme.KeyHint.Render("[h]") + m.theme.FindingReason.Render(" Yank Hash  •  ") +
+			m.theme.KeyHint.Render("[c]") + m.theme.FindingReason.Render(" Yank Cmd  •  ") +
+			m.theme.KeyHint.Render("[?]") + m.theme.FindingReason.Render(" Shortcuts"))
 
 		previewBox := m.theme.CardActive.Width(width).Render(p.String())
 		return feedBox + "\n" + previewBox
@@ -377,12 +716,12 @@ func (m Model) renderDetailModal() string {
 
 	report.PopulateFindingDetails(f)
 
-	modalWidth := 74
-	if m.width > 80 {
-		modalWidth = m.width - 10
+	modalWidth := 78
+	if m.width > 86 {
+		modalWidth = m.width - 8
 	}
-	if modalWidth > 96 {
-		modalWidth = 96
+	if modalWidth > 100 {
+		modalWidth = 100
 	}
 
 	var b strings.Builder
@@ -390,66 +729,164 @@ func (m Model) renderDetailModal() string {
 	title := fmt.Sprintf("🔍 FORENSIC THREAT DOSSIER :: %s %s", badge, f.Title)
 	b.WriteString(m.theme.ModalHeader.Render(title) + "\n\n")
 
-	// Threat Assessment Section
-	b.WriteString(m.theme.SubSectionHeader.Render("1. EXECUTIVE THREAT ASSESSMENT") + "\n")
-	b.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Detection Rule:"), f.RuleName))
-	b.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Security Module:"), f.Module))
-	b.WriteString(fmt.Sprintf("%s %s  │  %s %s (Confidence: %s)\n",
-		m.theme.ModalFieldKey.Render("Alert Severity:"), f.Severity,
-		m.theme.ModalFieldKey.Render("Verdict:"), f.Verdict, f.Confidence))
-	if f.ConfidenceRationale != "" {
-		b.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Rationale:     "), f.ConfidenceRationale))
-	}
-	if f.EvidenceRecord != nil && len(f.EvidenceRecord.ContributingDetectors) > 0 {
-		b.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Corroboration: "), strings.Join(f.EvidenceRecord.ContributingDetectors, ", ")))
-	}
-	if f.Why != "" {
-		b.WriteString(fmt.Sprintf("%s\n%s\n", m.theme.ModalFieldKey.Render("Why This Is Dangerous:"), f.Why))
-	}
-	b.WriteString("\n")
-
-	// Artifact Details Section
-	b.WriteString(m.theme.SubSectionHeader.Render("2. FORENSIC ARTIFACT DETAILS") + "\n")
-	b.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Target File Path:"), f.Path))
-	b.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Detection Time:  "), f.Timestamp.Format(time.RFC3339)))
-	if f.EvidenceRecord != nil {
-		b.WriteString(fmt.Sprintf("%s %s  │  %s %s\n",
-			m.theme.ModalFieldKey.Render("Package Status:  "), f.EvidenceRecord.PackageStatus,
-			m.theme.ModalFieldKey.Render("Context Profile:"), f.EvidenceRecord.ContextProfile))
-	}
-	if f.Evidence != "" {
-		b.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Evidence Snippet:"), f.Evidence))
-	}
-
-	if len(f.Hashes) > 0 {
-		b.WriteString(m.theme.ModalFieldKey.Render("Cryptographic Hashes:") + "\n")
-		for k, v := range f.Hashes {
-			b.WriteString(fmt.Sprintf("  • %-8s %s\n", k+":", v))
+	// Render Tab Navigation Bar
+	tabTitles := []string{"[1] Assessment", "[2] Artifact", "[3] MITRE ATT&CK", "[4] Remediation"}
+	var tabsRow strings.Builder
+	for i, tTitle := range tabTitles {
+		if i == m.activeTab {
+			tabsRow.WriteString(m.theme.TabActive.Render(" "+tTitle+" ") + "  ")
+		} else {
+			tabsRow.WriteString(m.theme.TabInactive.Render(" "+tTitle+" ") + "  ")
 		}
 	}
-	b.WriteString("\n")
+	b.WriteString(tabsRow.String() + "\n\n")
 
-	// MITRE ATT&CK Mapping Section
-	if len(f.MITRE) > 0 {
-		b.WriteString(m.theme.SubSectionHeader.Render("3. MITRE ATT&CK FRAMEWORK CLASSIFICATION") + "\n")
-		for _, mit := range f.MITRE {
-			b.WriteString(fmt.Sprintf("  • [%s] %s — %s\n", mit.Technique, mit.Tactic, mit.TechniqueName))
+	// Render Active Tab Content into buffer for scrollable viewport
+	var content strings.Builder
+	switch m.activeTab {
+	case 0: // Assessment
+		content.WriteString(m.theme.SubSectionHeader.Render("EXECUTIVE THREAT ASSESSMENT & REASONING") + "\n")
+		content.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Detection Rule:"), f.RuleName))
+		content.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Security Module:"), f.Module))
+		content.WriteString(fmt.Sprintf("%s %s  │  %s %s (Confidence: %s)\n",
+			m.theme.ModalFieldKey.Render("Alert Severity:"), f.Severity,
+			m.theme.ModalFieldKey.Render("Verdict:"), f.Verdict, f.Confidence))
+		if f.ConfidenceRationale != "" {
+			content.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Rationale:     "), f.ConfidenceRationale))
 		}
+		if f.EvidenceRecord != nil && len(f.EvidenceRecord.ContributingDetectors) > 0 {
+			content.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Corroboration: "), strings.Join(f.EvidenceRecord.ContributingDetectors, ", ")))
+		}
+		if f.Why != "" {
+			content.WriteString(fmt.Sprintf("\n%s\n%s\n", m.theme.ModalFieldKey.Render("Why This Pattern Is Dangerous:"), f.Why))
+		}
+
+	case 1: // Artifact Details
+		content.WriteString(m.theme.SubSectionHeader.Render("FORENSIC ARTIFACT & HOST EVIDENCE") + "\n")
+		content.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Target File Path:"), f.Path))
+		content.WriteString(fmt.Sprintf("%s %s\n", m.theme.ModalFieldKey.Render("Detection Time:  "), f.Timestamp.Format(time.RFC3339)))
+		if f.EvidenceRecord != nil {
+			content.WriteString(fmt.Sprintf("%s %s  │  %s %s\n",
+				m.theme.ModalFieldKey.Render("Package Status:  "), f.EvidenceRecord.PackageStatus,
+				m.theme.ModalFieldKey.Render("Context Profile:"), f.EvidenceRecord.ContextProfile))
+		}
+		if f.Evidence != "" {
+			content.WriteString(fmt.Sprintf("\n%s\n  %s\n", m.theme.ModalFieldKey.Render("Matched Evidence:"), f.Evidence))
+		}
+		if len(f.Hashes) > 0 {
+			content.WriteString(fmt.Sprintf("\n%s\n", m.theme.ModalFieldKey.Render("Cryptographic Hashes:")))
+			for k, v := range f.Hashes {
+				content.WriteString(fmt.Sprintf("  • %-8s %s\n", k+":", v))
+			}
+		}
+
+	case 2: // MITRE ATT&CK
+		content.WriteString(m.theme.SubSectionHeader.Render("MITRE ATT&CK FRAMEWORK CLASSIFICATION") + "\n")
+		if len(f.MITRE) == 0 {
+			content.WriteString("  No MITRE ATT&CK techniques mapped to this finding.\n")
+		} else {
+			for _, mit := range f.MITRE {
+				content.WriteString(fmt.Sprintf("  • %s %s :: %s\n",
+					m.theme.KeyHint.Render("["+mit.Technique+"]"),
+					m.theme.ModalFieldKey.Render(mit.Tactic),
+					mit.TechniqueName))
+			}
+		}
+
+	case 3: // Remediation Plan
+		content.WriteString(m.theme.SubSectionHeader.Render("RECOMMENDED CONTAINMENT & REMEDIATION PLAN") + "\n")
+		if len(f.Remediation) == 0 {
+			content.WriteString("  No specific remediation steps required for this finding.\n")
+		} else {
+			for idx, step := range f.Remediation {
+				content.WriteString(fmt.Sprintf("  %d. %s\n", idx+1, step))
+			}
+		}
+	}
+
+	// Viewport window calculation
+	lines := strings.Split(content.String(), "\n")
+	maxVisible := m.height - 12
+	if maxVisible < 5 {
+		maxVisible = 5
+	}
+
+	scrollY := m.modalScrollY
+	if scrollY > len(lines)-maxVisible {
+		scrollY = len(lines) - maxVisible
+	}
+	if scrollY < 0 {
+		scrollY = 0
+	}
+
+	visibleEnd := scrollY + maxVisible
+	if visibleEnd > len(lines) {
+		visibleEnd = len(lines)
+	}
+
+	for i := scrollY; i < visibleEnd; i++ {
+		b.WriteString(lines[i] + "\n")
+	}
+
+	if len(lines) > maxVisible {
+		scrollIndicator := fmt.Sprintf("▲ [Scroll: Line %d-%d of %d  •  Use j/k, PgUp/PgDn, g/G] ▼",
+			scrollY+1, visibleEnd, len(lines))
+		b.WriteString(m.theme.KeyHint.Render(scrollIndicator) + "\n")
+	} else {
 		b.WriteString("\n")
 	}
 
-	// Actionable Remediation Plan Section
-	if len(f.Remediation) > 0 {
-		b.WriteString(m.theme.SubSectionHeader.Render("4. RECOMMENDED CONTAINMENT & REMEDIATION") + "\n")
-		for idx, step := range f.Remediation {
-			b.WriteString(fmt.Sprintf("  %d. %s\n", idx+1, step))
-		}
-		b.WriteString("\n")
-	}
-
-	b.WriteString(m.theme.KeyHint.Render("Press [Esc] or [Enter] to return to Command Center"))
+	footer := fmt.Sprintf("%s Tab   %s Scroll   %s Path   %s Hash   %s Cmd   %s Close",
+		m.theme.KeyHint.Render("[Tab/1-4]"),
+		m.theme.KeyHint.Render("[j/k]"),
+		m.theme.KeyHint.Render("[y]"),
+		m.theme.KeyHint.Render("[h]"),
+		m.theme.KeyHint.Render("[c]"),
+		m.theme.KeyHint.Render("[Esc]"),
+	)
+	b.WriteString(m.theme.FindingTimestamp.Render(footer))
 
 	box := m.theme.ModalBox.Width(modalWidth).Render(b.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m Model) renderCommandPalette() string {
+	w := 72
+	if m.width > 80 {
+		w = m.width - 10
+	}
+	if w > 86 {
+		w = 86
+	}
+
+	var b strings.Builder
+	b.WriteString(m.theme.ModalHeader.Render("⌨  AETHER COMMAND CENTER & KEYBOARD SHORTCUTS") + "\n\n")
+
+	items := []struct {
+		key  string
+		desc string
+	}{
+		{"j / k / ↑ / ↓", "Navigate findings list / scroll forensic dossier"},
+		{"g / G", "Jump to top / bottom of findings list or dossier"},
+		{"PgUp / PgDn", "Scroll 5 findings or dossier lines up / down"},
+		{"Enter", "Open Forensic Threat Dossier for selected finding"},
+		{"/", "Live fuzzy search / filter findings feed"},
+		{"Esc", "Clear active search filter / close modal"},
+		{"c", "Copy actionable remediation command to clipboard"},
+		{"y", "Copy selected finding path to clipboard"},
+		{"h", "Copy selected finding cryptographic hash (SHA256/MD5)"},
+		{"Tab / 1-4", "Switch dossier tabs (Assessment, Artifact, MITRE, Remediation)"},
+		{"?", "Toggle this Keyboard Shortcuts Command Palette"},
+		{"q / Ctrl+C", "Quit scanner / Close modal dialog"},
+	}
+
+	for _, it := range items {
+		b.WriteString(fmt.Sprintf("  %-16s %s\n", m.theme.KeyHint.Render(it.key), m.theme.FindingRowNormal.Render(it.desc)))
+	}
+
+	b.WriteString("\n" + m.theme.KeyHint.Render("Press [Esc], [?], or [Enter] to return"))
+
+	box := m.theme.CommandPalette.Width(w).Render(b.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
@@ -511,27 +948,82 @@ func (m Model) renderFinished() string {
 
 	// 4. Detailed Telemetry & Coverage Card
 	var stats strings.Builder
-	stats.WriteString(fmt.Sprintf("Inspected: %s files  │  Duration: %s  │  Total Findings: %d  (Alerts: %d, Warnings: %d, Notices: %d, Infos: %d)",
-		m.formatNumber(m.filesScanned), m.formatDuration(m.elapsed), len(m.findings), alerts, warnings, notices, infos))
+	stats.WriteString(m.theme.SectionHeader.Render("📊 FORENSIC TELEMETRY & AUDIT METRICS") + "\n\n")
 
+	// Row 1: Primary Metrics Badges with spacious breathing room
+	metricsRow := fmt.Sprintf("  %s   %s   %s   %s   %s   %s",
+		m.theme.PillNeutral.Render(fmt.Sprintf(" 📁 %s Inspected ", m.formatNumber(m.filesScanned))),
+		m.theme.PillNeutral.Render(fmt.Sprintf(" ⏱ %s Elapsed ", m.formatDuration(m.elapsed))),
+		m.theme.PillAlert.Render(fmt.Sprintf(" 🚨 %d Alerts ", alerts)),
+		m.theme.PillWarn.Render(fmt.Sprintf(" ⚠️ %d Warnings ", warnings)),
+		m.theme.PillNotice.Render(fmt.Sprintf(" 🔍 %d Notices ", notices)),
+		m.theme.PillInfo.Render(fmt.Sprintf(" ℹ️ %d Infos ", infos)),
+	)
+	stats.WriteString(metricsRow + "\n")
+
+	// Row 2: Clean Skipped Breakdown (only show non-zero items)
 	if cov.TotalSkipped() > 0 {
-		stats.WriteString(fmt.Sprintf("\nSkipped Files: %d  (Oversize: %d, Perm Denied: %d, Vanished: %d, Non-Regular: %d, Excluded: %d)",
-			cov.TotalSkipped(), cov.SkippedOversize, cov.SkippedPermission, cov.SkippedVanished, cov.SkippedNotRegular, cov.SkippedExcluded))
+		var skippedParts []string
+		if cov.SkippedPermission > 0 {
+			skippedParts = append(skippedParts, fmt.Sprintf("%d Perm Denied", cov.SkippedPermission))
+		}
+		if cov.SkippedOversize > 0 {
+			skippedParts = append(skippedParts, fmt.Sprintf("%d Oversize", cov.SkippedOversize))
+		}
+		if cov.SkippedNotRegular > 0 {
+			skippedParts = append(skippedParts, fmt.Sprintf("%d Non-Regular", cov.SkippedNotRegular))
+		}
+		if cov.SkippedExcluded > 0 {
+			skippedParts = append(skippedParts, fmt.Sprintf("%d Excluded", cov.SkippedExcluded))
+		}
+		if cov.SkippedVanished > 0 {
+			skippedParts = append(skippedParts, fmt.Sprintf("%d Vanished", cov.SkippedVanished))
+		}
+		stats.WriteString(fmt.Sprintf("\n  %s %s: %s\n",
+			m.theme.FindingTimestamp.Render("⊘"),
+			m.theme.FindingTimestamp.Render(fmt.Sprintf("Skipped (%d)", cov.TotalSkipped())),
+			m.theme.FindingTimestamp.Render(strings.Join(skippedParts, "  •  ")),
+		))
 	}
+
+	// Optional YARA stats if active
 	if m.finishEvent != nil && m.finishEvent.YARACoverage != nil {
 		yCov := m.finishEvent.YARACoverage
 		if yCov.RulesLoaded > 0 {
-			stats.WriteString(fmt.Sprintf("\nYARA-X Engine: %d Rules Active (Scanned: %d, Oversize: %d, Errors: %d)",
-				yCov.RulesLoaded, yCov.FilesScanned, yCov.SkippedOversize, yCov.SkippedError))
+			stats.WriteString(fmt.Sprintf("  %s %s\n",
+				m.theme.FindingTimestamp.Render("⚡"),
+				m.theme.FindingTimestamp.Render(fmt.Sprintf("YARA-X Engine: %d Rules Active  •  %d Files Evaluated", yCov.RulesLoaded, yCov.FilesScanned)),
+			))
 		}
 	}
+
+	// Row 3: Curated Top Triggered Rules (top 4-5 chips instead of 20-rule wall)
 	if m.finishEvent != nil && len(m.finishEvent.TopRules) > 0 {
-		stats.WriteString("\nTop Rules Triggered: ")
-		var trParts []string
-		for _, tr := range m.finishEvent.TopRules {
-			trParts = append(trParts, fmt.Sprintf("%s (%d)", tr.RuleName, tr.Count))
+		stats.WriteString(fmt.Sprintf("\n  %s  ", m.theme.SubSectionHeader.Render("🏷️ Top Detections:")))
+		maxRules := 4
+		if cardWidth > 110 {
+			maxRules = 6
 		}
-		stats.WriteString(strings.Join(trParts, ", "))
+		displayed := 0
+		for idx, tr := range m.finishEvent.TopRules {
+			if idx >= maxRules {
+				break
+			}
+			shortName := tr.RuleName
+			shortName = strings.TrimPrefix(shortName, "Persistence_System_")
+			shortName = strings.TrimPrefix(shortName, "Persistence_")
+			shortName = strings.TrimPrefix(shortName, "Script_")
+			shortName = strings.TrimPrefix(shortName, "Process_")
+			shortName = strings.TrimPrefix(shortName, "Linux_")
+			chip := m.theme.PillNeutral.Render(fmt.Sprintf(" [%s: %d] ", shortName, tr.Count))
+			stats.WriteString(chip + "  ")
+			displayed++
+		}
+		if len(m.finishEvent.TopRules) > displayed {
+			remaining := len(m.finishEvent.TopRules) - displayed
+			stats.WriteString(m.theme.FindingTimestamp.Render(fmt.Sprintf("(+%d more)", remaining)))
+		}
+		stats.WriteString("\n")
 	}
 	b.WriteString(m.theme.CardBox.Width(cardWidth).Render(stats.String()) + "\n")
 
@@ -539,14 +1031,24 @@ func (m Model) renderFinished() string {
 	b.WriteString(m.renderFindingsFeed(cardWidth) + "\n")
 
 	// 6. Navigation Footer
-	footerText := fmt.Sprintf("%s Navigate   %s Full Forensic Dossier   %s Filter   %s Exit Command Center",
-		m.theme.KeyHint.Render("[↑/↓/j/k]"),
+	footerText := fmt.Sprintf("%s Nav   %s Dossier   %s Filter   %s Yank   %s Shortcuts   %s Exit",
+		m.theme.KeyHint.Render("[j/k]"),
 		m.theme.KeyHint.Render("[Enter]"),
 		m.theme.KeyHint.Render("[/]"),
+		m.theme.KeyHint.Render("[y/h/c]"),
+		m.theme.KeyHint.Render("[?]"),
 		m.theme.KeyHint.Render("[q]"),
 	)
 	if m.isFiltering {
-		footerText = fmt.Sprintf("Search Filter: %s█  (Press [Enter] to apply, [Esc] to clear)", m.filterQuery)
+		footerText = fmt.Sprintf("Search Filter: %s█  (Press [Enter] to apply, [Esc] to cancel)", m.filterQuery)
+	} else if m.filterQuery != "" {
+		footerText = fmt.Sprintf("Filter: %q (%s Clear)   %s Nav   %s Dossier   %s Yank Cmd",
+			m.filterQuery,
+			m.theme.KeyHint.Render("[Esc]"),
+			m.theme.KeyHint.Render("[j/k]"),
+			m.theme.KeyHint.Render("[Enter]"),
+			m.theme.KeyHint.Render("[c]"),
+		)
 	}
 	b.WriteString(m.theme.StatusBar.Width(cardWidth).Render(footerText))
 
@@ -557,25 +1059,48 @@ func (m Model) renderProgressBar(width int) string {
 	if width < 5 {
 		return ""
 	}
-	// Dynamic animated pulse bar
-	chars := make([]rune, width)
-	activePos := int(m.elapsed.Milliseconds()/100) % width
-	for i := 0; i < width; i++ {
-		dist := i - activePos
-		if dist < 0 {
-			dist = -dist
+	progressRatio := 0.0
+	totalMods := len(m.moduleOrder)
+	if totalMods > 0 {
+		completed := 0
+		for _, mod := range m.activeModules {
+			if mod.Finished {
+				completed++
+			}
 		}
-		if dist == 0 {
-			chars[i] = '█'
-		} else if dist <= 2 {
-			chars[i] = '▓'
-		} else if dist <= 4 {
-			chars[i] = '▒'
+		progressRatio = float64(completed) / float64(totalMods)
+	}
+	if m.scanFinished {
+		progressRatio = 1.0
+	}
+
+	trackWidth := width - 7
+	if trackWidth < 5 {
+		trackWidth = 5
+	}
+	filled := int(progressRatio * float64(trackWidth))
+	if filled > trackWidth {
+		filled = trackWidth
+	}
+	if filled < 0 {
+		filled = 0
+	}
+
+	pulseFrames := []rune{'█', '▓', '▒', '░'}
+	pulseIdx := int(m.elapsed.Milliseconds()/150) % len(pulseFrames)
+
+	var b strings.Builder
+	for i := 0; i < trackWidth; i++ {
+		if i < filled {
+			b.WriteRune('█')
+		} else if i == filled && !m.scanFinished && filled < trackWidth {
+			b.WriteRune(pulseFrames[pulseIdx])
 		} else {
-			chars[i] = '░'
+			b.WriteRune('─')
 		}
 	}
-	return string(chars)
+
+	return fmt.Sprintf("[%s %3.0f%%]", b.String(), progressRatio*100)
 }
 
 func (m Model) formatDuration(d time.Duration) string {

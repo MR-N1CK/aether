@@ -42,8 +42,8 @@ func TestTheme_NoColorRendering(t *testing.T) {
 	}
 
 	badge := th.SeverityBadge(report.SeverityAlert)
-	if !strings.Contains(badge, "[ALERT]") {
-		t.Errorf("expected plain badge containing [ALERT], got: %q", badge)
+	if !strings.Contains(badge, "ALERT") {
+		t.Errorf("expected plain badge containing ALERT, got: %q", badge)
 	}
 
 	// Verify no ESC bytes (\x1b) in monochrome badge

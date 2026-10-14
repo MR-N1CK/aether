@@ -16,17 +16,17 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 
 // LiveDashboard manages real-time scan progress rendering without flooding stdout.
 type LiveDashboard struct {
-	writer      io.Writer
-	th          *theme.Theme
-	isTTY       bool
-	frameIdx    int
-	lastRender  time.Time
-	alerts      int
-	warnings    int
-	notices     int
-	infos       int
-	activeMod   string
-	filesSec    float64
+	writer       io.Writer
+	th           *theme.Theme
+	isTTY        bool
+	frameIdx     int
+	lastRender   time.Time
+	alerts       int
+	warnings     int
+	notices      int
+	infos        int
+	activeMod    string
+	filesSec     float64
 	totalScanned int64
 }
 

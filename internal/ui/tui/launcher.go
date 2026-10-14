@@ -311,7 +311,7 @@ func (m LauncherModel) View() string {
 		subStyle.Render("v0.1.0-dev"),
 	)
 	headerBadges := fmt.Sprintf("%s  %s", privBadge, yaraBadge)
-	
+
 	// Right align badges relative to title
 	spacerLen := wBox - lipgloss.Width(headerTop) - lipgloss.Width(headerBadges) - 4
 	if spacerLen < 2 {

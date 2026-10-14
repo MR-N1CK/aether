@@ -19,6 +19,7 @@ type Consumer struct {
 	writer              io.Writer
 	theme               *theme.Theme
 	verbose             bool
+	quiet               bool
 	dashboard           *LiveDashboard
 	permErrors          map[string]int
 	vanishedErrors      map[string]int
@@ -49,6 +50,12 @@ func NewConsumer(w io.Writer, th *theme.Theme, verbose bool) *Consumer {
 	}
 }
 
+// WithQuiet configures quiet mode (suppressing non-alert output, scan header and progress).
+func (c *Consumer) WithQuiet(quiet bool) *Consumer {
+	c.quiet = quiet
+	return c
+}
+
 // Consume processes events from a subscription until the channel is closed,
 // a ScanFinished event is rendered, or context cancelled.
 func (c *Consumer) Consume(ctx context.Context, sub *events.Subscription) error {
@@ -70,7 +77,9 @@ func (c *Consumer) Consume(ctx context.Context, sub *events.Subscription) error 
 func (c *Consumer) renderEvent(e events.Event) bool {
 	switch ev := e.(type) {
 	case events.ScanStarted:
-		RenderScanHeader(c.writer, ev, c.theme)
+		if !c.quiet {
+			RenderScanHeader(c.writer, ev, c.theme)
+		}
 
 	case events.ModuleStarted:
 		c.dashboard.activeMod = ev.ModuleName
@@ -90,7 +99,7 @@ func (c *Consumer) renderEvent(e events.Event) bool {
 			if ev.Err != nil {
 				fmt.Fprintf(c.writer, "[AETHER] [NOTICE] Module %s failed: %v\n", ev.ModuleName, ev.Err)
 			}
-		} else if c.verbose {
+		} else if c.verbose && !c.quiet {
 			c.dashboard.ClearLine()
 			fmt.Fprintf(c.writer, "  ✓  [%-14s] %-8s (%d objects inspected, %v)\n",
 				ev.ModuleName, status, ev.InspectedCount, ev.Duration.Round(time.Millisecond))
@@ -109,6 +118,9 @@ func (c *Consumer) renderEvent(e events.Event) bool {
 		}
 		c.dashboard.UpdateCounters(c.alertsCount, c.warningsCount, c.noticesCount, c.infosCount)
 
+		if c.quiet && ev.Finding.Severity != report.SeverityAlert && ev.Finding.Severity != report.SeverityCritical {
+			return false
+		}
 		if ev.Finding.Severity == report.SeverityInfo && !c.verbose {
 			return false
 		}
@@ -117,11 +129,13 @@ func (c *Consumer) renderEvent(e events.Event) bool {
 		RenderFindingCard(c.writer, ev.Finding, c.theme)
 
 	case events.Progress:
-		active := "filesystem"
-		if len(ev.ActiveModules) > 0 {
-			active = ev.ActiveModules[0]
+		if !c.quiet {
+			active := "filesystem"
+			if len(ev.ActiveModules) > 0 {
+				active = ev.ActiveModules[0]
+			}
+			c.dashboard.RenderProgress(ev.CurrentFiles, ev.FilesPerSec, ev.Elapsed, active)
 		}
-		c.dashboard.RenderProgress(ev.CurrentFiles, ev.FilesPerSec, ev.Elapsed, active)
 
 	case events.Error:
 		if ev.IsFatal {

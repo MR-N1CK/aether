@@ -958,4 +958,46 @@ func registerScannerRules() {
 		[]MITREMapping{{Tactic: "Privilege Escalation", Technique: "T1611", TechniqueName: "Escape to Host"}, {Tactic: "Execution", Technique: "T1610", TechniqueName: "Deploy Container"}},
 		[]string{"Remove Docker/Containerd socket mounts from container run configurations.", "Use Docker-in-Docker (dind) rootless mode or sysbox if container orchestration is required.", "Audit processes launched on the host during the container execution timeframe."},
 		ConfidenceHigh)
+
+	m("Process_Environ_LDAudit",
+		"Process Environment Injected with LD_AUDIT Hook",
+		"The process was launched with an active LD_AUDIT environment variable pointing to a dynamic library, used to hook dynamic linker symbol resolutions and execute code stealthily before main().",
+		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}},
+		[]string{"Inspect the audited library file path.", "Terminate the infected process and investigate the parent process that spawned it.", "Audit dynamic linker configuration."},
+		ConfidenceHigh)
+
+	m("Process_Environ_Suspicious_LibPath",
+		"Process Environment Injected with Suspicious LD_LIBRARY_PATH",
+		"The process was launched with LD_LIBRARY_PATH pointing to temporary, shared memory, or non-standard writable locations, allowing malicious shared objects to shadow legitimate system libraries.",
+		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}},
+		[]string{"Inspect the directories referenced in LD_LIBRARY_PATH.", "Verify whether malicious libraries exist in those directories.", "Review the parent process and service unit."},
+		ConfidenceHigh)
+
+	m("Persistence_Systemd_Generator_Unowned",
+		"Unowned Systemd Early-Boot Generator Executable",
+		"An executable or script exists in systemd-generators directories that is not owned by any registered operating system package. Systemd executes all generator binaries early during boot and daemon-reload before service startup.",
+		[]MITREMapping{{Tactic: "Persistence", Technique: "T1543.002", TechniqueName: "Systemd Service"}},
+		[]string{"Inspect the generator script or binary.", "Verify whether the generator dynamically synthesizes malicious service units.", "Remove the unowned generator file and run systemctl daemon-reload."},
+		ConfidenceMedium)
+
+	m("Persistence_Systemd_Generator_Suspicious_Target",
+		"Systemd Early-Boot Generator Symlink Points to Suspicious Location",
+		"A systemd generator symlink points to a volatile, temporary, or user-controlled directory (/tmp, /dev/shm, /var/tmp), allowing unprivileged code to execute as root during boot.",
+		[]MITREMapping{{Tactic: "Persistence", Technique: "T1543.002", TechniqueName: "Systemd Service"}, {Tactic: "Defense Evasion", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}},
+		[]string{"Quarantine and remove the generator symlink immediately.", "Inspect volatile directories for malicious payload binaries.", "Reboot or daemon-reload after cleaning."},
+		ConfidenceHigh)
+
+	m("Persistence_Binfmt_Unowned_Registration",
+		"Unowned Binary Format (binfmt_misc) Registration",
+		"A custom binary format registration in /etc/binfmt.d is not owned by any OS package, allowing custom binary interpreters to intercept execution.",
+		[]MITREMapping{{Tactic: "Persistence", Technique: "T1546", TechniqueName: "Event Triggered Execution"}},
+		[]string{"Inspect the binfmt registration file and the interpreter it designates.", "Ensure the registration was created by a known software package (such as wine or qemu)."},
+		ConfidenceMedium)
+
+	m("Persistence_Binfmt_Suspicious_Interpreter",
+		"Binary Format Handler Points to Suspicious or User Directory",
+		"A binfmt_misc handler configuration designates an interpreter located in a volatile, temporary, or user-writable directory (/tmp, /dev/shm, /home), enabling arbitrary code execution on binary launch.",
+		[]MITREMapping{{Tactic: "Persistence", Technique: "T1546", TechniqueName: "Event Triggered Execution"}, {Tactic: "Privilege Escalation", Technique: "T1548", TechniqueName: "Abuse Elevation Control Mechanism"}},
+		[]string{"Remove the binfmt configuration immediately (`systemctl restart systemd-binfmt`).", "Quarantine the rogue interpreter executable."},
+		ConfidenceHigh)
 }

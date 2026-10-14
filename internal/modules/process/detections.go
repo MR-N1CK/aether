@@ -720,6 +720,44 @@ func CheckProcessEnviron(info *ProcessInfo, cfg *config.Config) []*ProcessSignal
 		}
 	}
 
+	// 1b. LD_AUDIT injection hook
+	if lda, ok := info.Environ["LD_AUDIT"]; ok {
+		clean := strings.TrimSpace(lda)
+		if clean != "" {
+			signals = append(signals, &ProcessSignal{
+				RuleName: "Process_Environ_LDAudit",
+				Reason:   fmt.Sprintf("Process running with active LD_AUDIT dynamic linker auditing hook (%s)", clean),
+				Score:    90,
+				Severity: report.SeverityAlert,
+				IsStrong: true,
+			})
+		}
+	}
+
+	// 1c. Suspicious LD_LIBRARY_PATH referencing volatile/temporary directory
+	if lp, ok := info.Environ["LD_LIBRARY_PATH"]; ok {
+		clean := strings.TrimSpace(lp)
+		if clean != "" {
+			parts := strings.Split(clean, ":")
+			for _, p := range parts {
+				cp := filepath.Clean(strings.TrimSpace(p))
+				if cp == "/tmp" || strings.HasPrefix(cp, "/tmp/") ||
+					cp == "/dev/shm" || strings.HasPrefix(cp, "/dev/shm/") ||
+					cp == "/var/tmp" || strings.HasPrefix(cp, "/var/tmp/") ||
+					strings.HasPrefix(cp, "/run/user/") {
+					signals = append(signals, &ProcessSignal{
+						RuleName: "Process_Environ_Suspicious_LibPath",
+						Reason:   fmt.Sprintf("Process running with suspicious LD_LIBRARY_PATH referencing volatile/temporary directory (%s)", cp),
+						Score:    85,
+						Severity: report.SeverityAlert,
+						IsStrong: true,
+					})
+					break
+				}
+			}
+		}
+	}
+
 	// 2. Anti-forensic bash history suppression
 	histfile, hasHF := info.Environ["HISTFILE"]
 	histsize, hasHS := info.Environ["HISTSIZE"]

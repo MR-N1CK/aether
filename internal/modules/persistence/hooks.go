@@ -53,6 +53,9 @@ func CheckOtherHooks(ctx context.Context, rootFS string, cfg *config.Config, pkg
 	// 8. XDG autostart
 	inspectXDGAutostart(rootFS, cfg, pkgDB, cov, &findings)
 
+	// 9. binfmt_misc handler registrations
+	inspectBinfmtMisc(rootFS, cfg, pkgDB, cov, &findings)
+
 	return findings, nil
 }
 
@@ -687,6 +690,112 @@ func inspectXDGAutostart(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageD
 					"file":         virtPath,
 					"line_content": lastSuspiciousLine,
 					"exec_targets": dedupeSlice(allExecTargets),
+				}
+				if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
+					*findings = append(*findings, *f)
+				}
+			}
+		}
+	}
+}
+
+func inspectBinfmtMisc(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, cov *CheckCoverage, findings *[]report.Finding) {
+	binfmtDirs := []string{
+		"/etc/binfmt.d",
+		"/usr/lib/binfmt.d",
+		"/run/binfmt.d",
+	}
+
+	seenFiles := make(map[string]bool)
+
+	for _, bDir := range binfmtDirs {
+		hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, bDir)
+		if err != nil {
+			continue
+		}
+
+		entries, err := os.ReadDir(hostDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".conf") {
+				continue
+			}
+			virtPath := filepath.Join(bDir, entry.Name())
+			if seenFiles[virtPath] {
+				continue
+			}
+			seenFiles[virtPath] = true
+			cov.Inspected++
+
+			var signals []*PersistenceSignal
+
+			isOwned := false
+			if pkgDB != nil && pkgDB.IsAvailable() {
+				if _, ok := pkgDB.Owner(virtPath); ok {
+					isOwned = true
+				}
+			}
+
+			data, _, rErr := SafeReadRegularFile(rootFS, virtPath, 64*1024)
+			var interpList []string
+			if rErr == nil && len(data) > 0 {
+				scanner := bufio.NewScanner(bytes.NewReader(data))
+				lineNum := 0
+				for scanner.Scan() {
+					lineNum++
+					line := strings.TrimSpace(scanner.Text())
+					if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+						continue
+					}
+					// Format: :name:type:offset:magic:mask:interpreter:flags
+					parts := strings.Split(line, ":")
+					if len(parts) >= 7 {
+						interp := strings.TrimSpace(parts[6])
+						if interp != "" {
+							interpList = append(interpList, interp)
+							cleanInterp := filepath.Clean(interp)
+							if strings.HasPrefix(cleanInterp, "/tmp/") ||
+								strings.HasPrefix(cleanInterp, "/dev/shm/") ||
+								strings.HasPrefix(cleanInterp, "/var/tmp/") ||
+								strings.HasPrefix(cleanInterp, "/home/") ||
+								strings.HasPrefix(cleanInterp, "/root/") {
+								signals = append(signals, &PersistenceSignal{
+									Class:      ClassExecFromTemp,
+									RuleName:   "Persistence_Binfmt_Suspicious_Interpreter",
+									Reason:     fmt.Sprintf("Binfmt registration specifies interpreter in suspicious or volatile location (%s)", interp),
+									Score:      85,
+									Severity:   report.SeverityAlert,
+									IsStrong:   true,
+									LineNumber: lineNum,
+									Snippet:    line,
+								})
+							}
+						}
+					}
+				}
+			}
+
+			if !isOwned && strings.HasPrefix(virtPath, "/etc/binfmt.d") {
+				signals = append(signals, &PersistenceSignal{
+					Class:      ClassUnowned,
+					RuleName:   "Persistence_Binfmt_Unowned_Registration",
+					Reason:     fmt.Sprintf("Binfmt handler registration %s is not owned by any OS package", virtPath),
+					Score:      40,
+					Severity:   report.SeverityNotice,
+					IsStrong:   false,
+					LineNumber: 0,
+				})
+			}
+
+			if len(signals) > 0 {
+				meta := map[string]any{
+					"artifact":     "binfmt",
+					"file":         virtPath,
+					"is_owned":     isOwned,
+					"interpreters": dedupeSlice(interpList),
 				}
 				if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
 					*findings = append(*findings, *f)

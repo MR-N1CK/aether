@@ -17,16 +17,18 @@ const (
 // Error, ScanFinished) while dropping or coalescing ephemeral events (FileScanned,
 // Progress) when subscribers lag.
 type EventBus struct {
-	mu          sync.RWMutex
-	subscribers map[int64]*Subscription
-	nextID      atomic.Int64
-	closed      atomic.Bool
+	mu           sync.RWMutex
+	subscribers  map[int64]*Subscription
+	attachedReps map[report.Reporter]*Subscription
+	nextID       atomic.Int64
+	closed       atomic.Bool
 }
 
 // NewEventBus instantiates a ready-to-use EventBus.
 func NewEventBus() *EventBus {
 	return &EventBus{
-		subscribers: make(map[int64]*Subscription),
+		subscribers:  make(map[int64]*Subscription),
+		attachedReps: make(map[report.Reporter]*Subscription),
 	}
 }
 
@@ -79,8 +81,28 @@ func (b *EventBus) Subscribe() *Subscription {
 
 // AttachReporter connects a report.Reporter as a subscriber to the event bus,
 // forwarding all FindingRaised events into the reporter losslessly.
+// Multiple calls with the same Reporter instance are idempotent and return the existing subscription.
 func (b *EventBus) AttachReporter(rep report.Reporter) *Subscription {
+	if rep == nil || b.closed.Load() {
+		return nil
+	}
+
+	b.mu.Lock()
+	if b.attachedReps == nil {
+		b.attachedReps = make(map[report.Reporter]*Subscription)
+	}
+	if existing, ok := b.attachedReps[rep]; ok {
+		b.mu.Unlock()
+		return existing
+	}
+	b.mu.Unlock()
+
 	sub := b.Subscribe()
+
+	b.mu.Lock()
+	b.attachedReps[rep] = sub
+	b.mu.Unlock()
+
 	go func() {
 		for e := range sub.Events() {
 			if fr, ok := e.(FindingRaised); ok {
@@ -99,6 +121,11 @@ func (b *EventBus) Unsubscribe(sub *Subscription) {
 
 	b.mu.Lock()
 	delete(b.subscribers, sub.id)
+	for rep, s := range b.attachedReps {
+		if s == sub {
+			delete(b.attachedReps, rep)
+		}
+	}
 	b.mu.Unlock()
 
 	sub.close()

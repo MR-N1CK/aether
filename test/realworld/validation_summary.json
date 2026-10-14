@@ -12,12 +12,12 @@
     "scale_max_throughput_fps": 52132.6,
     "scale_peak_memory_mb": 241.22,
     "memory_budget_met": true,
-    "timestamp": "2026-10-14T15:28:58.748411483Z"
+    "timestamp": "2026-10-14T16:01:44.149139117Z"
   },
   "runs": [
     {
       "run_id": "VAL-RUN-001-desktop-standard",
-      "timestamp": "2026-10-14T15:28:58.851711982Z",
+      "timestamp": "2026-10-14T16:01:44.171925161Z",
       "profile_id": "desktop-standard",
       "is_elevated": true,
       "files_inspected": 6,
@@ -42,11 +42,11 @@
       "assessment": {
         "posture": "SAFE",
         "summary_rationale": "System posture is healthy. All inspected subsystems verified safe.",
-        "total_findings": 2,
+        "total_findings": 1,
         "alerts_count": 0,
         "warnings_count": 0,
         "notices_count": 0,
-        "infos_count": 2,
+        "infos_count": 1,
         "unknowns_count": 0,
         "next_actions": [
           {
@@ -61,7 +61,7 @@
     },
     {
       "run_id": "VAL-RUN-002-server-web",
-      "timestamp": "2026-10-14T15:28:58.891309552Z",
+      "timestamp": "2026-10-14T16:01:44.189811104Z",
       "profile_id": "server-web",
       "is_elevated": true,
       "files_inspected": 6,
@@ -86,11 +86,11 @@
       "assessment": {
         "posture": "SAFE",
         "summary_rationale": "System posture is healthy. All inspected subsystems verified safe.",
-        "total_findings": 2,
+        "total_findings": 1,
         "alerts_count": 0,
         "warnings_count": 0,
         "notices_count": 0,
-        "infos_count": 2,
+        "infos_count": 1,
         "unknowns_count": 0,
         "next_actions": [
           {
@@ -105,7 +105,7 @@
     },
     {
       "run_id": "VAL-RUN-003-server-minimal",
-      "timestamp": "2026-10-14T15:28:58.931271935Z",
+      "timestamp": "2026-10-14T16:01:44.240160302Z",
       "profile_id": "server-minimal",
       "is_elevated": true,
       "files_inspected": 6,
@@ -149,7 +149,7 @@
     },
     {
       "run_id": "VAL-RUN-004-upgraded-pending",
-      "timestamp": "2026-10-14T15:28:58.96672805Z",
+      "timestamp": "2026-10-14T16:01:44.289205165Z",
       "profile_id": "upgraded-pending",
       "is_elevated": true,
       "files_inspected": 6,
@@ -174,10 +174,10 @@
       "assessment": {
         "posture": "ATTENTION_REQUIRED",
         "summary_rationale": "Attention required: pending daemon restart detected post-package upgrade.",
-        "total_findings": 2,
+        "total_findings": 1,
         "alerts_count": 0,
         "warnings_count": 0,
-        "notices_count": 2,
+        "notices_count": 1,
         "infos_count": 0,
         "unknowns_count": 0,
         "next_actions": [
@@ -193,7 +193,7 @@
     },
     {
       "run_id": "VAL-RUN-005-workstation-pentest",
-      "timestamp": "2026-10-14T15:28:59.007576164Z",
+      "timestamp": "2026-10-14T16:01:44.306693619Z",
       "profile_id": "workstation-pentest",
       "is_elevated": true,
       "files_inspected": 5,
@@ -237,7 +237,7 @@
     },
     {
       "run_id": "VAL-RUN-006-workstation-dev",
-      "timestamp": "2026-10-14T15:28:59.03886758Z",
+      "timestamp": "2026-10-14T16:01:44.358820148Z",
       "profile_id": "workstation-dev",
       "is_elevated": true,
       "files_inspected": 6,
@@ -262,11 +262,11 @@
       "assessment": {
         "posture": "SAFE",
         "summary_rationale": "System posture is healthy. All inspected subsystems verified safe.",
-        "total_findings": 2,
+        "total_findings": 1,
         "alerts_count": 0,
         "warnings_count": 0,
         "notices_count": 0,
-        "infos_count": 2,
+        "infos_count": 1,
         "unknowns_count": 0,
         "next_actions": [
           {
@@ -281,7 +281,7 @@
     },
     {
       "run_id": "VAL-RUN-007-container-host",
-      "timestamp": "2026-10-14T15:28:59.071352317Z",
+      "timestamp": "2026-10-14T16:01:44.409433564Z",
       "profile_id": "container-host",
       "is_elevated": true,
       "files_inspected": 6,
@@ -325,7 +325,7 @@
     },
     {
       "run_id": "VAL-RUN-008-package-mixed",
-      "timestamp": "2026-10-14T15:28:59.096590269Z",
+      "timestamp": "2026-10-14T16:01:44.458597026Z",
       "profile_id": "package-mixed",
       "is_elevated": true,
       "files_inspected": 5,
@@ -369,7 +369,7 @@
     },
     {
       "run_id": "VAL-RUN-009-privilege-restricted",
-      "timestamp": "2026-10-14T15:28:59.135197646Z",
+      "timestamp": "2026-10-14T16:01:44.478203754Z",
       "profile_id": "privilege-restricted",
       "is_elevated": false,
       "files_inspected": 5,

@@ -121,7 +121,134 @@ func CheckSystemd(ctx context.Context, rootFS string, cfg *config.Config, pkgDB 
 		})
 	}
 
+	inspectSystemdGenerators(ctx, rootFS, cfg, pkgDB, iocEng, cov, &findings)
+
 	return findings, nil
+}
+
+func inspectSystemdGenerators(ctx context.Context, rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, iocEng ioc.Engine, cov *CheckCoverage, findings *[]report.Finding) {
+	generatorDirs := []string{
+		"/etc/systemd/system-generators",
+		"/usr/local/lib/systemd/system-generators",
+		"/lib/systemd/system-generators",
+		"/usr/lib/systemd/system-generators",
+		"/etc/systemd/user-generators",
+		"/usr/lib/systemd/user-generators",
+	}
+
+	seenGenerators := make(map[string]bool)
+
+	for _, gDir := range generatorDirs {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		hostDir, _, _, err := safeopen.ResolveUnderRoot(rootFS, gDir)
+		if err != nil {
+			continue
+		}
+
+		entries, err := os.ReadDir(hostDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			virtPath := filepath.Join(gDir, entry.Name())
+			if seenGenerators[virtPath] {
+				continue
+			}
+			seenGenerators[virtPath] = true
+			cov.Inspected++
+
+			var signals []*PersistenceSignal
+
+			// Check symlink targeting
+			hostEntry := filepath.Join(hostDir, entry.Name())
+			lst, lErr := os.Lstat(hostEntry)
+			if lErr != nil {
+				continue
+			}
+
+			if (lst.Mode() & os.ModeSymlink) != 0 {
+				resolved, _, sErr := SafeResolveSymlink(rootFS, virtPath)
+				if sErr == nil {
+					cleanRes := filepath.Clean(resolved)
+					if strings.HasPrefix(cleanRes, "/tmp/") || strings.HasPrefix(cleanRes, "/dev/shm/") || strings.HasPrefix(cleanRes, "/var/tmp/") {
+						signals = append(signals, &PersistenceSignal{
+							Class:      ClassSymlinkHijack,
+							RuleName:   "Persistence_Systemd_Generator_Suspicious_Target",
+							Reason:     fmt.Sprintf("Systemd early-boot generator symlink targets volatile or temporary directory (%s)", cleanRes),
+							Score:      90,
+							Severity:   report.SeverityAlert,
+							IsStrong:   true,
+							LineNumber: 0,
+						})
+					}
+				}
+			}
+
+			// Check package ownership
+			isOwned := false
+			if pkgDB != nil && pkgDB.IsAvailable() {
+				if _, ok := pkgDB.Owner(virtPath); ok {
+					isOwned = true
+				}
+			}
+
+			// Read file content for suspicious commands / reverse shells
+			data, _, rErr := SafeReadRegularFile(rootFS, virtPath, 256*1024)
+			var allExecTargets []string
+			if rErr == nil && len(data) > 0 {
+				fileGuards := ExtractGuardedPaths(string(data))
+				scanner := bufio.NewScanner(bytes.NewReader(data))
+				lineNum := 0
+				for scanner.Scan() {
+					lineNum++
+					line := strings.TrimSpace(scanner.Text())
+					if line == "" || strings.HasPrefix(line, "#") {
+						continue
+					}
+					cmdSignals := CheckSuspiciousCommand(line, lineNum, cfg, rootFS, true, pkgDB, fileGuards)
+					if len(cmdSignals) > 0 {
+						targets, _ := ExtractExecTargets(line)
+						allExecTargets = append(allExecTargets, targets...)
+					}
+					signals = append(signals, cmdSignals...)
+				}
+			}
+
+			// If unowned generator in /etc or /usr/local/lib
+			if !isOwned && (strings.HasPrefix(virtPath, "/etc/systemd/") || strings.HasPrefix(virtPath, "/usr/local/lib/systemd/")) {
+				signals = append(signals, &PersistenceSignal{
+					Class:      ClassUnowned,
+					RuleName:   "Persistence_Systemd_Generator_Unowned",
+					Reason:     fmt.Sprintf("Systemd early-boot generator %s is not owned by any OS package", virtPath),
+					Score:      65,
+					Severity:   report.SeverityWarning,
+					IsStrong:   false,
+					LineNumber: 0,
+				})
+			}
+
+			if len(signals) > 0 {
+				meta := map[string]any{
+					"artifact":     "systemd-generator",
+					"file":         virtPath,
+					"is_owned":     isOwned,
+					"exec_targets": dedupeSlice(allExecTargets),
+				}
+				if f := ConsolidateSignals(signals, virtPath, meta); f != nil {
+					*findings = append(*findings, *f)
+				}
+			}
+		}
+	}
 }
 
 func inspectSystemdUnit(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, iocEng ioc.Engine, cov *CheckCoverage, findings *[]report.Finding, wantsSymlink string) {

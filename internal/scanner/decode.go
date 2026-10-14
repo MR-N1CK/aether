@@ -9,23 +9,29 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"aether/internal/config"
 	"aether/internal/pkgdb"
 	"aether/internal/report"
+	"aether/internal/yara"
 )
 
 const (
 	maxDecodeDepth       = 3
 	maxDecompressedBytes = 32 * 1024 * 1024 // 32 MB safety cap
-	minCandidateLen      = 32
+	minCandidateLen      = 16
 )
 
 var (
 	base64Pattern = regexp.MustCompile(`[A-Za-z0-9+/=]{32,}`)
 	hexPattern    = regexp.MustCompile(`(?:\\x[0-9a-fA-F]{2}){16,}|[0-9a-fA-F]{32,}`)
+	reRevEcho     = regexp.MustCompile(`(?:echo|printf)\s+(?:'([^']{16,})'|"([^"]{16,})")\s*\|\s*(?:ba|z|da)?sh\s*\|\s*rev|(?:echo|printf)\s+(?:'([^']{16,})'|"([^"]{16,})")\s*\|\s*rev`)
+	reRevHeredoc  = regexp.MustCompile(`rev\s*<<<\s*(?:'([^']{16,})'|"([^"]{16,})")`)
+	reRevPython   = regexp.MustCompile(`(?:'([^']{16,})'|"([^"]{16,})")\[::-1\]`)
+	reRot13       = regexp.MustCompile(`str_rot13\s*\(\s*(?:'([^']{16,})'|"([^"]{16,})")\s*\)`)
 )
 
 // tryGzipDecompress attempts to decompress gzip or zlib data up to maxBytes.
@@ -211,9 +217,81 @@ func extractDecodedCandidates(data []byte, maxBytes int64) []decodedCandidate {
 				addResult(decoded, "hex")
 			}
 		}
+
+		// 5. Scan for rev payload patterns
+		for _, m := range reRevEcho.FindAllSubmatch(data, 5) {
+			for i := 1; i < len(m); i++ {
+				if len(m[i]) >= 16 {
+					if rev := tryRevDecode(m[i]); rev != nil {
+						addResult(rev, "rev")
+					}
+					break
+				}
+			}
+		}
+		for _, m := range reRevHeredoc.FindAllSubmatch(data, 5) {
+			for i := 1; i < len(m); i++ {
+				if len(m[i]) >= 16 {
+					if rev := tryRevDecode(m[i]); rev != nil {
+						addResult(rev, "rev")
+					}
+					break
+				}
+			}
+		}
+		for _, m := range reRevPython.FindAllSubmatch(data, 5) {
+			for i := 1; i < len(m); i++ {
+				if len(m[i]) >= 16 {
+					if rev := tryRevDecode(m[i]); rev != nil {
+						addResult(rev, "rev")
+					}
+					break
+				}
+			}
+		}
+
+		// 6. Scan for rot13 payload patterns
+		for _, m := range reRot13.FindAllSubmatch(data, 5) {
+			for i := 1; i < len(m); i++ {
+				if len(m[i]) >= 16 {
+					if rot := tryRot13Decode(m[i]); rot != nil {
+						addResult(rot, "rot13")
+					}
+					break
+				}
+			}
+		}
 	}
 
 	return results
+}
+
+func tryRevDecode(b []byte) []byte {
+	if len(b) < 16 {
+		return nil
+	}
+	rev := make([]byte, len(b))
+	for i := 0; i < len(b); i++ {
+		rev[i] = b[len(b)-1-i]
+	}
+	return rev
+}
+
+func tryRot13Decode(b []byte) []byte {
+	if len(b) < 16 {
+		return nil
+	}
+	out := make([]byte, len(b))
+	for i, c := range b {
+		if c >= 'a' && c <= 'z' {
+			out[i] = 'a' + (c-'a'+13)%26
+		} else if c >= 'A' && c <= 'Z' {
+			out[i] = 'A' + (c-'A'+13)%26
+		} else {
+			out[i] = c
+		}
+	}
+	return out
 }
 
 func min(a, b int) int {
@@ -233,8 +311,23 @@ func DecodeAndRescan(
 	cfg *config.Config,
 	budget *MemoryBudget,
 ) (*HeuristicMatch, []string) {
+	h, layers, _ := DecodeAndRescanWithYARA(ctx, path, data, pkgDB, cfg, budget, nil)
+	return h, layers
+}
+
+// DecodeAndRescanWithYARA evaluates both native heuristics and compiled YARA rules across
+// progressively decoded candidates in memory up to 3 layers deep.
+func DecodeAndRescanWithYARA(
+	ctx context.Context,
+	path string,
+	data []byte,
+	pkgDB pkgdb.PackageDB,
+	cfg *config.Config,
+	budget *MemoryBudget,
+	yScanner yara.Scanner,
+) (*HeuristicMatch, []string, []yara.RuleMatch) {
 	if len(data) < minCandidateLen || IsELF(data) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	maxCap := int64(maxDecompressedBytes)
@@ -253,7 +346,7 @@ func DecodeAndRescan(
 	for len(queue) > 0 {
 		select {
 		case <-ctx.Done():
-			return nil, nil
+			return nil, nil, nil
 		default:
 		}
 
@@ -275,7 +368,7 @@ func DecodeAndRescan(
 					Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches %s: %s", strings.Join(newLayers, " -> "), h.Name, h.Reason),
 					Score:    85,
 					Severity: report.SeverityAlert,
-				}, newLayers
+				}, newLayers, nil
 			}
 
 			// 2. Evaluate decoded stream for hidden private keys
@@ -285,10 +378,28 @@ func DecodeAndRescan(
 					Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches %s: %s", strings.Join(newLayers, " -> "), k.Name, k.Reason),
 					Score:    85,
 					Severity: report.SeverityAlert,
-				}, newLayers
+				}, newLayers, nil
 			}
 
-			// 3. Queue candidate for deeper iteration if within depth limit
+			// 3. Evaluate decoded stream with compiled YARA rules (if engine active)
+			if yScanner != nil {
+				target := yara.ScanTarget{
+					Path:      path,
+					Filename:  filepath.Base(path),
+					Extension: filepath.Ext(path),
+					Data:      c.data,
+				}
+				if yMatches, err := yScanner.Scan(target); err == nil && len(yMatches) > 0 {
+					return &HeuristicMatch{
+						Name:     "Script_Obfuscated_Payload",
+						Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches YARA rule %s", strings.Join(newLayers, " -> "), yMatches[0].RuleName),
+						Score:    90,
+						Severity: report.SeverityAlert,
+					}, newLayers, yMatches
+				}
+			}
+
+			// 4. Queue candidate for deeper iteration if within depth limit
 			if item.depth+1 < maxDecodeDepth {
 				queue = append(queue, queueItem{
 					current: c.data,
@@ -299,5 +410,5 @@ func DecodeAndRescan(
 		}
 	}
 
-	return nil, nil
+	return nil, nil, nil
 }

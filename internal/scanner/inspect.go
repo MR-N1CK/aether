@@ -133,10 +133,10 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 	hScript := CheckSuspiciousScriptContent(virtPath, inspectData, s.pkgDB, s.cfg)
 	hEntropyELF := CheckHighEntropyELF(virtPath, inspectData, s.cfg)
 	hEntropyScript := CheckHighEntropyScript(virtPath, inspectData, s.cfg)
-	hDecode, decodeLayers := DecodeAndRescan(ctx, virtPath, inspectData, s.pkgDB, s.cfg, s.memoryBudget)
+	hDecode, decodeLayers, decodeYaraMatches := DecodeAndRescanWithYARA(ctx, virtPath, inspectData, s.pkgDB, s.cfg, s.memoryBudget, yScanner)
 	hTrojanPkg := CheckTrojanedPackageBinary(virtPath, hashRes.Hashes.MD5, s.pkgDB, s.cfg)
 
-	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil || hKey != nil || hScript != nil || hEntropyELF != nil || hEntropyScript != nil || hDecode != nil || hTrojanPkg != nil {
+	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil || hKey != nil || hScript != nil || hEntropyELF != nil || hEntropyScript != nil || hDecode != nil || hTrojanPkg != nil || len(decodeYaraMatches) > 0 {
 		hasOtherSignal = true
 	}
 
@@ -153,6 +153,7 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		hEntropyScript = nil
 		hDecode = nil
 		hTrojanPkg = nil
+		decodeYaraMatches = nil
 		pathMatch = nil // Suppress path heuristics if known-good hash matches or oversize
 	}
 
@@ -174,6 +175,17 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 				yaraMatches = matches
 			}
 		}
+	}
+
+	if len(decodeYaraMatches) > 0 && !isAllowlisted && !isHashedOversize {
+		for i := range decodeYaraMatches {
+			if decodeYaraMatches[i].Metadata == nil {
+				decodeYaraMatches[i].Metadata = make(map[string]interface{})
+			}
+			decodeYaraMatches[i].Metadata["obfuscation_layers"] = strings.Join(decodeLayers, " -> ")
+			decodeYaraMatches[i].Metadata["deobfuscated"] = true
+		}
+		yaraMatches = append(yaraMatches, decodeYaraMatches...)
 	}
 
 	// 7. Check if this file qualifies as a YARA rule file

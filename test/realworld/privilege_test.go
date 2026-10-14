@@ -33,6 +33,15 @@ func TestPrivilegeBoundaryParity_Snapshot(t *testing.T) {
 		t.Fatalf("LoadSnapshot failed for %s: %v", profileDir, err)
 	}
 
+	shadowFile := filepath.Join(snapshot.RootFS, "etc/shadow")
+	mapsFile := filepath.Join(snapshot.ProcRoot, "1001/maps")
+	_ = os.Chmod(shadowFile, 0000)
+	_ = os.Chmod(mapsFile, 0000)
+	t.Cleanup(func() {
+		_ = os.Chmod(shadowFile, 0644)
+		_ = os.Chmod(mapsFile, 0644)
+	})
+
 	cfg := config.NewDefaultConfig()
 	cfg.Scan.DemoRules = true
 	cfg.Scan.Root = "/"

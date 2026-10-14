@@ -193,7 +193,7 @@ When a file matching a YARA rule is owned by an installed distribution package (
 - **Active Exploit Exception**: If a rule explicitly defines `severity = "alert"` or `severity = "critical"` in its metadata, the downgrade is bypassed (ransomware and active exploitation artifacts retain full severity regardless of package ownership).
 
 ### 2. Pentest Tool Path Trust (`--trust-installed-pentest-tools`)
-Aether includes the `--trust-installed-pentest-tools` flag (enabled by default: `true`). When active, matches inside well-known pentest tool locations:
+Aether includes the `--trust-installed-pentest-tools` flag (disabled by default: `false` for maximum incident response assurance). When explicitly enabled on pentest audit machines, matches inside well-known pentest tool locations:
 - `/usr/share/metasploit-framework`
 - `/usr/share/windows-resources`
 - `/usr/share/powershell-empire`
@@ -205,8 +205,8 @@ Aether includes the `--trust-installed-pentest-tools` flag (enabled by default: 
 are downgraded to `INFO` with the original severity recorded in metadata (`original_severity`), preventing legitimate tool suites from skewing the final scan verdict.
 
 > [!IMPORTANT]
-> `--trust-installed-pentest-tools` is designed for workstations and VMs where penetration testing tools are legitimately installed. When scanning a suspect end-user or production server machine, disable this flag:
+> `--trust-installed-pentest-tools` is strictly opt-in and designed for authorized workstations and VMs where penetration testing tools are legitimately installed. When scanning an authorized pentest machine, enable this flag:
 > ```bash
-> sudo aether scan --full --trust-installed-pentest-tools=false
+> sudo aether scan --full --trust-installed-pentest-tools=true
 > ```
 

@@ -612,9 +612,9 @@ func (b *busReporter) Report(f report.Finding) {
 		})
 	}
 }
-func (b *busReporter) Findings() []report.Finding { return nil }
+func (b *busReporter) Findings() []report.Finding         { return nil }
 func (b *busReporter) Summary() (int, int, int, int, int) { return 0, 0, 0, 0, 0 }
-func (b *busReporter) Close() error { return nil }
+func (b *busReporter) Close() error                       { return nil }
 
 func TestPersistence_RedactSnippet_NoOverRedaction(t *testing.T) {
 	cases := []struct {
@@ -1083,6 +1083,41 @@ func TestPersistence_SSHNonStandardKeyLocation(t *testing.T) {
 	}
 }
 
+func TestPersistence_SystemdSocketActivation(t *testing.T) {
+	root := t.TempDir()
+	sysdDir := filepath.Join(root, "etc/systemd/system")
+	_ = os.MkdirAll(sysdDir, 0755)
 
+	socketContent := `[Unit]
+Description=Stealth Backdoor Listener Socket
+[Socket]
+ListenFIFO=/tmp/.backdoor_fifo
+Service=backdoor.service
+[Install]
+WantedBy=sockets.target
+`
+	_ = os.WriteFile(filepath.Join(sysdDir, "backdoor.socket"), []byte(socketContent), 0644)
 
+	cfg := config.NewDefaultConfig()
+	rep := &memoryReporter{}
+	mod := persistence.NewModuleWithRoot(root, nil, nil, nil)
 
+	err := mod.Run(context.Background(), cfg, rep)
+	if err != nil {
+		t.Fatalf("unexpected error running persistence module: %v", err)
+	}
+
+	foundSocket := false
+	for _, f := range rep.findings {
+		if strings.Contains(f.RuleName, "Persistence_Systemd_Socket_Activation") {
+			foundSocket = true
+			if f.Severity != report.SeverityWarning {
+				t.Errorf("expected WARNING for suspicious socket FIFO activation, got %s", f.Severity)
+			}
+		}
+	}
+
+	if !foundSocket {
+		t.Errorf("expected Persistence_Systemd_Socket_Activation finding, got: %+v", rep.findings)
+	}
+}

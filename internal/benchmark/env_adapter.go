@@ -73,6 +73,11 @@ func (m *MockPackageDB) IsAvailable() bool {
 	return m.available
 }
 
+// VerifyDigest verifies whether actualMD5 matches expected digest in mock.
+func (m *MockPackageDB) VerifyDigest(path string, actualMD5 string) (bool, string, bool) {
+	return true, "", false
+}
+
 // SetAvailable configures whether the mock database reports as available.
 func (m *MockPackageDB) SetAvailable(available bool, note string) {
 	m.mu.Lock()
@@ -117,4 +122,3 @@ func CreateMockPackageDBForEnvironment(c BenchmarkCorpusCase, distro DistroProfi
 	}
 	return db
 }
-

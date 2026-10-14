@@ -27,10 +27,10 @@ type MutatedVariant struct {
 
 // EvasionScorecard summarizes evasion detection resilience across mutation categories.
 type EvasionScorecard struct {
-	TotalMutations     int                     `json:"total_mutations"`
-	DetectedMutations  int                     `json:"detected_mutations"`
-	ResilienceScore    float64                 `json:"resilience_score"`
-	MutationBreakdown  map[MutationType]float64 `json:"mutation_breakdown"`
+	TotalMutations    int                      `json:"total_mutations"`
+	DetectedMutations int                      `json:"detected_mutations"`
+	ResilienceScore   float64                  `json:"resilience_score"`
+	MutationBreakdown map[MutationType]float64 `json:"mutation_breakdown"`
 }
 
 // LexicalMutator generates static lexical mutations of script payloads without execution.

@@ -105,6 +105,45 @@ func (a *EngineAdapter) ScanCase(c BenchmarkCorpusCase, pkgDB pkgdb.PackageDB) (
 		findings = append(findings, f)
 	}
 
+	if match, _ := scanner.DecodeAndRescan(context.Background(), path, data, pkgDB, a.cfg, nil); match != nil {
+		f := &report.Finding{
+			Path:       path,
+			RuleName:   match.Name,
+			Reason:     match.Reason,
+			Severity:   match.Severity,
+			Confidence: report.ConfidenceHigh,
+		}
+		report.DetermineVerdict(f, pkgDB, isExec, false, false, c.Expected.RequiredCorroboration)
+		report.PopulateFindingDetails(f)
+		findings = append(findings, f)
+	}
+
+	if match := scanner.CheckHighEntropyELF(path, data, a.cfg); match != nil {
+		f := &report.Finding{
+			Path:       path,
+			RuleName:   match.Name,
+			Reason:     match.Reason,
+			Severity:   match.Severity,
+			Confidence: report.ConfidenceHigh,
+		}
+		report.DetermineVerdict(f, pkgDB, isExec, false, false, c.Expected.RequiredCorroboration)
+		report.PopulateFindingDetails(f)
+		findings = append(findings, f)
+	}
+
+	if match := scanner.CheckHighEntropyScript(path, data, a.cfg); match != nil {
+		f := &report.Finding{
+			Path:       path,
+			RuleName:   match.Name,
+			Reason:     match.Reason,
+			Severity:   match.Severity,
+			Confidence: report.ConfidenceMedium,
+		}
+		report.DetermineVerdict(f, pkgDB, isExec, false, false, c.Expected.RequiredCorroboration)
+		report.PopulateFindingDetails(f)
+		findings = append(findings, f)
+	}
+
 	// 3. YARA Engine Scan (if initialized and available)
 	if a.yaraEngine != nil && a.yaraEngine.Enabled() && len(data) > 0 {
 		yScanner := a.yaraEngine.NewScanner()

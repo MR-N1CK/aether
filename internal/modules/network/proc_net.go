@@ -200,11 +200,11 @@ func ParsePacketSockets(data []byte, socketToProc map[uint64]*ProcessSocketOwner
 		inode64, _ := strconv.ParseUint(fields[8], 10, 64)
 
 		entry := SocketEntry{
-			Protocol:  "packet",
-			State:     "ACTIVE",
-			UID:       uint32(uid64),
-			Inode:     inode64,
-			Owner:     socketToProc[inode64],
+			Protocol: "packet",
+			State:    "ACTIVE",
+			UID:      uint32(uid64),
+			Inode:    inode64,
+			Owner:    socketToProc[inode64],
 		}
 		entries = append(entries, entry)
 	}

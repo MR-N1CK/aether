@@ -171,4 +171,3 @@ func (a *FindingAccumulator) CorrelateAndGet() []Finding {
 	SortFindings(copied)
 	return copied
 }
-

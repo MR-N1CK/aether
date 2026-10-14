@@ -42,7 +42,7 @@ type FalsePositiveTaxonomyRecord struct {
 
 // CoverageGap documents an inaccessible subsystem or target due to permission boundaries.
 type CoverageGap struct {
-	Subsystem   string `json:"subsystem"`             // "process", "filesystem", "users", "network"
+	Subsystem   string `json:"subsystem"` // "process", "filesystem", "users", "network"
 	TargetPath  string `json:"target_path"`
 	Reason      string `json:"reason"`                // e.g. "EACCES: permission denied"
 	Remediation string `json:"remediation,omitempty"` // e.g. "Run with sudo or CAP_DAC_OVERRIDE"
@@ -50,7 +50,7 @@ type CoverageGap struct {
 
 // PrioritizedAction represents an actionable executive containment or remediation step.
 type PrioritizedAction struct {
-	Priority    int    `json:"priority"`              // 1 = Critical, 2 = High, 3 = Moderate, 4 = Low
+	Priority    int    `json:"priority"` // 1 = Critical, 2 = High, 3 = Moderate, 4 = Low
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Command     string `json:"command,omitempty"`

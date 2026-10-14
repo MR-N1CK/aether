@@ -245,12 +245,12 @@ func CheckPasswd(ctx context.Context, rootFS string, cfg *config.Config, pkgDB p
 							Count:     1,
 							Paths:     []string{passwdPath},
 							Metadata: map[string]interface{}{
-								"username":   entry.Username,
-								"uid":        entry.UID,
-								"shell":      entry.Shell,
-								"home":       entry.Home,
-								"is_weak":    true,
-								"score":      35,
+								"username": entry.Username,
+								"uid":      entry.UID,
+								"shell":    entry.Shell,
+								"home":     entry.Home,
+								"is_weak":  true,
+								"score":    35,
 							},
 						}
 						findings = append(findings, f)

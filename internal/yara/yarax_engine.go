@@ -579,4 +579,3 @@ func parseRuleMetadataStats(content string) (scores, sevs, alerts, defaults int)
 	}
 	return
 }
-

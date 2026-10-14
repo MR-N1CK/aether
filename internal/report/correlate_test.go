@@ -12,13 +12,13 @@ func TestCorrelateFindings_MultiVectorThreatEscalation(t *testing.T) {
 	now := time.Now().UTC()
 
 	fsFinding := report.Finding{
-		Module:      "scanner",
-		Severity:    report.SeverityWarning,
-		Verdict:     report.VerdictSuspicious,
-		Confidence:  report.ConfidenceMedium,
-		Path:        "/tmp/dropper.sh",
-		Reason:      "Remote pipe execution command detected (curl | bash)",
-		RuleName:    "Script_Download_And_Execute",
+		Module:     "scanner",
+		Severity:   report.SeverityWarning,
+		Verdict:    report.VerdictSuspicious,
+		Confidence: report.ConfidenceMedium,
+		Path:       "/tmp/dropper.sh",
+		Reason:     "Remote pipe execution command detected (curl | bash)",
+		RuleName:   "Script_Download_And_Execute",
 		EvidenceRecord: &report.EvidenceRecord{
 			DetectorType:        "heuristic",
 			RuleName:            "Script_Download_And_Execute",
@@ -31,13 +31,13 @@ func TestCorrelateFindings_MultiVectorThreatEscalation(t *testing.T) {
 	}
 
 	procFinding := report.Finding{
-		Module:      "process",
-		Severity:    report.SeverityWarning,
-		Verdict:     report.VerdictSuspicious,
-		Confidence:  report.ConfidenceMedium,
-		Path:        "/proc/1337/exe -> /tmp/dropper.sh",
-		Reason:      "Process operating in temporary directory",
-		RuleName:    "Process_Exe_Or_Cwd_In_Temp",
+		Module:     "process",
+		Severity:   report.SeverityWarning,
+		Verdict:    report.VerdictSuspicious,
+		Confidence: report.ConfidenceMedium,
+		Path:       "/proc/1337/exe -> /tmp/dropper.sh",
+		Reason:     "Process operating in temporary directory",
+		RuleName:   "Process_Exe_Or_Cwd_In_Temp",
 		Metadata: map[string]interface{}{
 			"pid":  1337,
 			"comm": "dropper.sh",
@@ -56,13 +56,13 @@ func TestCorrelateFindings_MultiVectorThreatEscalation(t *testing.T) {
 	}
 
 	netFinding := report.Finding{
-		Module:      "network",
-		Severity:    report.SeverityNotice,
-		Verdict:     report.VerdictSuspicious,
-		Confidence:  report.ConfidenceMedium,
-		Path:        "/proc/net/tcp",
-		Reason:      "Wildcard network listener on 0.0.0.0:4444 owned by process \"dropper.sh\" (PID 1337)",
-		RuleName:    "Network_Wildcard_Listener_Unrecognized_Process",
+		Module:     "network",
+		Severity:   report.SeverityNotice,
+		Verdict:    report.VerdictSuspicious,
+		Confidence: report.ConfidenceMedium,
+		Path:       "/proc/net/tcp",
+		Reason:     "Wildcard network listener on 0.0.0.0:4444 owned by process \"dropper.sh\" (PID 1337)",
+		RuleName:   "Network_Wildcard_Listener_Unrecognized_Process",
 		Metadata: map[string]interface{}{
 			"pid":        1337,
 			"comm":       "dropper.sh",
@@ -84,13 +84,13 @@ func TestCorrelateFindings_MultiVectorThreatEscalation(t *testing.T) {
 	}
 
 	persFinding := report.Finding{
-		Module:      "persistence",
-		Severity:    report.SeverityWarning,
-		Verdict:     report.VerdictSuspicious,
-		Confidence:  report.ConfidenceMedium,
-		Path:        "/tmp/dropper.sh",
-		Reason:      "Cron job invokes script in temporary directory (/etc/cron.d/sync -> /tmp/dropper.sh)",
-		RuleName:    "Persistence_Cron_Temp_Target",
+		Module:     "persistence",
+		Severity:   report.SeverityWarning,
+		Verdict:    report.VerdictSuspicious,
+		Confidence: report.ConfidenceMedium,
+		Path:       "/tmp/dropper.sh",
+		Reason:     "Cron job invokes script in temporary directory (/etc/cron.d/sync -> /tmp/dropper.sh)",
+		RuleName:   "Persistence_Cron_Temp_Target",
 		EvidenceRecord: &report.EvidenceRecord{
 			DetectorType:        "module",
 			RuleName:            "Persistence_Cron_Temp_Target",
@@ -140,13 +140,13 @@ func TestCorrelateFindings_MultiVectorThreatEscalation(t *testing.T) {
 func TestCorrelateFindings_UncorroboratedStandaloneScript(t *testing.T) {
 	// Scenario: Uncorroborated standalone dual-use script without running process or network activity
 	fsFinding := report.Finding{
-		Module:      "scanner",
-		Severity:    report.SeverityWarning,
-		Verdict:     report.VerdictSuspicious,
-		Confidence:  report.ConfidenceMedium,
-		Path:        "/usr/local/bin/installer.sh",
-		Reason:      "curl | bash pipe detected",
-		RuleName:    "Script_Download_And_Execute",
+		Module:     "scanner",
+		Severity:   report.SeverityWarning,
+		Verdict:    report.VerdictSuspicious,
+		Confidence: report.ConfidenceMedium,
+		Path:       "/usr/local/bin/installer.sh",
+		Reason:     "curl | bash pipe detected",
+		RuleName:   "Script_Download_And_Execute",
 		EvidenceRecord: &report.EvidenceRecord{
 			DetectorType:        "heuristic",
 			RuleName:            "Script_Download_And_Execute",
@@ -180,13 +180,13 @@ func TestCorrelateFindings_UncorroboratedStandaloneScript(t *testing.T) {
 func TestCorrelateFindings_DocMetadataPreserved(t *testing.T) {
 	// Scenario: Doc metadata pattern in package wheel must never be elevated
 	docFinding := report.Finding{
-		Module:      "scanner",
-		Severity:    report.SeverityNotice,
-		Verdict:     report.VerdictSafe,
-		Confidence:  report.ConfidenceLow,
-		Path:        "/usr/lib/python3/dist-packages/test.dist-info/METADATA",
-		Reason:      "Documentation pattern match",
-		RuleName:    "Doc_Metadata_Match",
+		Module:     "scanner",
+		Severity:   report.SeverityNotice,
+		Verdict:    report.VerdictSafe,
+		Confidence: report.ConfidenceLow,
+		Path:       "/usr/lib/python3/dist-packages/test.dist-info/METADATA",
+		Reason:     "Documentation pattern match",
+		RuleName:   "Doc_Metadata_Match",
 		EvidenceRecord: &report.EvidenceRecord{
 			DetectorType:        "heuristic",
 			RuleName:            "Doc_Metadata_Match",

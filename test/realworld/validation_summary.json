@@ -12,12 +12,12 @@
     "scale_max_throughput_fps": 52132.6,
     "scale_peak_memory_mb": 241.22,
     "memory_budget_met": true,
-    "timestamp": "2026-10-05T04:32:44.384825593Z"
+    "timestamp": "2026-10-14T14:04:36.459450653Z"
   },
   "runs": [
     {
       "run_id": "VAL-RUN-001-desktop-standard",
-      "timestamp": "2026-10-05T04:32:44.457175972Z",
+      "timestamp": "2026-10-14T14:04:36.465947669Z",
       "profile_id": "desktop-standard",
       "is_elevated": true,
       "files_inspected": 6,
@@ -61,7 +61,7 @@
     },
     {
       "run_id": "VAL-RUN-002-server-web",
-      "timestamp": "2026-10-05T04:32:44.526311553Z",
+      "timestamp": "2026-10-14T14:04:36.471796179Z",
       "profile_id": "server-web",
       "is_elevated": true,
       "files_inspected": 6,
@@ -105,7 +105,7 @@
     },
     {
       "run_id": "VAL-RUN-003-server-minimal",
-      "timestamp": "2026-10-05T04:32:44.5886431Z",
+      "timestamp": "2026-10-14T14:04:36.47747344Z",
       "profile_id": "server-minimal",
       "is_elevated": true,
       "files_inspected": 6,
@@ -149,7 +149,7 @@
     },
     {
       "run_id": "VAL-RUN-004-upgraded-pending",
-      "timestamp": "2026-10-05T04:32:44.651963288Z",
+      "timestamp": "2026-10-14T14:04:36.483440999Z",
       "profile_id": "upgraded-pending",
       "is_elevated": true,
       "files_inspected": 6,
@@ -193,7 +193,7 @@
     },
     {
       "run_id": "VAL-RUN-005-workstation-pentest",
-      "timestamp": "2026-10-05T04:32:44.724505118Z",
+      "timestamp": "2026-10-14T14:04:36.490202875Z",
       "profile_id": "workstation-pentest",
       "is_elevated": true,
       "files_inspected": 5,
@@ -237,7 +237,7 @@
     },
     {
       "run_id": "VAL-RUN-006-workstation-dev",
-      "timestamp": "2026-10-05T04:32:44.789532828Z",
+      "timestamp": "2026-10-14T14:04:36.496317409Z",
       "profile_id": "workstation-dev",
       "is_elevated": true,
       "files_inspected": 6,
@@ -281,7 +281,7 @@
     },
     {
       "run_id": "VAL-RUN-007-container-host",
-      "timestamp": "2026-10-05T04:32:44.856097523Z",
+      "timestamp": "2026-10-14T14:04:36.503500976Z",
       "profile_id": "container-host",
       "is_elevated": true,
       "files_inspected": 6,
@@ -325,7 +325,7 @@
     },
     {
       "run_id": "VAL-RUN-008-package-mixed",
-      "timestamp": "2026-10-05T04:32:44.917662927Z",
+      "timestamp": "2026-10-14T14:04:36.511229929Z",
       "profile_id": "package-mixed",
       "is_elevated": true,
       "files_inspected": 5,
@@ -369,7 +369,7 @@
     },
     {
       "run_id": "VAL-RUN-009-privilege-restricted",
-      "timestamp": "2026-10-05T04:32:44.987511975Z",
+      "timestamp": "2026-10-14T14:04:36.517324246Z",
       "profile_id": "privilege-restricted",
       "is_elevated": false,
       "files_inspected": 5,

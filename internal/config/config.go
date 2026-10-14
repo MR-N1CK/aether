@@ -12,35 +12,36 @@ import (
 )
 
 const (
-	ToolName          = "aether"
-	DefaultMaxFileSize = 50 * 1024 * 1024 // 50MB
-	DefaultNice       = 0
+	ToolName                 = "aether"
+	DefaultMaxFileSize       = 50 * 1024 * 1024 // 50MB
+	DefaultNice              = 0
 	DefaultMaxReportFindings = 5000
-	DefaultFileTimeout     = 30 * time.Second
-	DefaultHashOversizeMax = 2 * 1024 * 1024 * 1024 // 2GB
+	DefaultFileTimeout       = 30 * time.Second
+	DefaultHashOversizeMax   = 2 * 1024 * 1024 * 1024 // 2GB
 
 	// Default heuristic score thresholds
-	DefaultScoreELFInTemp          = 55 // WARNING
-	DefaultScoreELFInTempEscalated = 85 // ALERT
-	DefaultScoreELFInTempNonExec   = 25 // NOTICE (owned by non-root invoking user & non-executable)
-	DefaultScoreELFInDev           = 85 // ALERT
-	DefaultScoreHiddenExe          = 65 // WARNING
-	DefaultScoreSuspiciousSUID     = 85 // ALERT
-	DefaultScoreWorldWritableEtc   = 60 // WARNING
-	DefaultScoreSuspiciousPrivateKey = 70 // WARNING
+	DefaultScoreELFInTemp             = 55 // WARNING
+	DefaultScoreELFInTempEscalated    = 85 // ALERT
+	DefaultScoreELFInTempNonExec      = 25 // NOTICE (owned by non-root invoking user & non-executable)
+	DefaultScoreELFInDev              = 85 // ALERT
+	DefaultScoreHiddenExe             = 65 // WARNING
+	DefaultScoreSuspiciousSUID        = 85 // ALERT
+	DefaultScoreWorldWritableEtc      = 60 // WARNING
+	DefaultScoreSuspiciousPrivateKey  = 70 // WARNING
+	DefaultScoreTrojanedPackageBinary = 95 // ALERT
 
 	// Default process hunting score thresholds
-	DefaultScoreProcDeletedExePkg     = 25 // NOTICE (package upgrade restart needed)
-	DefaultScoreProcDeletedExeSusp    = 85 // ALERT (deleted from /tmp, /dev/shm, /home, etc.)
-	DefaultScoreProcDeletedExeOther   = 55 // WARNING
-	DefaultScoreProcExeInTemp         = 55 // WARNING
-	DefaultScoreProcFilelessLow       = 15 // NOTICE
-	DefaultScoreProcFilelessELF       = 55 // WARNING
-	DefaultScoreProcMasquerade        = 60 // WARNING
-	DefaultScoreProcRootWritable      = 70 // WARNING
-	DefaultScoreProcRootNonRootOwner  = 20 // NOTICE
-	DefaultScoreProcHiddenPID         = 85 // ALERT
-	DefaultContainerScoreReduction    = 20 // Score reduction for container processes
+	DefaultScoreProcDeletedExePkg    = 25 // NOTICE (package upgrade restart needed)
+	DefaultScoreProcDeletedExeSusp   = 85 // ALERT (deleted from /tmp, /dev/shm, /home, etc.)
+	DefaultScoreProcDeletedExeOther  = 55 // WARNING
+	DefaultScoreProcExeInTemp        = 55 // WARNING
+	DefaultScoreProcFilelessLow      = 15 // NOTICE
+	DefaultScoreProcFilelessELF      = 55 // WARNING
+	DefaultScoreProcMasquerade       = 60 // WARNING
+	DefaultScoreProcRootWritable     = 70 // WARNING
+	DefaultScoreProcRootNonRootOwner = 20 // NOTICE
+	DefaultScoreProcHiddenPID        = 85 // ALERT
+	DefaultContainerScoreReduction   = 20 // Score reduction for container processes
 
 	// Default persistence hunting score thresholds
 	DefaultScorePersistCronSuspiciousCmd = 65 // WARNING
@@ -67,11 +68,11 @@ const (
 	DefaultVerdictNoticesThreshold       = 3  // 3 or more notices escalates verdict to SUSPICIOUS
 
 	// Default YARA configuration
-	DefaultYaraMaxFileSize  = 20 * 1024 * 1024 // 20MB
-	DefaultYaraTimeoutMs    = 5000             // 5 seconds
-	DefaultScoreYaraWarning = 40               // WARNING (weak) threshold
-	DefaultScoreYaraStrong  = 75               // STRONG signal threshold
-	DefaultScoreYaraAlert   = 90               // Single-match ALERT threshold
+	DefaultYaraMaxFileSize  = 20 * 1024 * 1024  // 20MB
+	DefaultYaraTimeoutMs    = 5000              // 5 seconds
+	DefaultScoreYaraWarning = 40                // WARNING (weak) threshold
+	DefaultScoreYaraStrong  = 75                // STRONG signal threshold
+	DefaultScoreYaraAlert   = 90                // Single-match ALERT threshold
 	DefaultMemoryBudget     = 256 * 1024 * 1024 // 256MB buffer memory budget
 )
 
@@ -195,49 +196,51 @@ type ScanConfig struct {
 	RedactHosts        bool     `yaml:"redact_hosts"`
 	MaxReportFindings  int      `yaml:"max_report_findings"`
 	IOCDir             string   `yaml:"ioc_dir"`
+	IOCFile            string   `yaml:"ioc_file"`
 	AllowlistPath      string   `yaml:"allowlist"`
 	OneFileSystem      bool     `yaml:"one_file_system"`
 	DockerLXDAllowlist []string `yaml:"docker_lxd_allowlist"`
 	ListenerAllowlist  []string `yaml:"listener_allowlist"`
 
 	// Configurable heuristic detection scores
-	ScoreELFInTemp          int `yaml:"score_elf_in_temp"`
-	ScoreELFInTempEscalated int `yaml:"score_elf_in_temp_escalated"`
-	ScoreELFInTempNonExec   int `yaml:"score_elf_in_temp_non_exec"`
-	ScoreELFInDev           int `yaml:"score_elf_in_dev"`
-	ScoreHiddenExe          int `yaml:"score_hidden_exe"`
-	ScoreSuspiciousSUID     int `yaml:"score_suspicious_suid"`
-	ScoreWorldWritableEtc   int `yaml:"score_world_writable_etc"`
+	ScoreELFInTemp             int `yaml:"score_elf_in_temp"`
+	ScoreELFInTempEscalated    int `yaml:"score_elf_in_temp_escalated"`
+	ScoreELFInTempNonExec      int `yaml:"score_elf_in_temp_non_exec"`
+	ScoreELFInDev              int `yaml:"score_elf_in_dev"`
+	ScoreHiddenExe             int `yaml:"score_hidden_exe"`
+	ScoreSuspiciousSUID        int `yaml:"score_suspicious_suid"`
+	ScoreWorldWritableEtc      int `yaml:"score_world_writable_etc"`
+	ScoreTrojanedPackageBinary int `yaml:"score_trojaned_package_binary"`
 
 	// Process hunting detection scores
-	ScoreProcDeletedExePkg     int `yaml:"score_proc_deleted_exe_pkg"`
-	ScoreProcDeletedExeSusp    int `yaml:"score_proc_deleted_exe_susp"`
-	ScoreProcDeletedExeOther   int `yaml:"score_proc_deleted_exe_other"`
-	ScoreProcExeInTemp         int `yaml:"score_proc_exe_in_temp"`
-	ScoreProcFilelessLow       int `yaml:"score_proc_fileless_low"`
-	ScoreProcFilelessELF       int `yaml:"score_proc_fileless_elf"`
-	ScoreProcMasquerade        int `yaml:"score_proc_masquerade"`
-	ScoreProcRootWritable      int `yaml:"score_proc_root_writable"`
-	ScoreProcRootNonRootOwner  int `yaml:"score_proc_root_non_root_owner"`
-	ScoreProcHiddenPID         int `yaml:"score_proc_hidden_pid"`
-	ContainerScoreReduction    int `yaml:"container_score_reduction"`
+	ScoreProcDeletedExePkg    int `yaml:"score_proc_deleted_exe_pkg"`
+	ScoreProcDeletedExeSusp   int `yaml:"score_proc_deleted_exe_susp"`
+	ScoreProcDeletedExeOther  int `yaml:"score_proc_deleted_exe_other"`
+	ScoreProcExeInTemp        int `yaml:"score_proc_exe_in_temp"`
+	ScoreProcFilelessLow      int `yaml:"score_proc_fileless_low"`
+	ScoreProcFilelessELF      int `yaml:"score_proc_fileless_elf"`
+	ScoreProcMasquerade       int `yaml:"score_proc_masquerade"`
+	ScoreProcRootWritable     int `yaml:"score_proc_root_writable"`
+	ScoreProcRootNonRootOwner int `yaml:"score_proc_root_non_root_owner"`
+	ScoreProcHiddenPID        int `yaml:"score_proc_hidden_pid"`
+	ContainerScoreReduction   int `yaml:"container_score_reduction"`
 
 	// Persistence hunting detection scores
-	ScorePersistCronSuspiciousCmd int `yaml:"score_persist_cron_suspicious_cmd"`
-	ScorePersistCronMissingTarget int `yaml:"score_persist_cron_missing_target"`
-	ScorePersistSystemdTempExec   int `yaml:"score_persist_systemd_temp_exec"`
-	ScorePersistSystemdUnowned    int `yaml:"score_persist_systemd_unowned"`
-	ScorePersistRecentMtimeDays   int `yaml:"score_persist_recent_mtime_days"`
-	ScorePersistSSHForcedCmd      int `yaml:"score_persist_ssh_forced_cmd"`
-	ScorePersistSSHNoCommentPriv  int `yaml:"score_persist_ssh_no_comment_priv"`
-	ScorePersistSSHSystemNologin  int `yaml:"score_persist_ssh_system_nologin"`
-	ScorePersistSSHPerms          int `yaml:"score_persist_ssh_perms"`
-	ScorePersistSSHConfig         int `yaml:"score_persist_ssh_config"`
-	ScorePersistProfileSuspicious int `yaml:"score_persist_profile_suspicious"`
-	ScorePersistProfileTemp       int `yaml:"score_persist_profile_temp"`
-	ScorePersistProfileAlias      int `yaml:"score_persist_profile_alias"`
-	ScorePersistLoaderPreload     int `yaml:"score_persist_loader_preload"`
-	ScorePersistLoaderPreloadSusp int `yaml:"score_persist_loader_preload_susp"`
+	ScorePersistCronSuspiciousCmd int      `yaml:"score_persist_cron_suspicious_cmd"`
+	ScorePersistCronMissingTarget int      `yaml:"score_persist_cron_missing_target"`
+	ScorePersistSystemdTempExec   int      `yaml:"score_persist_systemd_temp_exec"`
+	ScorePersistSystemdUnowned    int      `yaml:"score_persist_systemd_unowned"`
+	ScorePersistRecentMtimeDays   int      `yaml:"score_persist_recent_mtime_days"`
+	ScorePersistSSHForcedCmd      int      `yaml:"score_persist_ssh_forced_cmd"`
+	ScorePersistSSHNoCommentPriv  int      `yaml:"score_persist_ssh_no_comment_priv"`
+	ScorePersistSSHSystemNologin  int      `yaml:"score_persist_ssh_system_nologin"`
+	ScorePersistSSHPerms          int      `yaml:"score_persist_ssh_perms"`
+	ScorePersistSSHConfig         int      `yaml:"score_persist_ssh_config"`
+	ScorePersistProfileSuspicious int      `yaml:"score_persist_profile_suspicious"`
+	ScorePersistProfileTemp       int      `yaml:"score_persist_profile_temp"`
+	ScorePersistProfileAlias      int      `yaml:"score_persist_profile_alias"`
+	ScorePersistLoaderPreload     int      `yaml:"score_persist_loader_preload"`
+	ScorePersistLoaderPreloadSusp int      `yaml:"score_persist_loader_preload_susp"`
 	ScorePersistPAMExec           int      `yaml:"score_persist_pam_exec"`
 	ScorePersistPAMUnownedSO      int      `yaml:"score_persist_pam_unowned_so"`
 	ScorePersistHooksSuspicious   int      `yaml:"score_persist_hooks_suspicious"`
@@ -254,21 +257,21 @@ type ScanConfig struct {
 	BuildOutputDirs               []string `yaml:"build_output_dirs"`
 
 	// YARA Configuration
-	DemoRules                 bool     `yaml:"demo_rules"`
-	RulesDir                  string   `yaml:"rules_dir"`
-	TrustRulesDir             bool     `yaml:"trust_rules_dir"`
-	TrustInstalledPentestTools bool    `yaml:"trust_installed_pentest_tools"`
-	YaraMaxFileSize           int64    `yaml:"yara_max_filesize"`
-	YaraTimeoutMs             int      `yaml:"yara_timeout_ms"`
-	YaraWarningScore          int      `yaml:"yara_warning_score"`
-	YaraStrongScore           int      `yaml:"yara_strong_score"`
-	YaraAlertScore            int      `yaml:"yara_alert_score"`
-	DisabledRules             []string `yaml:"disabled_rules"`
-	DisabledTags              []string `yaml:"disabled_tags"`
-	MemoryBudgetBytes int64         `yaml:"memory_budget_bytes"`
-	FileTimeout       time.Duration `yaml:"file_timeout"`
-	HashOversizeMax   int64         `yaml:"hash_oversize_max"`
-	WeakRules         []string      `yaml:"weak_rules"`
+	DemoRules                  bool          `yaml:"demo_rules"`
+	RulesDir                   string        `yaml:"rules_dir"`
+	TrustRulesDir              bool          `yaml:"trust_rules_dir"`
+	TrustInstalledPentestTools bool          `yaml:"trust_installed_pentest_tools"`
+	YaraMaxFileSize            int64         `yaml:"yara_max_filesize"`
+	YaraTimeoutMs              int           `yaml:"yara_timeout_ms"`
+	YaraWarningScore           int           `yaml:"yara_warning_score"`
+	YaraStrongScore            int           `yaml:"yara_strong_score"`
+	YaraAlertScore             int           `yaml:"yara_alert_score"`
+	DisabledRules              []string      `yaml:"disabled_rules"`
+	DisabledTags               []string      `yaml:"disabled_tags"`
+	MemoryBudgetBytes          int64         `yaml:"memory_budget_bytes"`
+	FileTimeout                time.Duration `yaml:"file_timeout"`
+	HashOversizeMax            int64         `yaml:"hash_oversize_max"`
+	WeakRules                  []string      `yaml:"weak_rules"`
 }
 
 // LoggingConfig holds structured logging parameters.
@@ -327,36 +330,38 @@ func NewDefaultConfig() *Config {
 				"/dev/pts",
 				"/run/user",
 			},
-			Quick:                   false,
-			Full:                    false,
-			MaxFileSize:             DefaultMaxFileSize,
-			Threads:                 cpus,
-			Nice:                    DefaultNice,
-			JSONOut:                 "",
-			HTMLOut:                 "",
-			RedactHosts:             false,
-			MaxReportFindings:       DefaultMaxReportFindings,
-			IOCDir:                  "",
-			AllowlistPath:           "",
-			OneFileSystem:           false, // Enabled by default on --full, configurable
-			ScoreELFInTemp:          DefaultScoreELFInTemp,
-			ScoreELFInTempEscalated: DefaultScoreELFInTempEscalated,
-			ScoreELFInTempNonExec:   DefaultScoreELFInTempNonExec,
-			ScoreELFInDev:           DefaultScoreELFInDev,
-			ScoreHiddenExe:          DefaultScoreHiddenExe,
-			ScoreSuspiciousSUID:     DefaultScoreSuspiciousSUID,
-			ScoreWorldWritableEtc:   DefaultScoreWorldWritableEtc,
-			ScoreProcDeletedExePkg:     DefaultScoreProcDeletedExePkg,
-			ScoreProcDeletedExeSusp:    DefaultScoreProcDeletedExeSusp,
-			ScoreProcDeletedExeOther:   DefaultScoreProcDeletedExeOther,
-			ScoreProcExeInTemp:         DefaultScoreProcExeInTemp,
-			ScoreProcFilelessLow:       DefaultScoreProcFilelessLow,
-			ScoreProcFilelessELF:       DefaultScoreProcFilelessELF,
-			ScoreProcMasquerade:        DefaultScoreProcMasquerade,
-			ScoreProcRootWritable:      DefaultScoreProcRootWritable,
-			ScoreProcRootNonRootOwner:  DefaultScoreProcRootNonRootOwner,
-			ScoreProcHiddenPID:         DefaultScoreProcHiddenPID,
-			ContainerScoreReduction:    DefaultContainerScoreReduction,
+			Quick:                         false,
+			Full:                          false,
+			MaxFileSize:                   DefaultMaxFileSize,
+			Threads:                       cpus,
+			Nice:                          DefaultNice,
+			JSONOut:                       "",
+			HTMLOut:                       "",
+			RedactHosts:                   false,
+			MaxReportFindings:             DefaultMaxReportFindings,
+			IOCDir:                        "",
+			IOCFile:                       "",
+			AllowlistPath:                 "",
+			OneFileSystem:                 false, // Enabled by default on --full, configurable
+			ScoreELFInTemp:                DefaultScoreELFInTemp,
+			ScoreELFInTempEscalated:       DefaultScoreELFInTempEscalated,
+			ScoreELFInTempNonExec:         DefaultScoreELFInTempNonExec,
+			ScoreELFInDev:                 DefaultScoreELFInDev,
+			ScoreHiddenExe:                DefaultScoreHiddenExe,
+			ScoreSuspiciousSUID:           DefaultScoreSuspiciousSUID,
+			ScoreWorldWritableEtc:         DefaultScoreWorldWritableEtc,
+			ScoreTrojanedPackageBinary:    DefaultScoreTrojanedPackageBinary,
+			ScoreProcDeletedExePkg:        DefaultScoreProcDeletedExePkg,
+			ScoreProcDeletedExeSusp:       DefaultScoreProcDeletedExeSusp,
+			ScoreProcDeletedExeOther:      DefaultScoreProcDeletedExeOther,
+			ScoreProcExeInTemp:            DefaultScoreProcExeInTemp,
+			ScoreProcFilelessLow:          DefaultScoreProcFilelessLow,
+			ScoreProcFilelessELF:          DefaultScoreProcFilelessELF,
+			ScoreProcMasquerade:           DefaultScoreProcMasquerade,
+			ScoreProcRootWritable:         DefaultScoreProcRootWritable,
+			ScoreProcRootNonRootOwner:     DefaultScoreProcRootNonRootOwner,
+			ScoreProcHiddenPID:            DefaultScoreProcHiddenPID,
+			ContainerScoreReduction:       DefaultContainerScoreReduction,
 			ScorePersistCronSuspiciousCmd: DefaultScorePersistCronSuspiciousCmd,
 			ScorePersistCronMissingTarget: DefaultScorePersistCronMissingTarget,
 			ScorePersistSystemdTempExec:   DefaultScorePersistSystemdTempExec,
@@ -388,21 +393,21 @@ func NewDefaultConfig() *Config {
 			BuildOutputDirs:               append([]string{}, DefaultBuildOutputDirs...),
 			DockerLXDAllowlist:            []string{},
 			ListenerAllowlist:             append([]string{}, DefaultListenerAllowlist...),
-			DemoRules:                  false,
-			RulesDir:                   "",
-			TrustRulesDir:              false,
-			TrustInstalledPentestTools: true,
-			YaraMaxFileSize:            DefaultYaraMaxFileSize,
-			YaraTimeoutMs:              DefaultYaraTimeoutMs,
-			YaraWarningScore:           DefaultScoreYaraWarning,
-			YaraStrongScore:            DefaultScoreYaraStrong,
-			YaraAlertScore:             DefaultScoreYaraAlert,
-			DisabledRules:              nil,
-			DisabledTags:               nil,
-			MemoryBudgetBytes:          DefaultMemoryBudget,
-			FileTimeout:                DefaultFileTimeout,
-			HashOversizeMax:            DefaultHashOversizeMax,
-			WeakRules:                  append([]string{}, DefaultWeakRules()...),
+			DemoRules:                     false,
+			RulesDir:                      "",
+			TrustRulesDir:                 false,
+			TrustInstalledPentestTools:    false,
+			YaraMaxFileSize:               DefaultYaraMaxFileSize,
+			YaraTimeoutMs:                 DefaultYaraTimeoutMs,
+			YaraWarningScore:              DefaultScoreYaraWarning,
+			YaraStrongScore:               DefaultScoreYaraStrong,
+			YaraAlertScore:                DefaultScoreYaraAlert,
+			DisabledRules:                 nil,
+			DisabledTags:                  nil,
+			MemoryBudgetBytes:             DefaultMemoryBudget,
+			FileTimeout:                   DefaultFileTimeout,
+			HashOversizeMax:               DefaultHashOversizeMax,
+			WeakRules:                     append([]string{}, DefaultWeakRules()...),
 		},
 		Logging: LoggingConfig{
 			Level:  "info",

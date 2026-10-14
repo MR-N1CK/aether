@@ -358,14 +358,14 @@ func inspectUdevRules(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, 
 				isTemp := strings.HasPrefix(cmd, "/tmp/") || strings.HasPrefix(cmd, "/var/tmp/") || strings.HasPrefix(cmd, "/dev/shm/")
 				if isTemp {
 					signals = append(signals, &PersistenceSignal{
-						Class:       ClassExecFromTemp,
-						RuleName:    "Persistence_Udev_Exec_Temp",
-						Reason:      fmt.Sprintf("Udev rule executes program from volatile directory: %s", cmd),
-						Score:       85,
-						Severity:    report.SeverityAlert,
-						IsStrong:    true,
-						LineNumber:  lineNum,
-						Snippet:     RedactSnippet(cmd),
+						Class:      ClassExecFromTemp,
+						RuleName:   "Persistence_Udev_Exec_Temp",
+						Reason:     fmt.Sprintf("Udev rule executes program from volatile directory: %s", cmd),
+						Score:      85,
+						Severity:   report.SeverityAlert,
+						IsStrong:   true,
+						LineNumber: lineNum,
+						Snippet:    RedactSnippet(cmd),
 					})
 				} else {
 					cmdSignals := CheckSuspiciousCommand(cmd, lineNum, cfg, rootFS, true, pkgDB)
@@ -573,14 +573,14 @@ func inspectAptHooks(rootFS string, cfg *config.Config, pkgDB pkgdb.PackageDB, c
 				isTemp := strings.Contains(cmd, "/tmp") || strings.Contains(cmd, "/var/tmp") || strings.Contains(cmd, "/dev/shm")
 				if isTemp {
 					signals = append(signals, &PersistenceSignal{
-						Class:       ClassExecFromTemp,
-						RuleName:    "Persistence_APT_Hook_Temp",
-						Reason:      fmt.Sprintf("APT invocation hook points to volatile path: %s", cmd),
-						Score:       85,
-						Severity:    report.SeverityAlert,
-						IsStrong:    true,
-						LineNumber:  0,
-						Snippet:     RedactSnippet(cmd),
+						Class:      ClassExecFromTemp,
+						RuleName:   "Persistence_APT_Hook_Temp",
+						Reason:     fmt.Sprintf("APT invocation hook points to volatile path: %s", cmd),
+						Score:      85,
+						Severity:   report.SeverityAlert,
+						IsStrong:   true,
+						LineNumber: 0,
+						Snippet:    RedactSnippet(cmd),
 					})
 				} else {
 					cmdSignals := CheckSuspiciousCommand(cmd, 0, cfg, rootFS, true, pkgDB, fileGuards)

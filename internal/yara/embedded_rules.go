@@ -12,13 +12,15 @@ rule Linux_Webshell_PHP_Generic_Backdoor {
         mitre = "T1505.003"
         confidence = "high"
     strings:
-        $eval_post   = /eval\s*\(\s*((base64_decode|gzinflate|gzuncompress|str_rot13)\s*\(\s*)?\$_(POST|GET|REQUEST|COOKIE|SERVER)\[/ nocase
-        $assert_post = /assert\s*\(\s*((base64_decode|gzinflate|gzuncompress|str_rot13)\s*\(\s*)?\$_(POST|GET|REQUEST|COOKIE|SERVER)\[/ nocase
-        $system_post = /(system|passthru|shell_exec|exec|popen|proc_open)\s*\(\s*\$_(POST|GET|REQUEST|COOKIE)\[/ nocase
+        $eval_post   = /(eval|assert|passthru|shell_exec|system|popen|proc_open|pcntl_exec)\s*\(\s*((base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|hex2bin|pack)\s*\(\s*)*(\$_(POST|GET|REQUEST|COOKIE|SERVER)|\$GLOBALS\[['"]_(POST|GET|REQUEST|COOKIE)['"]\])\[/ nocase
+        $call_user   = /call_user_func(_array)?\s*\(\s*['"]?(eval|assert|passthru|shell_exec|system|popen|proc_open)['"]?\s*,\s*.*\$_(POST|GET|REQUEST|COOKIE|SERVER)/ nocase
         $create_func = /create_function\s*\(\s*['"]\s*['"]\s*,\s*\$_(POST|GET|REQUEST)\[/ nocase
         $preg_eval   = /preg_replace\s*\(\s*['"]\/.+\/e['"]\s*,\s*\$_(POST|GET|REQUEST)\[/ nocase
+        $var_assign  = /\$[a-zA-Z0-9_]+\s*=\s*((base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|hex2bin|stripslashes)\s*\(\s*)*\$_(POST|GET|REQUEST|COOKIE|SERVER)\[/ nocase
+        $var_exec    = /(eval|assert|passthru|shell_exec|system|popen|proc_open)\s*\(\s*\$[a-zA-Z0-9_]+\s*\)/ nocase
+        $dyn_call    = /\$[a-zA-Z0-9_]+\s*\(\s*\$_(POST|GET|REQUEST|COOKIE)\[/ nocase
     condition:
-        filesize < 2MB and (any of them)
+        filesize < 2MB and ($eval_post or $call_user or $create_func or $preg_eval or $dyn_call or ($var_assign and $var_exec))
 }
 
 rule Linux_Webshell_PHP_Known_Families {
@@ -69,15 +71,18 @@ rule Linux_Backdoor_Reverse_Shell_OneLiner {
         mitre = "T1059.004"
         confidence = "high"
     strings:
-        $bash_devtcp   = /((\/usr)?\/bin\/)?(ba)?sh\s+-i\s+>&?\s*\/dev\/tcp\/[^\s\/;]+/ ascii
-        $bash_devudp   = /((\/usr)?\/bin\/)?(ba)?sh\s+-i\s+>&?\s*\/dev\/udp\/[^\s\/;]+/ ascii
-        $devtcp_redir  = /\/dev\/(tcp|udp)\/[^\s\/;]+\s+0>&1/ ascii
-        $bash_exec_tcp = /exec\s+[0-9]+<>\/dev\/(tcp|udp)\/[^\s\/;]+/ ascii
-        $nc_e          = /(nc|ncat|netcat)(\.traditional)?\s+(-e|-c)\s+((\/usr)?\/bin\/)?(ba)?sh/ ascii
-        $nc_pipe       = /rm\s+-f\s+\/tmp\/[a-z0-9_.-]+;\s*mknod\s+\/tmp\/[a-z0-9_.-]+\s+p;\s*nc\s+/ ascii
-        $py_socket     = /python[23]?\s+-c\s+['"]import\s+socket\s*,\s*subprocess\s*,\s*os\s*;\s*s\s*=\s*socket\.socket/ ascii
-        $perl_socket   = /perl\s+-e\s+['"]use\s+Socket\s*;\s*\$i\s*=/ ascii
-        $socat_exec    = /socat\s+(exec|pty|tcp).*(exec|pty|tcp)/ ascii
+        $bash_devtcp   = /((\/usr)?\/bin\/)?(ba|da|z|k)?sh\s+.*>&?\s*\/dev\/(tcp|udp)\/[^\s;]+/ nocase
+        $devtcp_redir  = /\/dev\/(tcp|udp)\/[^\s;]+\s+(0>&1|>&0|>&2)/ nocase
+        $bash_exec_tcp = /(exec\s+)?[0-9]*<>\/dev\/(tcp|udp)\/[^\s;]+/ nocase
+        $nc_e          = /(nc|ncat|netcat)(\.[a-z]+)?\s+.*(-[a-z]*[ec][a-z]*|--(sh-)?exec)\s+['"]?((\/usr)?\/bin\/)?(ba|da|z|k)?sh/ nocase
+        $nc_pipe       = /(mkfifo|mknod)\s+\S+.*\|\s*(nc|ncat|netcat)(\.[a-z]+)?/ nocase
+        $py_socket     = /python[23]?\s+.*['"]import\s+(ssl,\s*)?socket.*socket\.socket/ nocase
+        $perl_socket   = /perl\s+.*['"]use\s+Socket/ nocase
+        $ruby_socket   = /ruby\s+.*['"](require\s+['"]socket['"]|TCPSocket\.open)/ nocase
+        $lua_socket    = /lua\s+.*['"]require\s*\(?['"]socket['"]\)?.*socket\.tcp/ nocase
+        $node_socket   = /node(js)?\s+.*['"]require\s*\(?['"](net|child_process)['"]\)?/ nocase
+        $awk_tcp       = /awk\s+.*inet\/tcp/ nocase
+        $socat_exec    = /socat\s+(exec|pty|tcp|system).*(exec|pty|tcp|system)/ nocase
     condition:
         filesize < 2MB and (any of them)
 }
@@ -107,15 +112,13 @@ rule Linux_Implant_RedTeam_Persistence_Framework {
         mitre = "T1547.001"
         confidence = "high"
     strings:
-        $proc_mount = /mount\s+-t\s+tmpfs\s+(-o\s+[^\s]+\s+)?tmpfs\s+['"]?\/proc\/[0-9${}a-zA-Z_]+/ nocase
-        $ghost_1    = "GHOST-SHELL" ascii nocase
-        $ghost_2    = "KALI-MASTER" ascii nocase
-        $ghost_3    = "TIER-1 RED TEAM IMPLANT" ascii nocase
-        $fake_svc   = "systemd-resolved-updater" ascii
-        $fake_cron  = "cron.daily/sys-check" ascii
-        $pipe_sh    = /mkfifo\s+\/tmp\/\.[a-zA-Z0-9_-]+\s*;\s*(\/bin\/)?(ba)?sh/ nocase
+        $proc_mount  = /mount\s+(-t\s+tmpfs\s+(-o\s+\S+\s+)?tmpfs|--bind\s+\S+|-o\s+bind\s+\S+)\s+['"]?\/proc\/[0-9${}a-zA-Z_]+/ nocase
+        $pipe_sh     = /(mkfifo|mknod)\s+\/tmp\/\S+\s*;\s*(\/bin\/)?(ba)?sh/ nocase
+        $implant_kw  = /(GHOST-SHELL|TIER-1\s+RED\s+TEAM|KALI-MASTER|systemd-resolved-updater)/ nocase
+        $cron_tmp    = /(echo|cat|cp|install)[\s\S]{0,100}(\/etc\/cron|\/var\/spool\/cron)[\s\S]{0,100}\/(tmp|var\/tmp|dev\/shm)\/\S+/ nocase
+        $rc_persist  = /(echo|cat|cp|install)[\s\S]{0,100}\/etc\/rc\.local[\s\S]{0,100}\/(tmp|var\/tmp|dev\/shm)\/\S+/ nocase
     condition:
-        filesize < 2MB and (2 of ($ghost_*, $fake_*, $pipe_sh) or $proc_mount or ($ghost_1 and any of them))
+        filesize < 2MB and (any of them)
 }
 
 rule Linux_Rootkit_LDPRELOAD_Hook_Artifact {
@@ -269,5 +272,70 @@ rule Linux_Malware_Data_Exfiltration_Server {
         $kw7 = "dump_payload" ascii
     condition:
         filesize < 5MB and ($sock1 and $bind and $listen and $accept) and (any of ($kw*))
+}
+
+rule Linux_Script_PowerShell_Encoded_Execution {
+    meta:
+        description = "Detects obfuscated PowerShell execution with Base64 encoded payload flags"
+        severity = "alert"
+        score = 85
+        author = "Aether Security Team"
+        mitre = "T1059.001"
+        confidence = "high"
+    strings:
+        $ps1 = /(pwsh|powershell)(\.exe)?\s+.*-(e|enc|encodedcommand)\s+[A-Za-z0-9+\/=]{10,}/ nocase
+    condition:
+        filesize < 2MB and $ps1
+}
+
+rule Linux_Script_Cloud_Exfiltration_Tool {
+    meta:
+        description = "Detects automated cloud storage synchronization and exfiltration tools"
+        severity = "warning"
+        score = 80
+        author = "Aether Security Team"
+        mitre = "T1567.002"
+        confidence = "medium"
+    strings:
+        $rclone    = /rclone\s+(copy|copyto|sync|move|rcat)\s+.*(\/etc\/|\/root\/|\/home\/|\.tar(\.(gz|bz2|xz))?|\.zip|\.7z|\.sql|\.kdbx|\.db)/ nocase
+        $s5cmd     = /s5cmd\s+(cp|sync|cat)\s+.*(\/etc\/|\/root\/|\/home\/|\.tar(\.(gz|bz2|xz))?|\.zip|\.7z|\.sql|\.kdbx|\.db)/ nocase
+        $mega      = /mega-(put|cmd|export)\s+.*(\/etc\/|\/root\/|\/home\/|\.tar(\.(gz|bz2|xz))?|\.zip|\.7z|\.sql|\.kdbx|\.db)/ nocase
+        $aws       = /aws\s+s3\s+(cp|sync|mv)\s+.*(\/etc\/|\/root\/|\/home\/|\.tar(\.(gz|bz2|xz))?|\.zip|\.7z|\.sql|\.kdbx|\.db)/ nocase
+        $gsutil    = /(gsutil|gcloud\s+storage)\s+(cp|rsync)\s+.*(\/etc\/|\/root\/|\/home\/|\.tar(\.(gz|bz2|xz))?|\.zip|\.7z|\.sql|\.kdbx|\.db)/ nocase
+        $azcopy    = /azcopy\s+(copy|sync)\s+.*(\/etc\/|\/root\/|\/home\/|\.tar(\.(gz|bz2|xz))?|\.zip|\.7z|\.sql|\.kdbx|\.db)/ nocase
+        $curl_post = /curl\s+.*(-T|--upload-file|-F)\s+.*https?:\/\/(transfer\.sh|file\.io|bashupload\.com|catbox\.moe|0x0\.st)/ nocase
+    condition:
+        filesize < 2MB and (any of them)
+}
+
+rule Linux_Persistence_Linker_Audit_Hijack {
+    meta:
+        description = "Detects dynamic linker audit or preload interface hijacking (LD_AUDIT / LD_PRELOAD / ld.so.preload)"
+        severity = "alert"
+        score = 85
+        author = "Aether Security Team"
+        mitre = "T1574.006"
+        confidence = "high"
+    strings:
+        $ld_hook      = /(LD_AUDIT|LD_PRELOAD|LD_LIBRARY_PATH)\s*=/ nocase
+        $preload_file = "/etc/ld.so.preload" ascii
+        $audit_file   = "/etc/ld.so.audit" ascii
+        $env_inject   = /Environment\s*=.*LD_(AUDIT|PRELOAD)/ nocase
+    condition:
+        filesize < 2MB and (any of them)
+}
+
+rule Linux_Persistence_PAM_Exec_Suspicious {
+    meta:
+        description = "Detects PAM authentication hooks executing scripts or binaries with elevated privileges in volatile paths"
+        severity = "alert"
+        score = 90
+        author = "Aether Security Team"
+        mitre = "T1556.004"
+        confidence = "high"
+    strings:
+        $pam = /(pam_exec\.so|pam_script\.so)\s+.*(\/(tmp|var\/tmp|dev\/shm|root|home)|\/\.[a-zA-Z0-9_]+|\.(sh|py|pl)(\s|$)|seteuid)/ nocase
+    condition:
+        filesize < 1MB and $pam
 }
 `

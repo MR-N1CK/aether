@@ -215,14 +215,23 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 		if s := CheckExeOrCwdInTemp(info, cfg); s != nil {
 			signals = append(signals, s)
 		}
-		if s := CheckFilelessExecution(info, cfg); s != nil {
-			signals = append(signals, s)
+		if sigs := CheckFilelessExecution(info, cfg); len(sigs) > 0 {
+			signals = append(signals, sigs...)
 		}
 		if s := CheckMasquerading(info, cfg); s != nil {
 			signals = append(signals, s)
 		}
 		if s := CheckRootWritableExe(info, cfg); s != nil {
 			signals = append(signals, s)
+		}
+		if s := CheckProcessReverseShell(info, cfg); s != nil {
+			signals = append(signals, s)
+		}
+		if s := CheckContainerCapabilities(info, m.selfMntNs, cfg); s != nil {
+			signals = append(signals, s)
+		}
+		if envSignals := CheckProcessEnviron(info, cfg); len(envSignals) > 0 {
+			signals = append(signals, envSignals...)
 		}
 
 		// Container namespace score adjustment

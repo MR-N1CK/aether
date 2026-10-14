@@ -22,4 +22,3 @@ func VersionInfo() string {
 func ValidateRulesDir(dir string) (*ValidationResult, error) {
 	return YaraXValidateRulesDir(dir)
 }
-

@@ -77,6 +77,7 @@ type Engine interface {
 //   - warningThreshold <= score < strongThreshold (40-74 by default): WARNING (weak)
 //   - strongThreshold <= score < alertThreshold (75-89 by default): WARNING (strong)
 //   - score >= alertThreshold (>=90 by default): ALERT
+//
 // All scores are clamped to [0, 100].
 func ScoreFromMeta(metadata map[string]interface{}, defaultScore, warningThreshold, strongThreshold, alertThreshold int) (int, report.Severity, bool, string) {
 	if defaultScore <= 0 {

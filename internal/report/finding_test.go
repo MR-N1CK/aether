@@ -135,3 +135,35 @@ func TestFinding_DefaultVerdictAndRationale(t *testing.T) {
 		t.Errorf("expected VerdictSafe for NOTICE, got %v", noticeFinding.Verdict)
 	}
 }
+
+func TestFinding_NewDetectionsEnrichment(t *testing.T) {
+	// 1. Process_Interactive_Reverse_Shell
+	revFinding := report.NewFinding("process", report.SeverityAlert, "/proc/1337/exe", "Reverse shell socket redirection", "Process_Interactive_Reverse_Shell")
+	if revFinding.Title != "Interactive Reverse Shell Socket Redirection" {
+		t.Errorf("unexpected Title: %s", revFinding.Title)
+	}
+	if revFinding.Verdict != report.VerdictMalicious {
+		t.Errorf("expected VerdictMalicious, got %v", revFinding.Verdict)
+	}
+	if len(revFinding.MITRE) == 0 {
+		t.Errorf("expected non-empty MITRE mappings for Process_Interactive_Reverse_Shell")
+	}
+	if len(revFinding.Remediation) == 0 {
+		t.Errorf("expected non-empty Remediation for Process_Interactive_Reverse_Shell")
+	}
+
+	// 2. Container_Dangerous_Capability_Overprivilege
+	capFinding := report.NewFinding("process", report.SeverityWarning, "/proc/2001/exe", "Container overprivileged", "Container_Dangerous_Capability_Overprivilege")
+	if capFinding.Title != "Container Process with Dangerous Host Breakout Capabilities" {
+		t.Errorf("unexpected Title: %s", capFinding.Title)
+	}
+	if capFinding.Verdict != report.VerdictSuspicious {
+		t.Errorf("expected VerdictSuspicious, got %v", capFinding.Verdict)
+	}
+	if len(capFinding.MITRE) == 0 {
+		t.Errorf("expected non-empty MITRE mappings for Container_Dangerous_Capability_Overprivilege")
+	}
+	if len(capFinding.Remediation) == 0 {
+		t.Errorf("expected non-empty Remediation for Container_Dangerous_Capability_Overprivilege")
+	}
+}

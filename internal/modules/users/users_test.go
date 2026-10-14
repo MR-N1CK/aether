@@ -19,9 +19,9 @@ type memoryReporter struct {
 func (r *memoryReporter) Report(f report.Finding) {
 	r.findings = append(r.findings, f)
 }
-func (r *memoryReporter) Findings() []report.Finding      { return r.findings }
+func (r *memoryReporter) Findings() []report.Finding         { return r.findings }
 func (r *memoryReporter) Summary() (int, int, int, int, int) { return 0, 0, 0, 0, 0 }
-func (r *memoryReporter) Close() error                     { return nil }
+func (r *memoryReporter) Close() error                       { return nil }
 
 func setupCleanEtc(t *testing.T) string {
 	root := t.TempDir()

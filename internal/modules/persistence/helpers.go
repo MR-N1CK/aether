@@ -52,12 +52,12 @@ type PersistenceSignal struct {
 
 // Regular expressions for credential and key redaction
 var (
-	reUserPass = regexp.MustCompile(`//[^:\s/]+:[^@\s/]+@`)
-	rePassword = regexp.MustCompile(`(?i)(password|passwd|pwd)\s*=\s*[^\s;&]+`)
-	reToken    = regexp.MustCompile(`(?i)(token|bearer)\s*=\s*[^\s;&]+`)
-	reSecret   = regexp.MustCompile(`(?i)(secret|api_key|apikey)\s*=\s*[^\s;&]+`)
-	reCurlAuth = regexp.MustCompile(`(?i)(curl|wget)[^;\n]*\s+-u\s+([^\s;&]+)`)
-	reSSHKey   = regexp.MustCompile(`(?i)(^|\s)(-i\s+)[^\s;&]+`)
+	reUserPass   = regexp.MustCompile(`//[^:\s/]+:[^@\s/]+@`)
+	rePassword   = regexp.MustCompile(`(?i)(password|passwd|pwd)\s*=\s*[^\s;&]+`)
+	reToken      = regexp.MustCompile(`(?i)(token|bearer)\s*=\s*[^\s;&]+`)
+	reSecret     = regexp.MustCompile(`(?i)(secret|api_key|apikey)\s*=\s*[^\s;&]+`)
+	reCurlAuth   = regexp.MustCompile(`(?i)(curl|wget)[^;\n]*\s+-u\s+([^\s;&]+)`)
+	reSSHKey     = regexp.MustCompile(`(?i)(^|\s)(-i\s+)[^\s;&]+`)
 	reSSHCommand = regexp.MustCompile(`(?i)\b(ssh|scp|sftp|rsync|autossh)\b`)
 )
 
@@ -885,40 +885,40 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 			score = config.DefaultScorePersistCronSuspiciousCmd
 		}
 		signals = append(signals, &PersistenceSignal{
-			Class:       ClassDownloadAndExecute,
-			RuleName:    "Persistence_Download_And_Execute",
-			Reason:      "Download piped directly into shell execution (curl/wget | sh)",
-			Score:       score,
-			Severity:    report.SeverityWarning,
-			IsStrong:    true,
-			LineNumber:  lineNum,
-			Snippet:     redacted,
+			Class:      ClassDownloadAndExecute,
+			RuleName:   "Persistence_Download_And_Execute",
+			Reason:     "Download piped directly into shell execution (curl/wget | sh)",
+			Score:      score,
+			Severity:   report.SeverityWarning,
+			IsStrong:   true,
+			LineNumber: lineNum,
+			Snippet:    redacted,
 		})
 	}
 
 	// 3. Obfuscation & Eval
 	if rePipedDecode.MatchString(trimmed) {
 		signals = append(signals, &PersistenceSignal{
-			Class:       ClassObfuscation,
-			RuleName:    "Persistence_Piped_Decode_Execute",
-			Reason:      "Decoded payload piped directly into shell execution",
-			Score:       75,
-			Severity:    report.SeverityWarning,
-			IsStrong:    true,
-			LineNumber:  lineNum,
-			Snippet:     redacted,
+			Class:      ClassObfuscation,
+			RuleName:   "Persistence_Piped_Decode_Execute",
+			Reason:     "Decoded payload piped directly into shell execution",
+			Score:      75,
+			Severity:   report.SeverityWarning,
+			IsStrong:   true,
+			LineNumber: lineNum,
+			Snippet:    redacted,
 		})
 	} else if strings.Contains(trimmed, "eval") {
 		if !reBenignEval.MatchString(trimmed) && reDecodePrimitives.MatchString(trimmed) {
 			signals = append(signals, &PersistenceSignal{
-				Class:       ClassObfuscation,
-				RuleName:    "Persistence_Eval_Decode_Obfuscation",
-				Reason:      "eval executed with decoded or downloaded payload",
-				Score:       75,
-				Severity:    report.SeverityWarning,
-				IsStrong:    true,
-				LineNumber:  lineNum,
-				Snippet:     redacted,
+				Class:      ClassObfuscation,
+				RuleName:   "Persistence_Eval_Decode_Obfuscation",
+				Reason:     "eval executed with decoded or downloaded payload",
+				Score:      75,
+				Severity:   report.SeverityWarning,
+				IsStrong:   true,
+				LineNumber: lineNum,
+				Snippet:    redacted,
 			})
 		}
 	}
@@ -943,14 +943,14 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 			tunnelScore = 80 // Never ALERT alone
 		}
 		signals = append(signals, &PersistenceSignal{
-			Class:       ClassPrivilegeAbuse,
-			RuleName:    "Persistence_Autostart_Tunnel",
-			Reason:      "Autostart tunnel or port forward configured",
-			Score:       tunnelScore,
-			Severity:    report.SeverityWarning,
-			IsStrong:    true,
-			LineNumber:  lineNum,
-			Snippet:     redacted,
+			Class:      ClassPrivilegeAbuse,
+			RuleName:   "Persistence_Autostart_Tunnel",
+			Reason:     "Autostart tunnel or port forward configured",
+			Score:      tunnelScore,
+			Severity:   report.SeverityWarning,
+			IsStrong:   true,
+			LineNumber: lineNum,
+			Snippet:    redacted,
 		})
 	} else if reSSHBaseCmd.MatchString(trimmed) && hasInsecureSSH {
 		insecureScore := cfg.Scan.ScorePersistInsecureSSH
@@ -958,14 +958,14 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 			insecureScore = config.DefaultScorePersistInsecureSSH
 		}
 		signals = append(signals, &PersistenceSignal{
-			Class:       ClassConfigDeviation,
-			RuleName:    "Persistence_Insecure_SSH_Options",
-			Reason:      "SSH command disables host key verification (StrictHostKeyChecking=no or UserKnownHostsFile=/dev/null)",
-			Score:       insecureScore,
-			Severity:    report.SeverityNotice,
-			IsStrong:    false,
-			LineNumber:  lineNum,
-			Snippet:     redacted,
+			Class:      ClassConfigDeviation,
+			RuleName:   "Persistence_Insecure_SSH_Options",
+			Reason:     "SSH command disables host key verification (StrictHostKeyChecking=no or UserKnownHostsFile=/dev/null)",
+			Score:      insecureScore,
+			Severity:   report.SeverityNotice,
+			IsStrong:   false,
+			LineNumber: lineNum,
+			Snippet:    redacted,
 		})
 	}
 
@@ -985,14 +985,14 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 					score = config.DefaultScorePersistSystemdTempExec
 				}
 				signals = append(signals, &PersistenceSignal{
-					Class:       ClassExecFromTemp,
-					RuleName:    "Persistence_Exec_From_Temp",
-					Reason:      fmt.Sprintf("Executes binary or script from volatile directory (%s)", target),
-					Score:       score,
-					Severity:    report.SeverityWarning,
-					IsStrong:    true,
-					LineNumber:  lineNum,
-					Snippet:     redacted,
+					Class:      ClassExecFromTemp,
+					RuleName:   "Persistence_Exec_From_Temp",
+					Reason:     fmt.Sprintf("Executes binary or script from volatile directory (%s)", target),
+					Score:      score,
+					Severity:   report.SeverityWarning,
+					IsStrong:   true,
+					LineNumber: lineNum,
+					Snippet:    redacted,
 				})
 				hasTempExec = true
 				break
@@ -1041,14 +1041,14 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 						score = config.DefaultScorePersistSystemdTempExec
 					}
 					signals = append(signals, &PersistenceSignal{
-						Class:       ClassExecFromTemp,
-						RuleName:    "Persistence_Exec_From_Temp",
-						Reason:      fmt.Sprintf("Executes binary or script from volatile directory (%s)", w),
-						Score:       score,
-						Severity:    report.SeverityWarning,
-						IsStrong:    true,
-						LineNumber:  lineNum,
-						Snippet:     redacted,
+						Class:      ClassExecFromTemp,
+						RuleName:   "Persistence_Exec_From_Temp",
+						Reason:     fmt.Sprintf("Executes binary or script from volatile directory (%s)", w),
+						Score:      score,
+						Severity:   report.SeverityWarning,
+						IsStrong:   true,
+						LineNumber: lineNum,
+						Snippet:    redacted,
 					})
 					hasTempExec = true
 					break
@@ -1077,14 +1077,14 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 			if !hasUnknownHiddenDir && !hasHiddenNoExtBinary {
 				if isCacheOnly {
 					signals = append(signals, &PersistenceSignal{
-						Class:       ClassExecFromTemp,
-						RuleName:    "Persistence_Exec_From_Home_Cache_Path",
-						Reason:      fmt.Sprintf("Executes script or binary from user cache directory (%s)", rawTarget),
-						Score:       10,
-						Severity:    report.SeverityInfo,
-						IsStrong:    false,
-						LineNumber:  lineNum,
-						Snippet:     redacted,
+						Class:      ClassExecFromTemp,
+						RuleName:   "Persistence_Exec_From_Home_Cache_Path",
+						Reason:     fmt.Sprintf("Executes script or binary from user cache directory (%s)", rawTarget),
+						Score:      10,
+						Severity:   report.SeverityInfo,
+						IsStrong:   false,
+						LineNumber: lineNum,
+						Snippet:    redacted,
 					})
 				}
 				continue
@@ -1096,25 +1096,25 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 			if isHome {
 				if isSystemContext {
 					signals = append(signals, &PersistenceSignal{
-						Class:       ClassExecFromTemp,
-						RuleName:    "Persistence_System_Exec_User_Hidden_Path",
-						Reason:      fmt.Sprintf("System file executes or sources user hidden home path (%s)", rawTarget),
-						Score:       70,
-						Severity:    report.SeverityWarning,
-						IsStrong:    true,
-						LineNumber:  lineNum,
-						Snippet:     redacted,
+						Class:      ClassExecFromTemp,
+						RuleName:   "Persistence_System_Exec_User_Hidden_Path",
+						Reason:     fmt.Sprintf("System file executes or sources user hidden home path (%s)", rawTarget),
+						Score:      70,
+						Severity:   report.SeverityWarning,
+						IsStrong:   true,
+						LineNumber: lineNum,
+						Snippet:    redacted,
 					})
 				} else {
 					signals = append(signals, &PersistenceSignal{
-						Class:       ClassExecFromTemp,
-						RuleName:    "Persistence_Exec_From_Home_Hidden_Path",
-						Reason:      fmt.Sprintf("Executes script or tool from hidden directory in user home (%s)", rawTarget),
-						Score:       25,
-						Severity:    report.SeverityNotice,
-						IsStrong:    false,
-						LineNumber:  lineNum,
-						Snippet:     redacted,
+						Class:      ClassExecFromTemp,
+						RuleName:   "Persistence_Exec_From_Home_Hidden_Path",
+						Reason:     fmt.Sprintf("Executes script or tool from hidden directory in user home (%s)", rawTarget),
+						Score:      25,
+						Severity:   report.SeverityNotice,
+						IsStrong:   false,
+						LineNumber: lineNum,
+						Snippet:    redacted,
 					})
 				}
 			} else {
@@ -1134,14 +1134,14 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 				}
 
 				signals = append(signals, &PersistenceSignal{
-					Class:       ClassExecFromTemp,
-					RuleName:    "Persistence_Exec_From_Hidden_Path",
-					Reason:      fmt.Sprintf("Executes binary or script from hidden path (%s)", rawTarget),
-					Score:       70,
-					Severity:    report.SeverityWarning,
-					IsStrong:    true,
-					LineNumber:  lineNum,
-					Snippet:     redacted,
+					Class:      ClassExecFromTemp,
+					RuleName:   "Persistence_Exec_From_Hidden_Path",
+					Reason:     fmt.Sprintf("Executes binary or script from hidden path (%s)", rawTarget),
+					Score:      70,
+					Severity:   report.SeverityWarning,
+					IsStrong:   true,
+					LineNumber: lineNum,
+					Snippet:    redacted,
 				})
 			}
 		}
@@ -1184,14 +1184,14 @@ func CheckSuspiciousCommand(line string, lineNum int, cfg *config.Config, rootFS
 					continue
 				}
 				signals = append(signals, &PersistenceSignal{
-					Class:       ClassMissingTarget,
-					RuleName:    "Persistence_Missing_Target_File",
-					Reason:      fmt.Sprintf("References non-existent executable target %s", cleanTarget),
-					Score:       config.DefaultScorePersistCronMissingTarget,
-					Severity:    report.SeverityNotice,
-					IsStrong:    false,
-					LineNumber:  lineNum,
-					Snippet:     redacted,
+					Class:      ClassMissingTarget,
+					RuleName:   "Persistence_Missing_Target_File",
+					Reason:     fmt.Sprintf("References non-existent executable target %s", cleanTarget),
+					Score:      config.DefaultScorePersistCronMissingTarget,
+					Severity:   report.SeverityNotice,
+					IsStrong:   false,
+					LineNumber: lineNum,
+					Snippet:    redacted,
 				})
 			}
 		}
@@ -1402,13 +1402,13 @@ func AssessSymlink(rootFS, virtPath string, pkgDB pkgdb.PackageDB, isUserControl
 					sev = report.SeverityAlert
 				}
 				return &PersistenceSignal{
-					Class:      ClassSymlinkHijack,
-					RuleName:   rule,
-					Reason:     fmt.Sprintf("User persistence file is a symlink pointing outside owner's home directory to %s", targetVirt),
-					Score:      score,
-					Severity:   sev,
-					IsStrong:   true,
-					Snippet:    targetVirt,
+					Class:    ClassSymlinkHijack,
+					RuleName: rule,
+					Reason:   fmt.Sprintf("User persistence file is a symlink pointing outside owner's home directory to %s", targetVirt),
+					Score:    score,
+					Severity: sev,
+					IsStrong: true,
+					Snippet:  targetVirt,
 				}
 			}
 		}
@@ -1419,13 +1419,13 @@ func AssessSymlink(rootFS, virtPath string, pkgDB pkgdb.PackageDB, isUserControl
 			if statSys, ok := tStat.Sys().(*syscall.Stat_t); ok {
 				if statSys.Uid != fileUID && fileUID != 0 {
 					return &PersistenceSignal{
-						Class:      ClassSymlinkHijack,
-						RuleName:   "Persistence_User_Symlink_Foreign_Owner",
-						Reason:     fmt.Sprintf("User symlink points to file owned by different UID %d (%s)", statSys.Uid, targetVirt),
-						Score:      75,
-						Severity:   report.SeverityWarning,
-						IsStrong:   true,
-						Snippet:    targetVirt,
+						Class:    ClassSymlinkHijack,
+						RuleName: "Persistence_User_Symlink_Foreign_Owner",
+						Reason:   fmt.Sprintf("User symlink points to file owned by different UID %d (%s)", statSys.Uid, targetVirt),
+						Score:    75,
+						Severity: report.SeverityWarning,
+						IsStrong: true,
+						Snippet:  targetVirt,
 					}
 				}
 			}
@@ -1438,13 +1438,13 @@ func AssessSymlink(rootFS, virtPath string, pkgDB pkgdb.PackageDB, isUserControl
 	if tErr != nil {
 		if os.IsNotExist(tErr) {
 			return &PersistenceSignal{
-				Class:      ClassMissingTarget,
-				RuleName:   "Persistence_System_Broken_Symlink",
-				Reason:     fmt.Sprintf("System symlink points to non-existent target (%s -> %s)", virtPath, targetVirt),
-				Score:      25,
-				Severity:   report.SeverityNotice,
-				IsStrong:   false,
-				Snippet:    targetVirt,
+				Class:    ClassMissingTarget,
+				RuleName: "Persistence_System_Broken_Symlink",
+				Reason:   fmt.Sprintf("System symlink points to non-existent target (%s -> %s)", virtPath, targetVirt),
+				Score:    25,
+				Severity: report.SeverityNotice,
+				IsStrong: false,
+				Snippet:  targetVirt,
 			}
 		}
 		return nil
@@ -1463,26 +1463,26 @@ func AssessSymlink(rootFS, virtPath string, pkgDB pkgdb.PackageDB, isUserControl
 
 	if isVolatileOrHome || isWorldWritable || !isRootOwned {
 		return &PersistenceSignal{
-			Class:      ClassSymlinkHijack,
-			RuleName:   "Persistence_System_Suspicious_Symlink",
-			Reason:     fmt.Sprintf("System symlink points to volatile, world-writable, or non-root owned target (%s -> %s)", virtPath, targetVirt),
-			Score:      75,
-			Severity:   report.SeverityWarning,
-			IsStrong:   true,
-			Snippet:    targetVirt,
+			Class:    ClassSymlinkHijack,
+			RuleName: "Persistence_System_Suspicious_Symlink",
+			Reason:   fmt.Sprintf("System symlink points to volatile, world-writable, or non-root owned target (%s -> %s)", virtPath, targetVirt),
+			Score:    75,
+			Severity: report.SeverityWarning,
+			IsStrong: true,
+			Snippet:  targetVirt,
 		}
 	}
 
 	// Root-owned target under /opt or /usr is normal vendor behavior
 	if strings.HasPrefix(targetVirt, "/opt") || strings.HasPrefix(targetVirt, "/usr") {
 		return &PersistenceSignal{
-			Class:      ClassSymlinkHijack,
-			RuleName:   "Persistence_System_Vendor_Symlink",
-			Reason:     fmt.Sprintf("System symlink points to root-owned vendor location (%s -> %s)", virtPath, targetVirt),
-			Score:      10,
-			Severity:   report.SeverityInfo,
-			IsStrong:   false,
-			Snippet:    targetVirt,
+			Class:    ClassSymlinkHijack,
+			RuleName: "Persistence_System_Vendor_Symlink",
+			Reason:   fmt.Sprintf("System symlink points to root-owned vendor location (%s -> %s)", virtPath, targetVirt),
+			Score:    10,
+			Severity: report.SeverityInfo,
+			IsStrong: false,
+			Snippet:  targetVirt,
 		}
 	}
 

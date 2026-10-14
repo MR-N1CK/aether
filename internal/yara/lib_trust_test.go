@@ -59,20 +59,20 @@ func TestEvaluateLibraryTrust(t *testing.T) {
 	}
 
 	trustedFS := map[string]mockFileInfo{
-		"/":                                         {name: "/", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
-		"/usr":                                      {name: "usr", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
-		"/usr/bin":                                  {name: "bin", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
-		"/usr/bin/aether":                           {name: "aether", mode: 0755, isDir: false, uid: 0},
-		"/usr/local":                                {name: "local", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
-		"/usr/local/bin":                            {name: "bin", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
-		"/usr/local/bin/aether":                     {name: "aether", mode: 0755, isDir: false, uid: 0},
-		"/usr/local/lib":                            {name: "lib", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
-		"/usr/local/lib/libyara_x_capi.so.1":        {name: "libyara_x_capi.so.1", mode: 0755, isDir: false, uid: 0},
-		"/usr/local/lib/libyara_x_capi.so":          {name: "libyara_x_capi.so", mode: 0755, isDir: false, uid: 0},
-		"/home":                                     {name: "home", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
-		"/home/alice":                               {name: "alice", mode: 0750 | os.ModeDir, isDir: true, uid: 1000},
-		"/home/alice/.local":                        {name: ".local", mode: 0755 | os.ModeDir, isDir: true, uid: 1000},
-		"/home/alice/.local/lib":                    {name: "lib", mode: 0755 | os.ModeDir, isDir: true, uid: 1000},
+		"/":                                  {name: "/", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
+		"/usr":                               {name: "usr", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
+		"/usr/bin":                           {name: "bin", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
+		"/usr/bin/aether":                    {name: "aether", mode: 0755, isDir: false, uid: 0},
+		"/usr/local":                         {name: "local", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
+		"/usr/local/bin":                     {name: "bin", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
+		"/usr/local/bin/aether":              {name: "aether", mode: 0755, isDir: false, uid: 0},
+		"/usr/local/lib":                     {name: "lib", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
+		"/usr/local/lib/libyara_x_capi.so.1": {name: "libyara_x_capi.so.1", mode: 0755, isDir: false, uid: 0},
+		"/usr/local/lib/libyara_x_capi.so":   {name: "libyara_x_capi.so", mode: 0755, isDir: false, uid: 0},
+		"/home":                              {name: "home", mode: 0755 | os.ModeDir, isDir: true, uid: 0},
+		"/home/alice":                        {name: "alice", mode: 0750 | os.ModeDir, isDir: true, uid: 1000},
+		"/home/alice/.local":                 {name: ".local", mode: 0755 | os.ModeDir, isDir: true, uid: 1000},
+		"/home/alice/.local/lib":             {name: "lib", mode: 0755 | os.ModeDir, isDir: true, uid: 1000},
 		"/home/alice/.local/lib/libyara_x_capi.so.1": {name: "libyara_x_capi.so.1", mode: 0755, isDir: false, uid: 1000},
 	}
 
@@ -500,5 +500,3 @@ func TestRefusal_CannotVerifyLinkage(t *testing.T) {
 		t.Fatalf("expected reason %q, got %q", expected, reason)
 	}
 }
-
-

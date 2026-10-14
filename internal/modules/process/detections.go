@@ -35,17 +35,17 @@ var standardSystemDirs = []string{
 }
 
 var knownSystemDaemons = map[string]bool{
-	"sshd":              true,
-	"cron":              true,
-	"crond":             true,
-	"systemd":           true,
-	"systemd-journald":  true,
-	"systemd-resolved":  true,
-	"systemd-logind":    true,
-	"systemd-udevd":     true,
-	"rsyslogd":          true,
-	"auditd":            true,
-	"udevd":             true,
+	"sshd":             true,
+	"cron":             true,
+	"crond":            true,
+	"systemd":          true,
+	"systemd-journald": true,
+	"systemd-resolved": true,
+	"systemd-logind":   true,
+	"systemd-udevd":    true,
+	"rsyslogd":         true,
+	"auditd":           true,
+	"udevd":            true,
 }
 
 func statInProcessNamespace(pid int, absPath string) (os.FileInfo, error) {
@@ -277,8 +277,13 @@ func CheckExeOrCwdInTemp(info *ProcessInfo, cfg *config.Config) *ProcessSignal {
 }
 
 // CheckFilelessExecution inspects /proc/<pid>/maps for executable memfd or anonymous-deleted mappings.
+// CheckFilelessExecution inspects /proc/<pid>/maps for executable memfd or anonymous-deleted mappings.
 // Plain JIT mappings (empty pathname or [anon:...]) are intentionally skipped.
-func CheckFilelessExecution(info *ProcessInfo, cfg *config.Config) *ProcessSignal {
+// Returns all matching signals deduped per memfd inode.
+func CheckFilelessExecution(info *ProcessInfo, cfg *config.Config) []*ProcessSignal {
+	var signals []*ProcessSignal
+	seenInodes := make(map[uint64]bool)
+
 	for _, m := range info.Maps {
 		if !strings.Contains(m.Perms, "x") {
 			continue
@@ -301,6 +306,14 @@ func CheckFilelessExecution(info *ProcessInfo, cfg *config.Config) *ProcessSigna
 			continue
 		}
 
+		// Dedupe per inode if non-zero
+		if m.Inode != 0 && seenInodes[m.Inode] {
+			continue
+		}
+		if m.Inode != 0 {
+			seenInodes[m.Inode] = true
+		}
+
 		// Check if mapping starts with ELF magic (\x7fELF)
 		// Read via /proc/<pid>/map_files or exe inode, never ptrace or writes.
 		// If unreadable, record a coverage gap instead of generating a speculative finding.
@@ -321,30 +334,31 @@ func CheckFilelessExecution(info *ProcessInfo, cfg *config.Config) *ProcessSigna
 			if score == 0 {
 				score = config.DefaultScoreProcFilelessELF
 			}
-			return &ProcessSignal{
+			signals = append(signals, &ProcessSignal{
 				RuleName:    "Process_Fileless_Memory_ELF",
 				Reason:      fmt.Sprintf("Executable memory mapping %q begins with ELF header (in-memory payload execution)", path),
 				Score:       score,
 				Severity:    report.SeverityWarning,
 				IsPathBased: false,
 				IsStrong:    true,
-			}
+			})
+			continue
 		}
 
 		score := cfg.Scan.ScoreProcFilelessLow
 		if score == 0 {
 			score = config.DefaultScoreProcFilelessLow
 		}
-		return &ProcessSignal{
+		signals = append(signals, &ProcessSignal{
 			RuleName:    "Process_Fileless_Memory_Mapping",
 			Reason:      fmt.Sprintf("Executable memory mapping %q detected", path),
 			Score:       score,
 			Severity:    report.SeverityNotice,
 			IsPathBased: false,
 			IsStrong:    false,
-		}
+		})
 	}
-	return nil
+	return signals
 }
 
 // CheckMasquerading detects processes masquerading as kernel threads or system daemons.
@@ -466,6 +480,119 @@ func CheckRootWritableExe(info *ProcessInfo, cfg *config.Config) *ProcessSignal 
 	return nil
 }
 
+var interactiveShellOrTools = map[string]bool{
+	"sh":      true,
+	"bash":    true,
+	"dash":    true,
+	"zsh":     true,
+	"ash":     true,
+	"csh":     true,
+	"tcsh":    true,
+	"ksh":     true,
+	"fish":    true,
+	"python":  true,
+	"python2": true,
+	"python3": true,
+	"perl":    true,
+	"ruby":    true,
+	"php":     true,
+	"lua":     true,
+	"nc":      true,
+	"netcat":  true,
+	"ncat":    true,
+	"socat":   true,
+}
+
+// CheckProcessReverseShell checks if an interactive shell, script interpreter, or networking
+// tool has its standard input or output redirected to a network socket.
+func CheckProcessReverseShell(info *ProcessInfo, cfg *config.Config) *ProcessSignal {
+	if info == nil {
+		return nil
+	}
+
+	comm := strings.ToLower(strings.TrimSpace(info.Comm))
+	exeBase := ""
+	if info.Exe != "" {
+		cleanExe := strings.TrimSuffix(info.Exe, " (deleted)")
+		exeBase = strings.ToLower(filepath.Base(cleanExe))
+	}
+
+	if !interactiveShellOrTools[comm] && !interactiveShellOrTools[exeBase] {
+		return nil
+	}
+
+	stdinIsSocket := strings.HasPrefix(info.StdinTarget, "socket:[")
+	stdoutIsSocket := strings.HasPrefix(info.StdoutTarget, "socket:[")
+
+	if stdinIsSocket || stdoutIsSocket {
+		var redirected []string
+		if stdinIsSocket {
+			redirected = append(redirected, fmt.Sprintf("stdin: %s", info.StdinTarget))
+		}
+		if stdoutIsSocket {
+			redirected = append(redirected, fmt.Sprintf("stdout: %s", info.StdoutTarget))
+		}
+
+		return &ProcessSignal{
+			RuleName:    "Process_Interactive_Reverse_Shell",
+			Reason:      fmt.Sprintf("Interactive process %s (PID %d) standard I/O redirected to network socket (%s)", info.Comm, info.PID, strings.Join(redirected, ", ")),
+			Score:       95,
+			Severity:    report.SeverityAlert,
+			IsPathBased: false,
+			IsStrong:    true,
+		}
+	}
+
+	return nil
+}
+
+// CheckContainerCapabilities detects processes running inside container namespaces with
+// dangerous Linux capabilities that enable container breakouts.
+func CheckContainerCapabilities(info *ProcessInfo, selfMntNs string, cfg *config.Config) *ProcessSignal {
+	if info == nil || info.MntNs == "" || selfMntNs == "" || info.MntNs == selfMntNs {
+		return nil
+	}
+
+	// Dangerous Linux capability bitmasks:
+	// CAP_DAC_READ_SEARCH = bit 2 (0x4)
+	// CAP_SYS_MODULE      = bit 16 (0x10000)
+	// CAP_SYS_RAWIO       = bit 17 (0x20000)
+	// CAP_SYS_PTRACE      = bit 19 (0x80000)
+	// CAP_SYS_ADMIN       = bit 21 (0x200000)
+	dangerousMask := uint64(1<<2 | 1<<16 | 1<<17 | 1<<19 | 1<<21)
+
+	matchedCaps := info.CapEff & dangerousMask
+	if matchedCaps != 0 {
+		var capNames []string
+		if (matchedCaps & (1 << 21)) != 0 {
+			capNames = append(capNames, "CAP_SYS_ADMIN")
+		}
+		if (matchedCaps & (1 << 19)) != 0 {
+			capNames = append(capNames, "CAP_SYS_PTRACE")
+		}
+		if (matchedCaps & (1 << 16)) != 0 {
+			capNames = append(capNames, "CAP_SYS_MODULE")
+		}
+		if (matchedCaps & (1 << 17)) != 0 {
+			capNames = append(capNames, "CAP_SYS_RAWIO")
+		}
+		if (matchedCaps & (1 << 2)) != 0 {
+			capNames = append(capNames, "CAP_DAC_READ_SEARCH")
+		}
+
+		return &ProcessSignal{
+			RuleName:    "Container_Dangerous_Capability_Overprivilege",
+			Reason:      fmt.Sprintf("Container process %s (PID %d) has dangerous breakout capabilities: %s (CapEff: 0x%x)", info.Comm, info.PID, strings.Join(capNames, ", "), info.CapEff),
+			Score:       75,
+			Severity:    report.SeverityWarning,
+			IsPathBased: false,
+			IsStrong:    true,
+		}
+	}
+
+	return nil
+}
+
 // ApplyContainerScoreAdjustment adjusts path-based detection scores if the process
 // is in a different mount namespace (container).
 func ApplyContainerScoreAdjustment(signals []*ProcessSignal, info *ProcessInfo, selfMntNs string, reduction int) bool {
@@ -568,4 +695,80 @@ func ConsolidateProcessSignals(signals []*ProcessSignal, info *ProcessInfo, isCo
 	}
 
 	return &finding
+}
+
+// CheckProcessEnviron inspects the runtime environment variables for rootkit hooks,
+// anti-forensics history suppression, and C2 framework indicators.
+func CheckProcessEnviron(info *ProcessInfo, cfg *config.Config) []*ProcessSignal {
+	if info == nil || len(info.Environ) == 0 {
+		return nil
+	}
+
+	var signals []*ProcessSignal
+
+	// 1. LD_PRELOAD injection hook
+	if ldp, ok := info.Environ["LD_PRELOAD"]; ok {
+		clean := strings.TrimSpace(ldp)
+		if clean != "" {
+			signals = append(signals, &ProcessSignal{
+				RuleName: "Process_Environ_LDPreload",
+				Reason:   fmt.Sprintf("Process running with active LD_PRELOAD environment variable (%s)", clean),
+				Score:    90,
+				Severity: report.SeverityAlert,
+				IsStrong: true,
+			})
+		}
+	}
+
+	// 2. Anti-forensic bash history suppression
+	histfile, hasHF := info.Environ["HISTFILE"]
+	histsize, hasHS := info.Environ["HISTSIZE"]
+	if (hasHF && (histfile == "/dev/null" || histfile == "")) || (hasHS && histsize == "0") {
+		signals = append(signals, &ProcessSignal{
+			RuleName: "Process_Environ_AntiForensic",
+			Reason:   "Process running with shell history suppression (HISTFILE=/dev/null or HISTSIZE=0)",
+			Score:    70,
+			Severity: report.SeverityWarning,
+			IsStrong: true,
+		})
+	}
+
+	// 3. Known offensive C2 frameworks or anonymous proxy markers
+	c2Prefixes := []string{"SLIVER_", "METERPRETER_", "PUPY_", "COBALT_STRIKE", "HAVOC_", "EMPIRE_"}
+	c2ExactKeys := []string{"TOR_SKIP_LAUNCH", "MYSTERY_HASH", "PROXYCHAINS_CONF_FILE"}
+
+	foundC2Key := ""
+	for k := range info.Environ {
+		upper := strings.ToUpper(k)
+		for _, exact := range c2ExactKeys {
+			if upper == exact {
+				foundC2Key = k
+				break
+			}
+		}
+		if foundC2Key != "" {
+			break
+		}
+		for _, prefix := range c2Prefixes {
+			if strings.HasPrefix(upper, prefix) {
+				foundC2Key = k
+				break
+			}
+		}
+		if foundC2Key != "" {
+			break
+		}
+	}
+
+	if foundC2Key != "" {
+		signals = append(signals, &ProcessSignal{
+			RuleName: "Process_Environ_C2_Artifact",
+			Reason:   fmt.Sprintf("Process environment contains C2 framework indicator (%s)", foundC2Key),
+			Score:    75,
+			Severity: report.SeverityWarning,
+			IsStrong: true,
+		})
+	}
+
+	return signals
 }

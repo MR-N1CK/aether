@@ -635,3 +635,132 @@ func TestHTMLReport_ExecutivePostureAndTiming(t *testing.T) {
 	}
 }
 
+func TestHTMLReport_DonutChartAndMITREHeatmap(t *testing.T) {
+	data := sampleReportData()
+	data.Findings = []report.Finding{
+		{
+			Timestamp: time.Now(),
+			Module:    "persistence",
+			Severity:  report.SeverityAlert,
+			Path:      "/etc/cron.d/evil",
+			RuleName:  "Persistence_Cron_Suspicious",
+			Reason:    "Malicious cron job",
+			Why:       "Allows persistent background execution as root",
+			MITRE: []report.MITREMapping{
+				{Tactic: "Persistence", Technique: "T1053.003", TechniqueName: "Cron"},
+				{Tactic: "Execution", Technique: "T1059.004", TechniqueName: "Unix Shell"},
+			},
+		},
+		{
+			Timestamp: time.Now(),
+			Module:    "filesystem",
+			Severity:  report.SeverityWarning,
+			Path:      "/tmp/.hidden",
+			RuleName:  "Suspicious_Hidden_Directory",
+			Reason:    "Hidden directory in /tmp",
+			MITRE: []report.MITREMapping{
+				{Tactic: "Defense Evasion", Technique: "T1564.001", TechniqueName: "Hidden Files and Directories"},
+			},
+		},
+	}
+	data.TotalFindings = 2
+	data.Alerts = 1
+	data.Warnings = 1
+	data.Notices = 0
+	data.Infos = 0
+
+	htmlBytes, err := htmlreport.GenerateHTMLReport(data)
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+
+	htmlStr := string(htmlBytes)
+
+	// 1. Verify Donut Chart SVG
+	if !strings.Contains(htmlStr, "donut-svg") {
+		t.Errorf("missing donut-svg element in HTML report")
+	}
+	if !strings.Contains(htmlStr, "stroke-dasharray") {
+		t.Errorf("missing stroke-dasharray in donut chart SVG")
+	}
+
+	// 2. Verify MITRE ATT&CK Heat-Map Matrix
+	if !strings.Contains(htmlStr, "mitre-matrix-section") {
+		t.Errorf("missing mitre-matrix-section in HTML report")
+	}
+	if !strings.Contains(htmlStr, "Persistence") || !strings.Contains(htmlStr, "T1053.003") {
+		t.Errorf("missing Persistence / T1053.003 technique chip in MITRE matrix")
+	}
+	if !strings.Contains(htmlStr, "Defense Evasion") || !strings.Contains(htmlStr, "T1564.001") {
+		t.Errorf("missing Defense Evasion / T1564.001 technique chip in MITRE matrix")
+	}
+
+	// 3. Verify CSV & Print Buttons
+	if !strings.Contains(htmlStr, "id=\"btn-export-csv\"") {
+		t.Errorf("missing btn-export-csv in HTML report")
+	}
+	if !strings.Contains(htmlStr, "id=\"btn-print\"") {
+		t.Errorf("missing btn-print in HTML report")
+	}
+
+	// 4. Verify Drawer Navigation Controls
+	if !strings.Contains(htmlStr, "id=\"drawer-prev\"") || !strings.Contains(htmlStr, "id=\"drawer-next\"") {
+		t.Errorf("missing drawer-prev or drawer-next in HTML report")
+	}
+	if !strings.Contains(htmlStr, "id=\"drawer-index-badge\"") {
+		t.Errorf("missing drawer-index-badge in HTML report")
+	}
+}
+
+func TestHTMLReport_CleanMITREBanner(t *testing.T) {
+	data := sampleReportData()
+	data.Findings = nil
+	data.TotalFindings = 0
+	data.Alerts = 0
+	data.Warnings = 0
+	data.Notices = 0
+	data.Infos = 0
+
+	htmlBytes, err := htmlreport.GenerateHTMLReport(data)
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+
+	htmlStr := string(htmlBytes)
+	if !strings.Contains(htmlStr, "Zero Active MITRE ATT&CK") {
+		t.Errorf("missing Zero Active MITRE ATT&CK clean banner for clean scan")
+	}
+}
+
+func TestHTMLReport_ExportJSONAndSeniorStudioFeatures(t *testing.T) {
+	data := sampleReportData()
+	htmlBytes, err := htmlreport.GenerateHTMLReport(data)
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+
+	htmlStr := string(htmlBytes)
+
+	// 1. Export JSON button
+	if !strings.Contains(htmlStr, "id=\"btn-export-json\"") {
+		t.Errorf("missing btn-export-json in HTML report header")
+	}
+
+	// 2. Donut segment class for stroke-dashoffset animation
+	if !strings.Contains(htmlStr, "class=\"donut-segment\"") {
+		t.Errorf("missing donut-segment class in SVG donut chart")
+	}
+
+	// 3. Search highlighting and code line numbers in CSS/JS
+	if !strings.Contains(htmlStr, "search-highlight") {
+		t.Errorf("missing search-highlight class in HTML report")
+	}
+	if !strings.Contains(htmlStr, "code-block-lines") {
+		t.Errorf("missing code-block-lines class in HTML report")
+	}
+
+	// 4. Modal accessibility
+	if !strings.Contains(htmlStr, "aria-modal") {
+		t.Errorf("missing aria-modal attribute in drawer JS")
+	}
+}

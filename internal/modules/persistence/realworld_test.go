@@ -157,28 +157,28 @@ func TestSignalStrength_WeakNeverCorroboratesAlert(t *testing.T) {
 	// Case A: 3 distinct weak signal classes -> capped at WARNING, totalScore <= 70
 	weakSignals := []*persistence.PersistenceSignal{
 		{
-			Class:      persistence.ClassExecFromTemp,
-			RuleName:   "Persistence_Exec_From_Home_Hidden_Path",
-			Reason:     "Hidden home tool",
-			Score:      25,
-			Severity:   report.SeverityNotice,
-			IsStrong:   false,
+			Class:    persistence.ClassExecFromTemp,
+			RuleName: "Persistence_Exec_From_Home_Hidden_Path",
+			Reason:   "Hidden home tool",
+			Score:    25,
+			Severity: report.SeverityNotice,
+			IsStrong: false,
 		},
 		{
-			Class:      persistence.ClassMissingTarget,
-			RuleName:   "Persistence_Missing_Target_File",
-			Reason:     "Missing binary",
-			Score:      25,
-			Severity:   report.SeverityNotice,
-			IsStrong:   false,
+			Class:    persistence.ClassMissingTarget,
+			RuleName: "Persistence_Missing_Target_File",
+			Reason:   "Missing binary",
+			Score:    25,
+			Severity: report.SeverityNotice,
+			IsStrong: false,
 		},
 		{
-			Class:      persistence.ClassUnowned,
-			RuleName:   "Persistence_Systemd_Unowned_Unit",
-			Reason:     "Unowned unit",
-			Score:      30,
-			Severity:   report.SeverityNotice,
-			IsStrong:   false,
+			Class:    persistence.ClassUnowned,
+			RuleName: "Persistence_Systemd_Unowned_Unit",
+			Reason:   "Unowned unit",
+			Score:    30,
+			Severity: report.SeverityNotice,
+			IsStrong: false,
 		},
 	}
 
@@ -200,20 +200,20 @@ func TestSignalStrength_WeakNeverCorroboratesAlert(t *testing.T) {
 	// Case B: 1 Strong + 1 Weak -> WARNING (raised score, capped < 85)
 	strongPlusWeak := []*persistence.PersistenceSignal{
 		{
-			Class:      persistence.ClassDownloadAndExecute,
-			RuleName:   "Persistence_Download_And_Execute",
-			Reason:     "curl | bash",
-			Score:      75,
-			Severity:   report.SeverityWarning,
-			IsStrong:   true,
+			Class:    persistence.ClassDownloadAndExecute,
+			RuleName: "Persistence_Download_And_Execute",
+			Reason:   "curl | bash",
+			Score:    75,
+			Severity: report.SeverityWarning,
+			IsStrong: true,
 		},
 		{
-			Class:      persistence.ClassMissingTarget,
-			RuleName:   "Persistence_Missing_Target_File",
-			Reason:     "Missing binary",
-			Score:      25,
-			Severity:   report.SeverityNotice,
-			IsStrong:   false,
+			Class:    persistence.ClassMissingTarget,
+			RuleName: "Persistence_Missing_Target_File",
+			Reason:   "Missing binary",
+			Score:    25,
+			Severity: report.SeverityNotice,
+			IsStrong: false,
 		},
 	}
 
@@ -235,20 +235,20 @@ func TestSignalStrength_WeakNeverCorroboratesAlert(t *testing.T) {
 	// Case C: 2 Strong distinct classes -> ALERT (score >= 85)
 	strongPlusStrong := []*persistence.PersistenceSignal{
 		{
-			Class:      persistence.ClassDownloadAndExecute,
-			RuleName:   "Persistence_Download_And_Execute",
-			Reason:     "curl | bash",
-			Score:      75,
-			Severity:   report.SeverityWarning,
-			IsStrong:   true,
+			Class:    persistence.ClassDownloadAndExecute,
+			RuleName: "Persistence_Download_And_Execute",
+			Reason:   "curl | bash",
+			Score:    75,
+			Severity: report.SeverityWarning,
+			IsStrong: true,
 		},
 		{
-			Class:      persistence.ClassExecFromTemp,
-			RuleName:   "Persistence_Exec_From_Temp",
-			Reason:     "Exec from /tmp",
-			Score:      70,
-			Severity:   report.SeverityWarning,
-			IsStrong:   true,
+			Class:    persistence.ClassExecFromTemp,
+			RuleName: "Persistence_Exec_From_Temp",
+			Reason:   "Exec from /tmp",
+			Score:    70,
+			Severity: report.SeverityWarning,
+			IsStrong: true,
 		},
 	}
 
@@ -734,5 +734,3 @@ func TestGuardedMissingTarget(t *testing.T) {
 		t.Errorf("unguarded missing target must be flagged with Persistence_Missing_Target_File")
 	}
 }
-
-

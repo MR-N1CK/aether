@@ -58,7 +58,7 @@ func EvaluateEvidenceStrength(ruleName, reason string, isPermissionDenied bool, 
 		strings.Contains(rule, "rootkit") || strings.Contains(rule, "ld_preload") ||
 		strings.Contains(rule, "proc_hiding") || strings.Contains(rule, "process_hiding") ||
 		strings.Contains(rule, "redteam") || strings.Contains(rule, "ghostshell") || strings.Contains(rule, "kali_master") ||
-		strings.Contains(rule, "webshell") ||
+		strings.Contains(rule, "webshell") || strings.Contains(rule, "trojan") || strings.Contains(rule, "trojaned") ||
 		strings.Contains(rule, "uid0") || strings.Contains(rule, "extra_uid0") ||
 		strings.Contains(rule, "memfd") || strings.Contains(rule, "fileless") ||
 		strings.Contains(rule, "volatile_path") || strings.Contains(rule, "authorized_key") ||
@@ -115,10 +115,10 @@ func DetermineVerdict(f *Finding, pkgDB pkgdb.PackageDB, isExec bool, isDoc bool
 	// Ensure EvidenceRecord is allocated
 	if f.EvidenceRecord == nil {
 		f.EvidenceRecord = &EvidenceRecord{
-			DetectorType:   "heuristic",
-			RuleName:       f.RuleName,
-			TargetPath:     path,
-			LineNumber:     f.LineNumber,
+			DetectorType:     "heuristic",
+			RuleName:         f.RuleName,
+			TargetPath:       path,
+			LineNumber:       f.LineNumber,
 			MatchedCondition: f.Reason,
 		}
 	}

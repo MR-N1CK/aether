@@ -9,23 +9,23 @@ import (
 
 // RegressionCase represents a historical false-positive scenario tracked permanently.
 type RegressionCase struct {
-	ID                  string `json:"id"`
-	Description         string `json:"description"`
-	OriginalIssueDate   string `json:"original_issue_date"`
-	TargetFile          string `json:"target_file"`
-	RootCause           string `json:"root_cause"`
-	CorpusCaseID        string `json:"corpus_case_id"`
-	ExpectedVerdict     report.Verdict `json:"expected_verdict"`
+	ID                string         `json:"id"`
+	Description       string         `json:"description"`
+	OriginalIssueDate string         `json:"original_issue_date"`
+	TargetFile        string         `json:"target_file"`
+	RootCause         string         `json:"root_cause"`
+	CorpusCaseID      string         `json:"corpus_case_id"`
+	ExpectedVerdict   report.Verdict `json:"expected_verdict"`
 }
 
 // RegressionResult records the evaluation outcome of a regression test case.
 type RegressionResult struct {
-	Case           RegressionCase `json:"case"`
-	Passed         bool           `json:"passed"`
-	ActualVerdict  report.Verdict `json:"actual_verdict"`
+	Case           RegressionCase  `json:"case"`
+	Passed         bool            `json:"passed"`
+	ActualVerdict  report.Verdict  `json:"actual_verdict"`
 	ActualSeverity report.Severity `json:"actual_severity"`
-	MatchedRules   []string       `json:"matched_rules"`
-	FailureReason  string         `json:"failure_reason,omitempty"`
+	MatchedRules   []string        `json:"matched_rules"`
+	FailureReason  string          `json:"failure_reason,omitempty"`
 }
 
 // RegressionManager manages historical false alarm tracking.

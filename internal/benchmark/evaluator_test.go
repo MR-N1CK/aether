@@ -9,9 +9,9 @@ import (
 func TestEvaluator_MaliciousMatch(t *testing.T) {
 	eval := NewEvaluator()
 	c := BenchmarkCorpusCase{
-		ID:          "MAL-001",
-		Category:    CategoryMalicious,
-		TargetPath:  "malicious/revshell.sh",
+		ID:         "MAL-001",
+		Category:   CategoryMalicious,
+		TargetPath: "malicious/revshell.sh",
 		Expected: ExpectedOutcome{
 			ExpectedVerdict:   report.VerdictMalicious,
 			AllowedSeverities: []report.Severity{report.SeverityAlert},
@@ -43,9 +43,9 @@ func TestEvaluator_MaliciousMatch(t *testing.T) {
 func TestEvaluator_OverEscalation(t *testing.T) {
 	eval := NewEvaluator()
 	c := BenchmarkCorpusCase{
-		ID:          "SUSP-001",
-		Category:    CategorySuspicious,
-		TargetPath:  "suspicious/installer.sh",
+		ID:         "SUSP-001",
+		Category:   CategorySuspicious,
+		TargetPath: "suspicious/installer.sh",
 		Expected: ExpectedOutcome{
 			ExpectedVerdict:   report.VerdictSuspicious,
 			AllowedSeverities: []report.Severity{report.SeverityWarning},
@@ -71,9 +71,9 @@ func TestEvaluator_OverEscalation(t *testing.T) {
 func TestEvaluator_Abstention(t *testing.T) {
 	eval := NewEvaluator()
 	c := BenchmarkCorpusCase{
-		ID:          "PARTIAL-001",
-		Category:    CategoryPartialVisibility,
-		TargetPath:  "partial_visibility/shadow",
+		ID:         "PARTIAL-001",
+		Category:   CategoryPartialVisibility,
+		TargetPath: "partial_visibility/shadow",
 		Expected: ExpectedOutcome{
 			ExpectedVerdict:   report.VerdictUnknown,
 			AllowedSeverities: []report.Severity{report.SeverityInfo},

@@ -167,13 +167,13 @@ func inspectCronFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb.Pa
 		// If data contains NULL bytes or ELF magic, it is a binary file in cron.d
 		if bytes.Contains(data, []byte{0x00}) || bytes.HasPrefix(data, []byte("\x7fELF")) {
 			signals = append(signals, &PersistenceSignal{
-				Class:       ClassObfuscation,
-				RuleName:    "Persistence_Cron_Binary_File",
-				Reason:      "Cron file contains binary/non-text content (malformed cron drop)",
-				Score:       75,
-				Severity:    report.SeverityWarning,
-				IsStrong:    true,
-				LineNumber:  0,
+				Class:      ClassObfuscation,
+				RuleName:   "Persistence_Cron_Binary_File",
+				Reason:     "Cron file contains binary/non-text content (malformed cron drop)",
+				Score:      75,
+				Severity:   report.SeverityWarning,
+				IsStrong:   true,
+				LineNumber: 0,
 			})
 		}
 	}
@@ -194,14 +194,14 @@ func inspectCronFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb.Pa
 		// Check environment overrides like PATH=/tmp:... or LD_PRELOAD=
 		if strings.HasPrefix(line, "PATH=") && (strings.Contains(line, "/tmp") || strings.Contains(line, "/var/tmp") || strings.Contains(line, "/dev/shm")) {
 			signals = append(signals, &PersistenceSignal{
-				Class:       ClassExecFromTemp,
-				RuleName:    "Persistence_Cron_Temp_Path",
-				Reason:      "Cron PATH environment variable prepends volatile directory",
-				Score:       70,
-				Severity:    report.SeverityWarning,
-				IsStrong:    true,
-				LineNumber:  lineNum,
-				Snippet:     RedactSnippet(line),
+				Class:      ClassExecFromTemp,
+				RuleName:   "Persistence_Cron_Temp_Path",
+				Reason:     "Cron PATH environment variable prepends volatile directory",
+				Score:      70,
+				Severity:   report.SeverityWarning,
+				IsStrong:   true,
+				LineNumber: lineNum,
+				Snippet:    RedactSnippet(line),
 			})
 		}
 

@@ -20,13 +20,13 @@ type PatternEntry struct {
 
 // PatternRule represents a compiled regex path/filename rule.
 type PatternRule struct {
-	Pattern   string
-	Regex     *regexp.Regexp
-	Score     int
-	Reason    string
-	OSHint    string
-	Severity  report.Severity
-	RuleName  string
+	Pattern  string
+	Regex    *regexp.Regexp
+	Score    int
+	Reason   string
+	OSHint   string
+	Severity report.Severity
+	RuleName string
 }
 
 // ScoreToSeverity translates a numerical score to a Finding Severity.

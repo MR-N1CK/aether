@@ -95,28 +95,28 @@ type CorroboratingSignal struct {
 
 // EvidenceRecord encapsulates structured forensic evidence for transparent provenance.
 type EvidenceRecord struct {
-	DetectorType          string                `json:"detector_type"`                   // "heuristic" | "yara" | "ioc" | "module"
-	RuleName              string                `json:"rule_name"`                       // Exact rule identifier
-	EvidenceStrength      EvidenceStrength      `json:"evidence_strength,omitempty"`    // "DIRECT" | "CORROBORATED" | "CONTEXTUAL" | "INCOMPLETE"
-	MatchedCondition      string                `json:"matched_condition,omitempty"`    // Human-readable summary of matched condition
-	LineContent           string                `json:"line_content,omitempty"`          // Matched snippet (if text)
-	LineNumber            int                   `json:"line_number,omitempty"`           // File line number (if applicable)
-	TargetPath            string                `json:"target_path"`                     // Virtual path inspected
-	PID                   int                   `json:"pid,omitempty"`                   // Process ID (if runtime)
-	Comm                  string                `json:"comm,omitempty"`                  // Process comm
-	Cmdline               string                `json:"cmdline,omitempty"`               // Process command line
-	SocketInfo            string                `json:"socket_info,omitempty"`           // Network socket info (e.g. "0.0.0.0:4444")
-	MountNamespace        string                `json:"mount_namespace,omitempty"`       // Mount namespace identifier
-	SHA256                string                `json:"sha256,omitempty"`                // Cryptographic SHA-256 hash
-	FileMode              uint32                `json:"file_mode,omitempty"`             // POSIX file permissions
-	OwnerUID              uint32                `json:"owner_uid,omitempty"`             // File owner UID
-	PackageName           string                `json:"package_name,omitempty"`          // Owning OS package (if any)
-	PackageStatus         string                `json:"package_status"`                  // "unowned" | "verified_package" | "modified_package" | "unknown"
-	ContextProfile        string                `json:"context_profile"`                 // "standard" | "doc_metadata" | "package_test" | "build_tree" | "container_namespace"
+	DetectorType          string                `json:"detector_type"`                    // "heuristic" | "yara" | "ioc" | "module"
+	RuleName              string                `json:"rule_name"`                        // Exact rule identifier
+	EvidenceStrength      EvidenceStrength      `json:"evidence_strength,omitempty"`      // "DIRECT" | "CORROBORATED" | "CONTEXTUAL" | "INCOMPLETE"
+	MatchedCondition      string                `json:"matched_condition,omitempty"`      // Human-readable summary of matched condition
+	LineContent           string                `json:"line_content,omitempty"`           // Matched snippet (if text)
+	LineNumber            int                   `json:"line_number,omitempty"`            // File line number (if applicable)
+	TargetPath            string                `json:"target_path"`                      // Virtual path inspected
+	PID                   int                   `json:"pid,omitempty"`                    // Process ID (if runtime)
+	Comm                  string                `json:"comm,omitempty"`                   // Process comm
+	Cmdline               string                `json:"cmdline,omitempty"`                // Process command line
+	SocketInfo            string                `json:"socket_info,omitempty"`            // Network socket info (e.g. "0.0.0.0:4444")
+	MountNamespace        string                `json:"mount_namespace,omitempty"`        // Mount namespace identifier
+	SHA256                string                `json:"sha256,omitempty"`                 // Cryptographic SHA-256 hash
+	FileMode              uint32                `json:"file_mode,omitempty"`              // POSIX file permissions
+	OwnerUID              uint32                `json:"owner_uid,omitempty"`              // File owner UID
+	PackageName           string                `json:"package_name,omitempty"`           // Owning OS package (if any)
+	PackageStatus         string                `json:"package_status"`                   // "unowned" | "verified_package" | "modified_package" | "unknown"
+	ContextProfile        string                `json:"context_profile"`                  // "standard" | "doc_metadata" | "package_test" | "build_tree" | "container_namespace"
 	CorroboratingSignals  []string              `json:"corroborating_signals,omitempty"`  // Independent physical signals
 	CorroborationDetails  []CorroboratingSignal `json:"corroboration_details,omitempty"`  // Structured corroboration signals
-	ContributingDetectors []string              `json:"contributing_detectors,omitempty"`  // Multiple rules flagging same target
-	ConfidenceRationale   string                `json:"confidence_rationale"`            // Plain-English justification
+	ContributingDetectors []string              `json:"contributing_detectors,omitempty"` // Multiple rules flagging same target
+	ConfidenceRationale   string                `json:"confidence_rationale"`             // Plain-English justification
 }
 
 // MITREMapping associates a finding with an enterprise MITRE ATT&CK technique.
@@ -183,12 +183,44 @@ func NewFinding(module string, severity Severity, path, reason, ruleName string)
 
 // PopulateFindingDetails enriches a finding with Title, Confidence, MITRE ATT&CK,
 // Why explanation, and Remediation recommendations based on RuleName and Module.
+// First it consults the typed rule metadata registry (rule_registry.go +
+// rule_metadata*.go). If the rule is unregistered it falls back to the
+// legacy substring switch so that third-party / custom IOC names keep working.
 func PopulateFindingDetails(f *Finding) {
 	if f == nil {
 		return
 	}
 
-	// Default Title if empty
+	// Registry path — exact rule name lookup.
+	if meta, ok := LookupRuleMeta(f.RuleName); ok {
+		if f.Title == "" || strings.EqualFold(f.Title, strings.ReplaceAll(f.RuleName, "_", " ")) {
+			f.Title = meta.Title
+		}
+		if meta.Confidence != "" {
+			f.Confidence = meta.Confidence
+		}
+		// Only override Why/MITRE/Remediation when the finding does not
+		// already carry detector-supplied values that are more specific.
+		if f.Why == "" {
+			f.Why = meta.Why
+		}
+		if len(f.MITRE) == 0 && len(meta.MITRE) > 0 {
+			f.MITRE = append([]MITREMapping(nil), meta.MITRE...)
+		}
+		if len(f.Remediation) == 0 && len(meta.Remediation) > 0 {
+			f.Remediation = append([]string(nil), meta.Remediation...)
+		}
+	}
+
+	// If registry already fully populated the finding (registered rule with
+	// non-empty Why+Remediation), skip the legacy fallback — just fill
+	// verdict/confidence rationale and evidence record below.
+	if _, registered := LookupRuleMeta(f.RuleName); registered && f.Why != "" && len(f.Remediation) > 0 {
+		applyFindingDefaults(f)
+		return
+	}
+
+	// Legacy substring fallback for unregistered / custom names.
 	if f.Title == "" {
 		if f.RuleName != "" {
 			f.Title = strings.ReplaceAll(f.RuleName, "_", " ")
@@ -294,6 +326,34 @@ func PopulateFindingDetails(f *Finding) {
 		f.Remediation = []string{
 			"Terminate the listening process and block the configured port.",
 			"Inspect exfiltrated data dumps to identify compromised client endpoints.",
+		}
+
+	case strings.Contains(rule, "interactive_reverse_shell"):
+		f.Confidence = ConfidenceHigh
+		f.Title = "Interactive Reverse Shell Socket Redirection"
+		f.Why = "Process standard input (stdin) or output (stdout) is redirected to an active network socket, establishing an interactive shell session with an external host."
+		f.MITRE = []MITREMapping{
+			{Tactic: "Execution", Technique: "T1059.004", TechniqueName: "Unix Shell"},
+			{Tactic: "Command and Control", Technique: "T1071", TechniqueName: "Application Layer Protocol"},
+		}
+		f.Remediation = []string{
+			"Immediately terminate the rogue process PID (`kill -9 <PID>`).",
+			"Trace process parentage (PPID) and inspect open sockets (/proc/<PID>/net or /proc/net/tcp).",
+			"Isolate the host from the network to sever C2 communications.",
+		}
+
+	case strings.Contains(rule, "container_dangerous_capability") || strings.Contains(rule, "capability_overprivilege"):
+		f.Confidence = ConfidenceHigh
+		f.Title = "Container Process with Dangerous Host Breakout Capabilities"
+		f.Why = "A container process runs with elevated Linux capabilities (e.g. CAP_SYS_ADMIN, CAP_SYS_PTRACE, CAP_DAC_READ_SEARCH), allowing potential container breakout and host compromise."
+		f.MITRE = []MITREMapping{
+			{Tactic: "Privilege Escalation", Technique: "T1611", TechniqueName: "Escape to Host"},
+			{Tactic: "Privilege Escalation", Technique: "T1548", TechniqueName: "Abuse Elevation Control Mechanism"},
+		}
+		f.Remediation = []string{
+			"Drop unnecessary Linux capabilities in container runtime configuration (use `cap_drop: [ALL]`).",
+			"Avoid running containers with `--privileged` flag in Docker or Podman.",
+			"Enable Seccomp and AppArmor profiles to restrict container system calls.",
 		}
 
 	case strings.Contains(rule, "reverse_shell") || strings.Contains(rule, "revshell") || strings.Contains(rule, "netcat") || strings.Contains(rule, "socat") || strings.Contains(rule, "openssl"):
@@ -569,6 +629,12 @@ func PopulateFindingDetails(f *Finding) {
 		}
 	}
 
+	applyFindingDefaults(f)
+}
+
+// applyFindingDefaults fills verdict, confidence rationale, and the evidence
+// record for any finding, regardless of which enrichment path populated it.
+func applyFindingDefaults(f *Finding) {
 	if f.Verdict == "" {
 		switch f.Severity {
 		case SeverityCritical, SeverityAlert:
@@ -608,5 +674,3 @@ func PopulateFindingDetails(f *Finding) {
 		}
 	}
 }
-
-

@@ -19,42 +19,42 @@ import (
 
 // HTMLReportData encapsulates all scan metadata, metrics, and findings for the HTML report.
 type HTMLReportData struct {
-	Version              string
-	Commit               string
-	BuildDate            string
-	BinaryName           string
-	Hostname             string
-	ScanMode             string
-	StartTime            time.Time
-	Duration             time.Duration
-	TargetPaths          []string
-	Excludes             []string
-	Threads              int
-	MaxFileSize          int64
-	Verdict              events.Verdict
-	VerdictReason        string
-	Partial              bool
-	RedactHosts          bool
-	MaxReportFindings    int
+	Version           string
+	Commit            string
+	BuildDate         string
+	BinaryName        string
+	Hostname          string
+	ScanMode          string
+	StartTime         time.Time
+	Duration          time.Duration
+	TargetPaths       []string
+	Excludes          []string
+	Threads           int
+	MaxFileSize       int64
+	Verdict           events.Verdict
+	VerdictReason     string
+	Partial           bool
+	RedactHosts       bool
+	MaxReportFindings int
 
-	TotalFindings        int
-	Alerts               int
-	Warnings             int
-	Notices              int
-	Infos                int
-	FilesScanned         int64
-	AffectedFiles        int
+	TotalFindings int
+	Alerts        int
+	Warnings      int
+	Notices       int
+	Infos         int
+	FilesScanned  int64
+	AffectedFiles int
 
-	Coverage             events.CoverageStats
-	ModulesRun           []events.ModuleFinished
-	ModulesNotRun        []string
-	StartupNotices       []string
-	ProcessCoverage      *events.ProcessCoverageStats
-	PersistenceCoverage  *events.PersistenceCoverageStats
-	UsersCoverage        *events.UsersCoverageStats
-	NetworkCoverage      *events.NetworkCoverageStats
-	KernelCoverage       *events.KernelCoverageStats
-	YARACoverage         *events.YARACoverageStats
+	Coverage            events.CoverageStats
+	ModulesRun          []events.ModuleFinished
+	ModulesNotRun       []string
+	StartupNotices      []string
+	ProcessCoverage     *events.ProcessCoverageStats
+	PersistenceCoverage *events.PersistenceCoverageStats
+	UsersCoverage       *events.UsersCoverageStats
+	NetworkCoverage     *events.NetworkCoverageStats
+	KernelCoverage      *events.KernelCoverageStats
+	YARACoverage        *events.YARACoverageStats
 
 	TopRules             []report.RuleSummary
 	Findings             []report.Finding
@@ -82,6 +82,178 @@ func GenerateNonce() (string, error) {
 		return "", fmt.Errorf("failed to generate random nonce: %w", err)
 	}
 	return base64.StdEncoding.EncodeToString(b), nil
+}
+
+type mitreTechniqueItem struct {
+	ID    string
+	Name  string
+	Count int
+}
+
+type mitreTacticGroup struct {
+	Tactic     string
+	TotalCount int
+	Techniques []mitreTechniqueItem
+}
+
+func aggregateMITRE(findings []report.Finding) []mitreTacticGroup {
+	standardOrder := []string{
+		"Initial Access",
+		"Execution",
+		"Persistence",
+		"Privilege Escalation",
+		"Defense Evasion",
+		"Credential Access",
+		"Discovery",
+		"Lateral Movement",
+		"Collection",
+		"Command and Control",
+		"Exfiltration",
+		"Impact",
+	}
+
+	tacticMap := make(map[string]map[string]*mitreTechniqueItem)
+	for _, tactic := range standardOrder {
+		tacticMap[tactic] = make(map[string]*mitreTechniqueItem)
+	}
+
+	for _, f := range findings {
+		for _, m := range f.MITRE {
+			tactic := strings.TrimSpace(m.Tactic)
+			if tactic == "" {
+				continue
+			}
+			techID := strings.TrimSpace(m.Technique)
+			techName := strings.TrimSpace(m.TechniqueName)
+			if techID == "" {
+				continue
+			}
+
+			if _, ok := tacticMap[tactic]; !ok {
+				tacticMap[tactic] = make(map[string]*mitreTechniqueItem)
+			}
+
+			if item, exists := tacticMap[tactic][techID]; exists {
+				item.Count++
+			} else {
+				tacticMap[tactic][techID] = &mitreTechniqueItem{
+					ID:    techID,
+					Name:  techName,
+					Count: 1,
+				}
+			}
+		}
+	}
+
+	var result []mitreTacticGroup
+	for _, tactic := range standardOrder {
+		techMap := tacticMap[tactic]
+		if len(techMap) == 0 {
+			continue
+		}
+		var techs []mitreTechniqueItem
+		total := 0
+		for _, item := range techMap {
+			techs = append(techs, *item)
+			total += item.Count
+		}
+		sort.Slice(techs, func(i, j int) bool {
+			if techs[i].Count != techs[j].Count {
+				return techs[i].Count > techs[j].Count
+			}
+			return techs[i].ID < techs[j].ID
+		})
+		result = append(result, mitreTacticGroup{
+			Tactic:     tactic,
+			TotalCount: total,
+			Techniques: techs,
+		})
+	}
+
+	for tactic, techMap := range tacticMap {
+		isStandard := false
+		for _, st := range standardOrder {
+			if st == tactic {
+				isStandard = true
+				break
+			}
+		}
+		if isStandard || len(techMap) == 0 {
+			continue
+		}
+		var techs []mitreTechniqueItem
+		total := 0
+		for _, item := range techMap {
+			techs = append(techs, *item)
+			total += item.Count
+		}
+		sort.Slice(techs, func(i, j int) bool {
+			return techs[i].Count > techs[j].Count
+		})
+		result = append(result, mitreTacticGroup{
+			Tactic:     tactic,
+			TotalCount: total,
+			Techniques: techs,
+		})
+	}
+
+	return result
+}
+
+func renderDonutSVG(alerts, warnings, notices, infos int, verdict events.Verdict) string {
+	total := alerts + warnings + notices + infos
+	var buf bytes.Buffer
+	buf.WriteString(`<svg class="donut-svg" width="140" height="140" viewBox="0 0 160 160" aria-label="Severity Distribution Donut Chart">` + "\n")
+
+	if total == 0 {
+		buf.WriteString(`  <circle cx="80" cy="80" r="52" fill="none" stroke="#10b981" stroke-width="14" stroke-opacity="0.8"/>` + "\n")
+		buf.WriteString(`  <text x="80" y="74" text-anchor="middle" font-size="22" font-weight="800" fill="#10b981">0</text>` + "\n")
+		buf.WriteString(`  <text x="80" y="92" text-anchor="middle" font-size="9" font-weight="700" fill="#9ca3af" letter-spacing="1">CLEAN</text>` + "\n")
+		buf.WriteString(`</svg>`)
+		return buf.String()
+	}
+
+	circumference := 2.0 * 3.141592653589793 * 52.0
+	buf.WriteString(`  <circle cx="80" cy="80" r="52" fill="none" stroke="#1f2937" stroke-width="14"/>` + "\n")
+
+	slices := []struct {
+		count int
+		color string
+	}{
+		{alerts, "#ef4444"},
+		{warnings, "#f59e0b"},
+		{notices, "#38bdf8"},
+		{infos, "#9ca3af"},
+	}
+
+	offset := 0.0
+	for _, sl := range slices {
+		if sl.count <= 0 {
+			continue
+		}
+		length := (float64(sl.count) / float64(total)) * circumference
+		remaining := circumference - length
+		dashoffset := -offset
+		buf.WriteString(fmt.Sprintf(`  <circle class="donut-segment" cx="80" cy="80" r="52" fill="none" stroke="%s" stroke-width="14" stroke-dasharray="%.2f %.2f" stroke-dashoffset="%.2f" transform="rotate(-90 80 80)"/>`+"\n",
+			sl.color, length, remaining, dashoffset))
+		offset += length
+	}
+
+	verdictColor := "#10b981"
+	verdictLabel := "CLEAN"
+	switch verdict {
+	case events.VerdictCompromised:
+		verdictColor = "#ef4444"
+		verdictLabel = "ALERT"
+	case events.VerdictSuspicious:
+		verdictColor = "#f59e0b"
+		verdictLabel = "SUSPECT"
+	}
+
+	buf.WriteString(fmt.Sprintf(`  <text x="80" y="74" text-anchor="middle" font-size="22" font-weight="800" fill="#f3f4f6">%d</text>`+"\n", total))
+	buf.WriteString(fmt.Sprintf(`  <text x="80" y="92" text-anchor="middle" font-size="9" font-weight="700" fill="%s" letter-spacing="1">%s</text>`+"\n", verdictColor, verdictLabel))
+	buf.WriteString(`</svg>`)
+	return buf.String()
 }
 
 // GenerateHTMLReport produces a standalone, air-gapped, zero-remote-resource HTML report.
@@ -161,6 +333,8 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	}
 
 	clientPayload := map[string]interface{}{
+		"hostname":        report.FormatRedactedHostname(data.Hostname, data.RedactHosts),
+		"verdict":         string(data.Verdict),
 		"total_count":     totalFindingsCount,
 		"displayed_count": len(jsonFindingsList),
 		"is_capped":       isCapped,
@@ -185,10 +359,10 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("  <meta charset=\"utf-8\">\n")
 	buf.WriteString("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
 	buf.WriteString("  <title>Aether Threat Hunting Report - " + html.EscapeString(report.FormatRedactedHostname(data.Hostname, data.RedactHosts)) + "</title>\n")
-	
+
 	// Strict CSP: script-src 'nonce-<NONCE>' only (no 'strict-dynamic'), default-src 'none', style-src 'unsafe-inline', img-src data:, base-uri 'none', form-action 'none'
 	buf.WriteString(fmt.Sprintf("  <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-%s'; img-src data:; base-uri 'none'; form-action 'none';\">\n", nonce))
-	
+
 	buf.WriteString("  <style>\n")
 	buf.WriteString(htmlReportCSS)
 	buf.WriteString("\n  </style>\n")
@@ -210,6 +384,15 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	if data.RedactHosts {
 		buf.WriteString("      <span class=\"badge-redacted\" title=\"IPs, usernames, hostnames, and home directories have been masked\">REDACTED MODE</span>\n")
 	}
+	buf.WriteString("      <button id=\"btn-export-csv\" class=\"btn\" aria-label=\"Export findings to CSV\" title=\"Export findings to CSV\">\n")
+	buf.WriteString("        <span>Export CSV</span>\n")
+	buf.WriteString("      </button>\n")
+	buf.WriteString("      <button id=\"btn-export-json\" class=\"btn\" aria-label=\"Export full findings and coverage telemetry to JSON\" title=\"Export full findings and coverage telemetry to JSON\">\n")
+	buf.WriteString("        <span>Export JSON</span>\n")
+	buf.WriteString("      </button>\n")
+	buf.WriteString("      <button id=\"btn-print\" class=\"btn\" aria-label=\"Print or save report as PDF\" title=\"Print or save report as PDF\">\n")
+	buf.WriteString("        <span>Print Report</span>\n")
+	buf.WriteString("      </button>\n")
 	buf.WriteString("      <button id=\"theme-toggle\" class=\"btn btn-theme\" aria-label=\"Toggle dark or light color theme\">\n")
 	buf.WriteString("        <span id=\"theme-icon\">☀️</span> <span id=\"theme-label\">Theme</span>\n")
 	buf.WriteString("      </button>\n")
@@ -350,20 +533,74 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 		buf.WriteString("    </section>\n\n")
 	}
 
-	// 4. Metric / Counter Cards
-	buf.WriteString("    <section class=\"counters-grid\" aria-label=\"Severity Breakdown\">\n")
-	buf.WriteString(fmt.Sprintf("      <div class=\"card counter-card\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Total Findings</span></div>\n", data.TotalFindings))
-	buf.WriteString(fmt.Sprintf("      <div class=\"card counter-card sev-alert\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Alerts</span></div>\n", data.Alerts))
-	buf.WriteString(fmt.Sprintf("      <div class=\"card counter-card sev-warning\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Warnings</span></div>\n", data.Warnings))
-	buf.WriteString(fmt.Sprintf("      <div class=\"card counter-card sev-notice\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Notices</span></div>\n", data.Notices))
-	buf.WriteString(fmt.Sprintf("      <div class=\"card counter-card sev-info\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Infos</span></div>\n", data.Infos))
-	buf.WriteString(fmt.Sprintf("      <div class=\"card counter-card\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Files Scanned</span></div>\n", data.FilesScanned))
+	// 4. Metric / Counter Cards & Donut Chart
+	buf.WriteString("    <section class=\"executive-metrics-grid\" aria-label=\"Severity Breakdown\">\n")
+	buf.WriteString("      <div class=\"card donut-card\" aria-label=\"Visual Severity Gauge\">\n")
+	buf.WriteString("        <div class=\"donut-chart-wrap\">\n")
+	buf.WriteString(renderDonutSVG(data.Alerts, data.Warnings, data.Notices, data.Infos, data.Verdict))
+	buf.WriteString("        </div>\n")
+	buf.WriteString("        <div class=\"donut-legend\">\n")
+	buf.WriteString(fmt.Sprintf("          <div class=\"legend-row\"><span class=\"legend-dot dot-alert\"></span><span class=\"legend-label\">Alerts</span><strong class=\"legend-val\">%d</strong></div>\n", data.Alerts))
+	buf.WriteString(fmt.Sprintf("          <div class=\"legend-row\"><span class=\"legend-dot dot-warn\"></span><span class=\"legend-label\">Warnings</span><strong class=\"legend-val\">%d</strong></div>\n", data.Warnings))
+	buf.WriteString(fmt.Sprintf("          <div class=\"legend-row\"><span class=\"legend-dot dot-notice\"></span><span class=\"legend-label\">Notices</span><strong class=\"legend-val\">%d</strong></div>\n", data.Notices))
+	buf.WriteString(fmt.Sprintf("          <div class=\"legend-row\"><span class=\"legend-dot dot-info\"></span><span class=\"legend-label\">Infos</span><strong class=\"legend-val\">%d</strong></div>\n", data.Infos))
+	buf.WriteString("        </div>\n")
+	buf.WriteString("      </div>\n")
+	buf.WriteString("      <div class=\"counters-grid\">\n")
+	buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Total Findings</span></div>\n", data.TotalFindings))
+	buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card sev-alert\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Alerts</span></div>\n", data.Alerts))
+	buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card sev-warning\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Warnings</span></div>\n", data.Warnings))
+	buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card sev-notice\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Notices</span></div>\n", data.Notices))
+	buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card sev-info\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Infos</span></div>\n", data.Infos))
+	buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Files Scanned</span></div>\n", data.FilesScanned))
+	buf.WriteString("      </div>\n")
+	buf.WriteString("    </section>\n\n")
+
+	// 4b. MITRE ATT&CK Matrix Heat-Map Section
+	mitreGroups := aggregateMITRE(cappedFindings)
+	buf.WriteString("    <section class=\"card section-card\" id=\"mitre-matrix-section\" aria-label=\"MITRE ATT&CK Matrix\">\n")
+	buf.WriteString("      <div class=\"mitre-matrix-header\">\n")
+	buf.WriteString("        <div class=\"mitre-titles\">\n")
+	buf.WriteString("          <h2 class=\"section-title\">MITRE ATT&CK&reg; Heat-Map Matrix</h2>\n")
+	buf.WriteString("          <span class=\"subtitle\">Enterprise adversarial tactics observed across inspected subsystems</span>\n")
+	buf.WriteString("        </div>\n")
+	buf.WriteString("      </div>\n")
+
+	if len(mitreGroups) > 0 {
+		buf.WriteString("      <div class=\"mitre-matrix-grid\">\n")
+		for _, grp := range mitreGroups {
+			buf.WriteString("        <div class=\"tactic-col\">\n")
+			buf.WriteString(fmt.Sprintf("          <div class=\"tactic-header\"><span class=\"tactic-name\">%s</span><span class=\"tactic-count\">%d</span></div>\n",
+				html.EscapeString(grp.Tactic), grp.TotalCount))
+			buf.WriteString("          <div class=\"tactic-techniques\">\n")
+			for _, tech := range grp.Techniques {
+				chipTitle := fmt.Sprintf("%s: %s (%d detections)", tech.ID, tech.Name, tech.Count)
+				buf.WriteString(fmt.Sprintf("            <button class=\"btn-tech-chip\" data-tech-id=\"%s\" title=\"%s\"><span class=\"chip-id\">%s</span><span class=\"chip-count\">%d</span></button>\n",
+					html.EscapeString(tech.ID),
+					html.EscapeString(chipTitle),
+					html.EscapeString(tech.ID+" "+tech.Name),
+					tech.Count,
+				))
+			}
+			buf.WriteString("          </div>\n")
+			buf.WriteString("        </div>\n")
+		}
+		buf.WriteString("      </div>\n")
+	} else {
+		buf.WriteString("      <div class=\"mitre-clean-card\">\n")
+		buf.WriteString("        <span class=\"mitre-clean-icon\">🛡️</span>\n")
+		buf.WriteString("        <div class=\"mitre-clean-text\">\n")
+		buf.WriteString("          <strong>Zero Active MITRE ATT&CK&reg; Adversarial Techniques Detected</strong>\n")
+		buf.WriteString("          <p>No malicious persistence, privilege escalation, credential theft, or execution artifacts were observed across inspected subsystems.</p>\n")
+		buf.WriteString("        </div>\n")
+		buf.WriteString("      </div>\n")
+	}
 	buf.WriteString("    </section>\n\n")
 
 	// 5. Coverage & Inspection Health Section
 	buf.WriteString("    <section class=\"card section-card\" aria-label=\"Coverage and Inspection Details\">\n")
 	buf.WriteString("      <h2 class=\"section-title\">Inspection Coverage & Subsystems</h2>\n")
-	
+
 	// Modules Run Table
 	if len(data.ModulesRun) > 0 {
 		buf.WriteString("      <div class=\"table-wrap\">\n")
@@ -533,7 +770,7 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	// Filter Controls
 	buf.WriteString("      <div class=\"filter-bar\">\n")
 	buf.WriteString("        <div class=\"search-wrap\">\n")
-	buf.WriteString("          <input type=\"search\" id=\"search-input\" class=\"input-search\" placeholder=\"Search path, rule, reason, module, metadata...\" aria-label=\"Search findings\">\n")
+	buf.WriteString("          <input type=\"search\" id=\"search-input\" class=\"input-search\" placeholder=\"Search findings (Press '/' or Cmd+K)...\" aria-label=\"Search findings\">\n")
 	buf.WriteString("        </div>\n")
 	buf.WriteString("        <div class=\"filter-group\">\n")
 	buf.WriteString("          <label for=\"module-filter\" class=\"filter-label\">Module:</label>\n")
@@ -584,8 +821,15 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("  <div id=\"detail-drawer-overlay\" class=\"drawer-overlay\" style=\"display:none;\" aria-hidden=\"true\">\n")
 	buf.WriteString("    <aside id=\"detail-drawer\" class=\"drawer\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Finding Details\">\n")
 	buf.WriteString("      <div class=\"drawer-header\">\n")
-	buf.WriteString("        <h3 id=\"drawer-title\">Finding Details</h3>\n")
-	buf.WriteString("        <button id=\"drawer-close\" class=\"btn btn-close\" aria-label=\"Close details dialog\">&times;</button>\n")
+	buf.WriteString("        <div class=\"drawer-header-left\">\n")
+	buf.WriteString("          <span id=\"drawer-index-badge\" class=\"badge\"></span>\n")
+	buf.WriteString("          <h3 id=\"drawer-title\">Finding Details</h3>\n")
+	buf.WriteString("        </div>\n")
+	buf.WriteString("        <div class=\"drawer-header-nav\">\n")
+	buf.WriteString("          <button id=\"drawer-prev\" class=\"btn btn-sm\" aria-label=\"Previous finding\">&larr; Prev</button>\n")
+	buf.WriteString("          <button id=\"drawer-next\" class=\"btn btn-sm\" aria-label=\"Next finding\">Next &rarr;</button>\n")
+	buf.WriteString("          <button id=\"drawer-close\" class=\"btn btn-close\" aria-label=\"Close details dialog\">&times;</button>\n")
+	buf.WriteString("        </div>\n")
 	buf.WriteString("      </div>\n")
 	buf.WriteString("      <div id=\"drawer-body\" class=\"drawer-body\">\n")
 	buf.WriteString("        <!-- Populated via safe DOM manipulation -->\n")
@@ -788,14 +1032,24 @@ code, pre {
 }
 
 .header-container {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background-color: rgba(11, 15, 25, 0.88);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 0 16px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--border-color);
-  margin-bottom: 20px;
+  margin: 0 -16px 20px;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+[data-theme="light"] .header-container {
+  background-color: rgba(248, 250, 252, 0.88);
 }
 
 .logo-wrap {
@@ -822,7 +1076,8 @@ code, pre {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .badge-redacted {
@@ -849,6 +1104,7 @@ code, pre {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
+  user-select: none;
 }
 .btn:hover { background-color: var(--bg-hover); border-color: var(--accent); }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -924,9 +1180,109 @@ code, pre {
   font-weight: 500;
 }
 
+/* Executive Metrics & Donut Chart */
+.executive-metrics-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+@media (max-width: 860px) {
+  .executive-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.donut-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 14px;
+  gap: 14px;
+}
+.donut-chart-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.donut-segment {
+  transform-origin: 80px 80px;
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.16, 1, 0.3, 1), stroke-dasharray 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .donut-segment {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+.search-highlight {
+  background-color: rgba(245, 158, 11, 0.35);
+  color: #fcd34d;
+  font-weight: 700;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+[data-theme="light"] .search-highlight {
+  background-color: #fef08a;
+  color: #854d0e;
+}
+.code-block-lines {
+  padding: 6px 0;
+  overflow-x: auto;
+}
+.code-line-row {
+  display: flex;
+  line-height: 1.6;
+}
+.code-line-num {
+  width: 38px;
+  padding-right: 10px;
+  text-align: right;
+  color: var(--text-muted);
+  user-select: none;
+  border-right: 1px solid var(--border-color);
+  margin-right: 10px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.code-line-text {
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.donut-legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  width: 100%;
+  font-size: 11.5px;
+}
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.dot-alert { background: var(--sev-alert-border); }
+.dot-warn { background: var(--sev-warn-border); }
+.dot-notice { background: var(--sev-notice-border); }
+.dot-info { background: var(--sev-info-border); }
+.legend-label { color: var(--text-muted); font-size: 11px; flex: 1; }
+.legend-val { color: var(--text-main); font-weight: 700; font-family: var(--font-mono); }
+
 .counters-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 12px;
 }
 
@@ -949,8 +1305,111 @@ code, pre {
 .section-title {
   font-size: 15px;
   font-weight: 700;
-  margin-bottom: 12px;
+  margin-bottom: 4px;
   color: var(--accent);
+}
+
+/* MITRE ATT&CK Matrix Grid */
+.mitre-matrix-header {
+  margin-bottom: 12px;
+}
+.mitre-matrix-header .subtitle {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.mitre-matrix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.tactic-col {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tactic-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-main);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 6px;
+  letter-spacing: 0.3px;
+}
+.tactic-count {
+  font-size: 10px;
+  background: var(--sev-alert-bg);
+  color: var(--sev-alert-text);
+  border: 1px solid var(--sev-alert-border);
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-weight: 800;
+}
+.tactic-techniques {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.btn-tech-chip {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+.btn-tech-chip:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.chip-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+.mitre-clean-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  background: var(--verdict-clean-bg);
+  border: 1px solid var(--verdict-clean-border);
+  border-radius: 6px;
+}
+.mitre-clean-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+.mitre-clean-text strong {
+  display: block;
+  font-size: 13.5px;
+  color: var(--verdict-clean-text);
+  margin-bottom: 4px;
+}
+.mitre-clean-text p {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .table-wrap {
@@ -1101,11 +1560,11 @@ code, pre {
   font-size: 13px;
 }
 
-/* Slide-over Drawer */
+/* Slide-over Threat Drawer */
 .drawer-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background-color: rgba(0, 0, 0, 0.6);
+  background-color: rgba(0, 0, 0, 0.65);
   z-index: 100;
   display: flex;
   justify-content: flex-end;
@@ -1113,21 +1572,48 @@ code, pre {
 .drawer {
   background: var(--bg-card);
   width: 100%;
-  max-width: 550px;
+  max-width: 620px;
   height: 100%;
   border-left: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
+  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.4);
 }
 .drawer-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--border-color);
+  gap: 12px;
 }
-.drawer-header h3 { font-size: 16px; color: var(--accent); }
+.drawer-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+}
+.drawer-header-left h3 {
+  font-size: 15px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drawer-header-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.btn-sm {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.btn-sm:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 .btn-close {
   background: transparent;
   border: none;
@@ -1147,11 +1633,93 @@ code, pre {
   font-size: 13px;
 }
 
+.drawer-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.drawer-card-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+}
+.drawer-badges-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.badge-conf {
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+  border: 1px solid #38bdf8;
+}
+.badge-verd {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fcd34d;
+  border: 1px solid #f59e0b;
+}
+
+.threat-callout {
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-top: 4px;
+}
+.threat-callout-alert { background: var(--sev-alert-bg); border: 1px solid var(--sev-alert-border); color: var(--sev-alert-text); }
+.threat-callout-warning { background: var(--sev-warn-bg); border: 1px solid var(--sev-warn-border); color: var(--sev-warn-text); }
+.threat-callout-notice { background: var(--sev-notice-bg); border: 1px solid var(--sev-notice-border); color: var(--sev-notice-text); }
+.threat-callout-info { background: var(--sev-info-bg); border: 1px solid var(--sev-info-border); color: var(--sev-info-text); }
+.callout-title { font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 0.5px; }
+.callout-text { font-size: 12.5px; line-height: 1.45; color: var(--text-main); }
+
 .drawer-field { display: flex; flex-direction: column; gap: 4px; }
 .drawer-field-label { font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px; }
-.drawer-field-val { word-break: break-all; }
+.field-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.btn-copy-sm {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-copy-sm:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.btn-copy-xs {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--accent);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.btn-copied {
+  background: #064e3b !important;
+  color: #34d399 !important;
+  border-color: #10b981 !important;
+}
+
 .code-block {
-  background: var(--bg-surface);
+  background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 10px 12px;
@@ -1159,6 +1727,97 @@ code, pre {
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.hash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hash-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 5px 8px;
+  gap: 8px;
+}
+.hash-code {
+  font-size: 11px;
+  word-break: break-all;
+  color: var(--text-muted);
+}
+
+.mitre-chips-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.mitre-item-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mitre-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.mitre-tech-id {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 11.5px;
+}
+.mitre-tactic-name {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.mitre-tech-name {
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.cmd-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 10px;
+  gap: 8px;
+}
+.cmd-box code {
+  color: var(--accent);
+  font-size: 11.5px;
+  word-break: break-all;
+}
+.remediation-steps {
+  margin-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.remediation-step {
+  font-size: 12.5px;
+  color: var(--text-main);
+}
+.step-desc {
+  line-height: 1.4;
+}
+.drawer-text-block {
+  font-size: 13px;
+  color: var(--text-main);
+  line-height: 1.45;
 }
 
 .footer-container {
@@ -1174,11 +1833,15 @@ code, pre {
 @media print {
   body { background: #ffffff !important; color: #000000 !important; padding: 0 !important; }
   .card { border: 1px solid #cccccc !important; box-shadow: none !important; break-inside: avoid; }
-  .header-right, .filter-bar, .capping-banner, .btn, #theme-toggle { display: none !important; }
+  .header-container { position: static !important; background: transparent !important; margin: 0 0 20px 0 !important; padding: 0 !important; border-bottom: 2px solid #000 !important; }
+  .header-right, .filter-bar, .capping-banner, .btn, #theme-toggle, #btn-export-csv, #btn-print { display: none !important; }
   .drawer-overlay { display: none !important; }
   .data-table th { background: #eeeeee !important; color: #000000 !important; }
   .data-table td, .data-table th { border-bottom: 1px solid #dddddd !important; }
   .badge { border: 1px solid #000000 !important; color: #000000 !important; background: transparent !important; }
+  .executive-metrics-grid { display: block !important; }
+  .donut-card { display: none !important; }
+  .counters-grid { display: grid !important; grid-template-columns: repeat(6, 1fr) !important; }
 }
 
 @media (max-width: 640px) {
@@ -1287,6 +1950,8 @@ const htmlReportJS = `
   var currentSeverity = 'ALL';
   var currentModule = '';
   var currentSearch = '';
+  var currentFilteredFindings = [];
+  var currentFilteredIndex = -1;
 
   var tbody = document.getElementById('findings-tbody');
   var emptyState = document.getElementById('empty-state');
@@ -1299,6 +1964,11 @@ const htmlReportJS = `
   var drawerOverlay = document.getElementById('detail-drawer-overlay');
   var drawerClose = document.getElementById('drawer-close');
   var drawerBody = document.getElementById('drawer-body');
+  var drawerPrev = document.getElementById('drawer-prev');
+  var drawerNext = document.getElementById('drawer-next');
+  var btnExportCSV = document.getElementById('btn-export-csv');
+  var btnExportJSON = document.getElementById('btn-export-json');
+  var btnPrint = document.getElementById('btn-print');
   var activeRow = null;
 
   // 1. Theme Management
@@ -1339,6 +2009,19 @@ const htmlReportJS = `
     }
   }
 
+  function el(tag, classNames, text) {
+    var e = document.createElement(tag);
+    if (classNames) {
+      classNames.split(' ').forEach(function(c) {
+        if (c) e.classList.add(c);
+      });
+    }
+    if (text !== undefined && text !== null) {
+      e.textContent = String(text);
+    }
+    return e;
+  }
+
   function createBadge(sev) {
     var span = document.createElement('span');
     span.classList.add('badge');
@@ -1348,7 +2031,161 @@ const htmlReportJS = `
     return span;
   }
 
-  // 3. Render Findings Table
+  // Safe DOM text node highlighter (strictly zero unsafe DOM manipulation)
+  function appendHighlightedText(parent, text, term) {
+    if (!text) return;
+    if (!term) {
+      parent.appendChild(document.createTextNode(text));
+      return;
+    }
+    var lowerText = text.toLowerCase();
+    var lowerTerm = term.toLowerCase();
+    var startIndex = 0;
+    var matchIndex = lowerText.indexOf(lowerTerm, startIndex);
+    if (matchIndex === -1) {
+      parent.appendChild(document.createTextNode(text));
+      return;
+    }
+    while (matchIndex !== -1) {
+      if (matchIndex > startIndex) {
+        parent.appendChild(document.createTextNode(text.substring(startIndex, matchIndex)));
+      }
+      var mark = document.createElement('mark');
+      mark.className = 'search-highlight';
+      mark.textContent = text.substring(matchIndex, matchIndex + term.length);
+      parent.appendChild(mark);
+      startIndex = matchIndex + term.length;
+      matchIndex = lowerText.indexOf(lowerTerm, startIndex);
+    }
+    if (startIndex < text.length) {
+      parent.appendChild(document.createTextNode(text.substring(startIndex)));
+    }
+  }
+
+  // Line-numbered code block with copy integrity
+  function renderCodeBlockWithLines(text) {
+    var container = el('div', 'code-block code-block-lines');
+    var lines = (text || '').split('\n');
+    lines.forEach(function(line, idx) {
+      var row = el('div', 'code-line-row');
+      var num = el('span', 'code-line-num', idx + 1);
+      var content = el('span', 'code-line-text', line || ' ');
+      row.appendChild(num);
+      row.appendChild(content);
+      container.appendChild(row);
+    });
+    return container;
+  }
+
+  // 3. Clipboard Copy Helpers
+  function copyText(text, btn) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        showCopied(btn);
+      }).catch(function() {
+        fallbackCopy(text, btn);
+      });
+    } else {
+      fallbackCopy(text, btn);
+    }
+  }
+
+  function fallbackCopy(text, btn) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand('copy');
+      showCopied(btn);
+    } catch (err) {}
+    document.body.removeChild(ta);
+  }
+
+  function showCopied(btn) {
+    if (!btn) return;
+    var orig = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.classList.add('btn-copied');
+    setTimeout(function() {
+      btn.textContent = orig;
+      btn.classList.remove('btn-copied');
+    }, 1800);
+  }
+
+  // 4. CSV Export
+  function exportCSV() {
+    var headers = ["Index", "Severity", "Confidence", "Module", "Rule", "Path", "Reason", "Why", "MITRE", "SHA256", "Timestamp"];
+    var rows = [headers];
+    allFindings.forEach(function(f, i) {
+      var mitreStr = (f.mitre || []).map(function(m) {
+        return (m.technique || '') + ' ' + (m.technique_name || '');
+      }).join('; ');
+      var sha256 = (f.hashes && f.hashes['SHA256']) ? f.hashes['SHA256'] : '';
+      var row = [
+        String(f.index || (i + 1)),
+        f.severity || '',
+        f.confidence || '',
+        f.module || '',
+        f.rule_name || '',
+        f.path || '',
+        f.reason || '',
+        f.why || '',
+        mitreStr,
+        sha256,
+        f.timestamp || ''
+      ];
+      rows.push(row.map(function(val) {
+        var s = String(val).replace(/"/g, '""');
+        return '"' + s + '"';
+      }));
+    });
+    var csvStr = rows.map(function(r) { return r.join(','); }).join('\r\n');
+    var blob = new Blob([csvStr], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.setAttribute('href', url);
+    var hostStr = (reportData.hostname || 'hunt').replace(/[^a-zA-Z0-9_-]/g, '_');
+    a.setAttribute('download', 'aether-threat-dossier-' + hostStr + '.csv');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  if (btnExportCSV) {
+    btnExportCSV.addEventListener('click', exportCSV);
+  }
+
+  function exportJSON() {
+    var jsonStr = JSON.stringify(reportData, null, 2);
+    var blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.setAttribute('href', url);
+    var hostStr = (reportData.hostname || 'hunt').replace(/[^a-zA-Z0-9_-]/g, '_');
+    a.setAttribute('download', 'aether-threat-dossier-' + hostStr + '.json');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  if (btnExportJSON) {
+    btnExportJSON.addEventListener('click', exportJSON);
+  }
+
+  if (btnPrint) {
+    btnPrint.addEventListener('click', function() {
+      window.print();
+    });
+  }
+
+  // 5. Render Findings Table
   function renderTable() {
     clearChildren(tbody);
 
@@ -1365,12 +2202,20 @@ const htmlReportJS = `
         var matchRule = f.rule_name && f.rule_name.toLowerCase().indexOf(term) !== -1;
         var matchReason = f.reason && f.reason.toLowerCase().indexOf(term) !== -1;
         var matchModule = f.module && f.module.toLowerCase().indexOf(term) !== -1;
-        if (!matchPath && !matchRule && !matchReason && !matchModule) {
+        var matchWhy = f.why && f.why.toLowerCase().indexOf(term) !== -1;
+        var matchMitre = (f.mitre || []).some(function(m) {
+          return (m.technique && m.technique.toLowerCase().indexOf(term) !== -1) ||
+                 (m.tactic && m.tactic.toLowerCase().indexOf(term) !== -1) ||
+                 (m.technique_name && m.technique_name.toLowerCase().indexOf(term) !== -1);
+        });
+        if (!matchPath && !matchRule && !matchReason && !matchModule && !matchWhy && !matchMitre) {
           return false;
         }
       }
       return true;
     });
+
+    currentFilteredFindings = filtered;
 
     if (countSummary) {
       countSummary.textContent = 'Showing ' + filtered.length + ' of ' + allFindings.length + ' items';
@@ -1383,7 +2228,7 @@ const htmlReportJS = `
       if (emptyState) emptyState.style.display = 'none';
     }
 
-    filtered.forEach(function(f) {
+    filtered.forEach(function(f, idx) {
       var tr = document.createElement('tr');
       tr.setAttribute('tabindex', '0');
       tr.setAttribute('role', 'button');
@@ -1404,20 +2249,20 @@ const htmlReportJS = `
       // Path column
       var tdPath = document.createElement('td');
       var codePath = document.createElement('code');
-      codePath.textContent = f.path || '';
+      appendHighlightedText(codePath, f.path || '', currentSearch);
       tdPath.appendChild(codePath);
       tr.appendChild(tdPath);
 
       // Rule Name column
       var tdRule = document.createElement('td');
       var codeRule = document.createElement('code');
-      codeRule.textContent = f.rule_name || '';
+      appendHighlightedText(codeRule, f.rule_name || '', currentSearch);
       tdRule.appendChild(codeRule);
       tr.appendChild(tdRule);
 
       // Reason column
       var tdReason = document.createElement('td');
-      tdReason.textContent = f.reason || '';
+      appendHighlightedText(tdReason, f.reason || '', currentSearch);
       tr.appendChild(tdReason);
 
       // Timestamp column
@@ -1432,7 +2277,9 @@ const htmlReportJS = `
       // Row Interaction
       function onRowSelect() {
         activeRow = tr;
-        openDrawer(f);
+        currentFilteredIndex = idx;
+        renderDrawerFinding(f);
+        openDrawer();
       }
 
       tr.addEventListener('click', onRowSelect);
@@ -1447,69 +2294,194 @@ const htmlReportJS = `
     });
   }
 
-  // 4. Detail Drawer
-  function openDrawer(f) {
+  // 6. Detail Drawer Rendering
+  function renderDrawerFinding(f) {
     clearChildren(drawerBody);
 
-    // Helper to add field
-    function addField(label, value, isCode) {
-      if (value === undefined || value === null || value === '') return;
-      var div = document.createElement('div');
-      div.classList.add('drawer-field');
+    var drawerTitle = document.getElementById('drawer-title');
+    var drawerIndexBadge = document.getElementById('drawer-index-badge');
 
-      var lbl = document.createElement('span');
-      lbl.classList.add('drawer-field-label');
-      lbl.textContent = label;
-      div.appendChild(lbl);
+    if (drawerTitle) {
+      drawerTitle.textContent = f.title || f.rule_name || 'Finding Details';
+    }
+    if (drawerIndexBadge) {
+      drawerIndexBadge.textContent = (currentFilteredIndex >= 0) ? (currentFilteredIndex + 1) + ' / ' + currentFilteredFindings.length : '';
+      drawerIndexBadge.className = 'badge sev-' + (f.severity || 'info').toLowerCase();
+    }
+    if (drawerPrev) {
+      drawerPrev.disabled = (currentFilteredIndex <= 0);
+    }
+    if (drawerNext) {
+      drawerNext.disabled = (currentFilteredIndex >= currentFilteredFindings.length - 1);
+    }
 
-      var valElem;
-      if (isCode) {
-        valElem = document.createElement('div');
-        valElem.classList.add('code-block');
-        valElem.textContent = (typeof value === 'object') ? JSON.stringify(value, null, 2) : String(value);
-      } else {
-        valElem = document.createElement('span');
-        valElem.classList.add('drawer-field-val');
-        valElem.textContent = String(value);
+    // 1. Threat Assessment Card
+    var assessCard = el('div', 'drawer-card');
+    assessCard.appendChild(el('h4', 'drawer-card-title', 'Threat Assessment'));
+
+    var badgesWrap = el('div', 'drawer-badges-row');
+    badgesWrap.appendChild(createBadge(f.severity));
+    if (f.confidence) {
+      var confBadge = el('span', 'badge badge-conf', 'CONFIDENCE: ' + f.confidence);
+      if (f.confidence_rationale) {
+        confBadge.setAttribute('title', f.confidence_rationale);
       }
-      div.appendChild(valElem);
-      drawerBody.appendChild(div);
+      badgesWrap.appendChild(confBadge);
+    }
+    if (f.verdict) {
+      badgesWrap.appendChild(el('span', 'badge badge-verd', 'VERDICT: ' + f.verdict));
+    }
+    assessCard.appendChild(badgesWrap);
+
+    if (f.why) {
+      var callout = el('div', 'threat-callout threat-callout-' + (f.severity || 'info').toLowerCase());
+      callout.appendChild(el('div', 'callout-title', 'Forensic Rationale (Why Dangerous)'));
+      callout.appendChild(el('div', 'callout-text', f.why));
+      assessCard.appendChild(callout);
+    }
+    drawerBody.appendChild(assessCard);
+
+    // 2. Forensic Evidence & Artifacts Card
+    var evidCard = el('div', 'drawer-card');
+    evidCard.appendChild(el('h4', 'drawer-card-title', 'Forensic Evidence & Artifacts'));
+
+    if (f.path) {
+      var pathField = el('div', 'drawer-field');
+      var pathHdr = el('div', 'field-header');
+      pathHdr.appendChild(el('span', 'drawer-field-label', 'Primary Path / Target'));
+      var copyPathBtn = el('button', 'btn-copy-sm', 'Copy Path');
+      copyPathBtn.addEventListener('click', function() { copyText(f.path, copyPathBtn); });
+      pathHdr.appendChild(copyPathBtn);
+      pathField.appendChild(pathHdr);
+      pathField.appendChild(el('div', 'code-block', f.path));
+      evidCard.appendChild(pathField);
     }
 
-    // Severity
-    var sevDiv = document.createElement('div');
-    sevDiv.classList.add('drawer-field');
-    var sevLbl = document.createElement('span');
-    sevLbl.classList.add('drawer-field-label');
-    sevLbl.textContent = 'Severity';
-    sevDiv.appendChild(sevLbl);
-    sevDiv.appendChild(createBadge(f.severity));
-    drawerBody.appendChild(sevDiv);
-
-    addField('Module', f.module);
-    addField('Rule Name', f.rule_name);
-    addField('Primary Path', f.path, true);
     if (f.paths && f.paths.length > 1) {
-      addField('All Matched Paths (' + f.paths.length + ')', f.paths.join('\\n'), true);
+      var pathsField = el('div', 'drawer-field');
+      var pathsHdr = el('div', 'field-header');
+      pathsHdr.appendChild(el('span', 'drawer-field-label', 'All Matched Paths (' + f.paths.length + ')'));
+      var copyAllBtn = el('button', 'btn-copy-sm', 'Copy All');
+      copyAllBtn.addEventListener('click', function() { copyText(f.paths.join('\n'), copyAllBtn); });
+      pathsHdr.appendChild(copyAllBtn);
+      pathsField.appendChild(pathsHdr);
+      pathsField.appendChild(renderCodeBlockWithLines(f.paths.join('\n')));
+      evidCard.appendChild(pathsField);
     }
-    addField('Reason & Details', f.reason);
-    addField('Timestamp', f.timestamp);
+
+    if (f.reason) {
+      var reasonField = el('div', 'drawer-field');
+      reasonField.appendChild(el('span', 'drawer-field-label', 'Detection Details'));
+      reasonField.appendChild(el('div', 'drawer-text-block', f.reason));
+      evidCard.appendChild(reasonField);
+    }
+
+    if (f.evidence) {
+      var evField = el('div', 'drawer-field');
+      var evHdr = el('div', 'field-header');
+      evHdr.appendChild(el('span', 'drawer-field-label', 'Raw Evidence / Matched String'));
+      var copyEvBtn = el('button', 'btn-copy-sm', 'Copy Evidence');
+      copyEvBtn.addEventListener('click', function() { copyText(f.evidence, copyEvBtn); });
+      evHdr.appendChild(copyEvBtn);
+      evField.appendChild(evHdr);
+      evField.appendChild(renderCodeBlockWithLines(f.evidence));
+      evidCard.appendChild(evField);
+    }
 
     if (f.hashes && Object.keys(f.hashes).length > 0) {
-      var hashLines = [];
+      var hashField = el('div', 'drawer-field');
+      var hashHdr = el('div', 'field-header');
+      hashHdr.appendChild(el('span', 'drawer-field-label', 'Cryptographic Hashes'));
+      var allHashStr = [];
       for (var hName in f.hashes) {
-        hashLines.push(hName + ': ' + f.hashes[hName]);
+        allHashStr.push(hName + ': ' + f.hashes[hName]);
       }
-      addField('File Hashes', hashLines.join('\\n'), true);
+      var copyHashBtn = el('button', 'btn-copy-sm', 'Copy Hashes');
+      copyHashBtn.addEventListener('click', function() { copyText(allHashStr.join('\n'), copyHashBtn); });
+      hashHdr.appendChild(copyHashBtn);
+      hashField.appendChild(hashHdr);
+
+      var hashList = el('div', 'hash-list');
+      for (var hKey in f.hashes) {
+        (function(key, val) {
+          var hRow = el('div', 'hash-row');
+          hRow.appendChild(el('code', 'hash-code', key + ': ' + val));
+          var cBtn = el('button', 'btn-copy-xs', 'Copy');
+          cBtn.addEventListener('click', function() { copyText(val, cBtn); });
+          hRow.appendChild(cBtn);
+          hashList.appendChild(hRow);
+        })(hKey, f.hashes[hKey]);
+      }
+      hashField.appendChild(hashList);
+      evidCard.appendChild(hashField);
     }
 
     if (f.metadata && Object.keys(f.metadata).length > 0) {
-      addField('Metadata', f.metadata, true);
+      var metaField = el('div', 'drawer-field');
+      metaField.appendChild(el('span', 'drawer-field-label', 'Forensic Metadata'));
+      metaField.appendChild(el('div', 'code-block', JSON.stringify(f.metadata, null, 2)));
+      evidCard.appendChild(metaField);
     }
 
+    drawerBody.appendChild(evidCard);
+
+    // 3. MITRE ATT&CK Mapping Card
+    if (f.mitre && f.mitre.length > 0) {
+      var mitreCard = el('div', 'drawer-card');
+      mitreCard.appendChild(el('h4', 'drawer-card-title', 'MITRE ATT&CK® Enterprise Alignment'));
+      var mitreList = el('div', 'mitre-chips-grid');
+      f.mitre.forEach(function(m) {
+        var item = el('div', 'mitre-item-card');
+        var topRow = el('div', 'mitre-top-row');
+        topRow.appendChild(el('span', 'mitre-tech-id', m.technique || ''));
+        topRow.appendChild(el('span', 'mitre-tactic-name', m.tactic || ''));
+        item.appendChild(topRow);
+        item.appendChild(el('div', 'mitre-tech-name', m.technique_name || ''));
+        mitreList.appendChild(item);
+      });
+      mitreCard.appendChild(mitreList);
+      drawerBody.appendChild(mitreCard);
+    }
+
+    // 4. Actionable Containment & Remediation Card
+    if (f.remediation && f.remediation.length > 0) {
+      var remCard = el('div', 'drawer-card');
+      remCard.appendChild(el('h4', 'drawer-card-title', 'Actionable Containment & Remediation'));
+      var remList = el('ol', 'remediation-steps');
+      f.remediation.forEach(function(step) {
+        var li = el('li', 'remediation-step');
+        var trimmed = step.trim();
+        var isCommand = trimmed.startsWith('kill ') ||
+                        trimmed.startsWith('rm ') ||
+                        trimmed.startsWith('systemctl ') ||
+                        trimmed.startsWith('chmod ') ||
+                        trimmed.startsWith('iptables ') ||
+                        trimmed.startsWith('sed ') ||
+                        trimmed.startsWith('pkill ') ||
+                        trimmed.startsWith('chattr ');
+        if (isCommand) {
+          var cmdBox = el('div', 'cmd-box');
+          cmdBox.appendChild(el('code', '', trimmed));
+          var copyCmdBtn = el('button', 'btn-copy-sm', 'Copy Command');
+          copyCmdBtn.addEventListener('click', function() { copyText(trimmed, copyCmdBtn); });
+          cmdBox.appendChild(copyCmdBtn);
+          li.appendChild(cmdBox);
+        } else {
+          li.appendChild(el('div', 'step-desc', step));
+        }
+        remList.appendChild(li);
+      });
+      remCard.appendChild(remList);
+      drawerBody.appendChild(remCard);
+    }
+  }
+
+  function openDrawer() {
     if (drawerOverlay) {
       drawerOverlay.style.display = 'flex';
       drawerOverlay.setAttribute('aria-hidden', 'false');
+      drawerOverlay.setAttribute('aria-modal', 'true');
+      drawerOverlay.setAttribute('role', 'dialog');
       if (drawerClose) drawerClose.focus();
     }
   }
@@ -1535,15 +2507,86 @@ const htmlReportJS = `
     });
   }
 
+  if (drawerPrev) {
+    drawerPrev.addEventListener('click', function() {
+      if (currentFilteredIndex > 0) {
+        currentFilteredIndex--;
+        renderDrawerFinding(currentFilteredFindings[currentFilteredIndex]);
+      }
+    });
+  }
+
+  if (drawerNext) {
+    drawerNext.addEventListener('click', function() {
+      if (currentFilteredIndex < currentFilteredFindings.length - 1) {
+        currentFilteredIndex++;
+        renderDrawerFinding(currentFilteredFindings[currentFilteredIndex]);
+      }
+    });
+  }
+
   window.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' || e.keyCode === 27) {
-      if (drawerOverlay && drawerOverlay.style.display !== 'none') {
+    if (drawerOverlay && drawerOverlay.style.display !== 'none') {
+      if (e.key === 'Escape' || e.keyCode === 27) {
         closeDrawer();
+      } else if (e.key === 'ArrowLeft' && currentFilteredIndex > 0) {
+        currentFilteredIndex--;
+        renderDrawerFinding(currentFilteredFindings[currentFilteredIndex]);
+      } else if (e.key === 'ArrowRight' && currentFilteredIndex < currentFilteredFindings.length - 1) {
+        currentFilteredIndex++;
+        renderDrawerFinding(currentFilteredFindings[currentFilteredIndex]);
+      } else if (e.key === 'Tab' || e.keyCode === 9) {
+        var focusables = drawerOverlay.querySelectorAll('button:not([disabled]), [tabindex="0"]:not([disabled])');
+        if (focusables.length > 0) {
+          var first = focusables[0];
+          var last = focusables[focusables.length - 1];
+          if (e.shiftKey) {
+            if (document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            }
+          } else {
+            if (document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
+      }
+      return;
+    }
+
+    // Global Command-K / '/' shortcut to focus search input
+    var isSearchShortcut = ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) ||
+      (e.key === '/' && document.activeElement !== searchInput && document.activeElement &&
+       document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA');
+    if (isSearchShortcut) {
+      e.preventDefault();
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.select();
       }
     }
   });
 
-  // 5. Search & Filters
+  // 7. MITRE Technique Chip Click Handling
+  var techChips = document.querySelectorAll('.btn-tech-chip');
+  techChips.forEach(function(chip) {
+    chip.addEventListener('click', function() {
+      var techId = chip.getAttribute('data-tech-id') || '';
+      if (searchInput) {
+        searchInput.value = techId;
+        currentSearch = techId;
+        renderTable();
+        var tableSection = document.getElementById('findings-table');
+        if (tableSection) {
+          tableSection.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
+    });
+  });
+
+  // 8. Search & Filters
   if (searchInput) {
     searchInput.addEventListener('input', function() {
       currentSearch = (searchInput.value || '').trim();

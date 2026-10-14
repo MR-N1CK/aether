@@ -421,4 +421,3 @@ func extractHiddenDirPrefix(p string) string {
 	}
 	return ""
 }
-

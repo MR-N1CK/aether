@@ -27,6 +27,11 @@ func CheckSystemd(ctx context.Context, rootFS string, cfg *config.Config, pkgDB 
 		"/etc/systemd/system",
 		"/lib/systemd/system",
 		"/usr/lib/systemd/system",
+		"/usr/local/lib/systemd/system",
+		"/run/systemd/system",
+		"/run/systemd/generator",
+		"/run/systemd/generator.early",
+		"/run/systemd/generator.late",
 	}
 
 	// Also check user systemd units under /home/*/.config/systemd/user and /root/.config/systemd/user
@@ -227,11 +232,15 @@ func inspectSystemdUnit(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 	// If unowned and package DB is available: low score signal only
 	if pkgDB != nil && pkgDB.IsAvailable() && !isPackageOwned {
 		// Only check unowned for top-level unit definitions
-		if strings.HasSuffix(virtPath, ".service") || strings.HasSuffix(virtPath, ".timer") {
+		if strings.HasSuffix(virtPath, ".service") || strings.HasSuffix(virtPath, ".timer") || strings.HasSuffix(virtPath, ".socket") {
+			ruleName := "Persistence_Systemd_Unowned_Unit"
+			if strings.HasSuffix(virtPath, ".socket") {
+				ruleName = "Persistence_Systemd_Unowned_Socket"
+			}
 			signals = append(signals, &PersistenceSignal{
 				Class:      ClassUnowned,
-				RuleName:   "Persistence_Systemd_Unowned_Unit",
-				Reason:     "Systemd unit file is not owned by any installed OS package",
+				RuleName:   ruleName,
+				Reason:     fmt.Sprintf("Systemd unit file (%s) is not owned by any installed OS package", filepath.Base(virtPath)),
 				Score:      cfg.Scan.ScorePersistSystemdUnowned,
 				Severity:   report.SeverityNotice,
 				IsStrong:   false,
@@ -313,6 +322,39 @@ func inspectSystemdUnit(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 				signals = append(signals, cs)
 			}
 		}
+
+		if strings.HasPrefix(line, "ListenStream=") ||
+			strings.HasPrefix(line, "ListenDatagram=") ||
+			strings.HasPrefix(line, "ListenSequentialPacket=") ||
+			strings.HasPrefix(line, "ListenFIFO=") {
+
+			idx := strings.Index(line, "=")
+			listenVal := strings.TrimSpace(line[idx+1:])
+
+			if strings.HasPrefix(listenVal, "/tmp/") ||
+				strings.HasPrefix(listenVal, "/var/tmp/") ||
+				strings.HasPrefix(listenVal, "/dev/shm/") {
+				signals = append(signals, &PersistenceSignal{
+					Class:      ClassExecFromTemp,
+					RuleName:   "Persistence_Systemd_Socket_Activation",
+					Reason:     fmt.Sprintf("Systemd socket listening on volatile/temporary FIFO: %s", listenVal),
+					Score:      75,
+					Severity:   report.SeverityWarning,
+					IsStrong:   true,
+					LineNumber: lineNum,
+				})
+			} else if !isPackageOwned {
+				signals = append(signals, &PersistenceSignal{
+					Class:      ClassConfigDeviation,
+					RuleName:   "Persistence_Systemd_Socket_Activation",
+					Reason:     fmt.Sprintf("Non-package-owned systemd socket listening on endpoint: %s", listenVal),
+					Score:      70,
+					Severity:   report.SeverityWarning,
+					IsStrong:   true,
+					LineNumber: lineNum,
+				})
+			}
+		}
 	}
 
 	if len(signals) > 0 {
@@ -340,10 +382,11 @@ func findUserSystemdDirs(rootFS string) []string {
 			for _, e := range entries {
 				if e.IsDir() {
 					dirs = append(dirs, filepath.Join("/home", e.Name(), ".config/systemd/user"))
+					dirs = append(dirs, filepath.Join("/home", e.Name(), ".local/share/systemd/user"))
 				}
 			}
 		}
 	}
-	dirs = append(dirs, "/root/.config/systemd/user")
+	dirs = append(dirs, "/root/.config/systemd/user", "/root/.local/share/systemd/user")
 	return dirs
 }

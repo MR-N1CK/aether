@@ -88,7 +88,7 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 	isNonRoot := os.Geteuid() != 0 && m.procRoot == "" && m.rootFS == ""
 
 	cov := KernelCoverage{
-		GapsNote:       "eBPF programs, syscall-table hooks, and live kernel memory are not inspected",
+		GapsNote:       "Live kernel memory and firmware integrity are not inspected",
 		NonRootLimited: isNonRoot,
 	}
 
@@ -108,6 +108,10 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 	// 3. Modprobe install & softdep configuration hooks
 	modprobeFindings := CheckModprobe(ctx, m.rootFS, cfg, &cov, m.logger)
 	allFindings = append(allFindings, modprobeFindings...)
+
+	// 4. eBPF & Kernel Trace Hook Inspection
+	ebpfFindings := CheckEBPFProbes(ctx, m.rootFS, m.sysRoot, &cov, m.logger)
+	allFindings = append(allFindings, ebpfFindings...)
 
 	// Report findings
 	for _, f := range allFindings {

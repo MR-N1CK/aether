@@ -61,7 +61,7 @@ func (l *ProfileLoader) ValidateManifest(m *ProfileManifest) error {
 	validProfiles := map[string]bool{
 		ProfileDesktopStandard:     true,
 		ProfileWorkstationDev:      true,
-		ProfileWorkstationPentest:   true,
+		ProfileWorkstationPentest:  true,
 		ProfileServerWeb:           true,
 		ProfileServerMinimal:       true,
 		ProfileContainerHost:       true,

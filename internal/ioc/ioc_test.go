@@ -179,3 +179,31 @@ func TestKnownBenignSuppression(t *testing.T) {
 	}
 }
 
+func TestLoadSingleFile(t *testing.T) {
+	tempDir := t.TempDir()
+	iocFilePath := filepath.Join(tempDir, "custom_threats.txt")
+	testHash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	content := testHash + " # Custom_Threat_Payload\n"
+	if err := os.WriteFile(iocFilePath, []byte(content), 0600); err != nil {
+		t.Fatalf("failed to write temp ioc file: %v", err)
+	}
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.IOCFile = iocFilePath
+
+	eng, err := ioc.NewEngine(cfg, nil)
+	if err != nil {
+		t.Fatalf("failed to init engine with single IOC file: %v", err)
+	}
+
+	match := eng.CheckHash(testHash)
+	if match == nil {
+		t.Fatalf("expected match for hash loaded via single IOC file")
+	}
+	if match.Severity != report.SeverityAlert {
+		t.Errorf("expected ALERT severity, got %v", match.Severity)
+	}
+	if match.RuleName != "Custom_Threat_Payload" {
+		t.Errorf("expected rule Custom_Threat_Payload, got %s", match.RuleName)
+	}
+}

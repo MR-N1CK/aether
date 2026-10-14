@@ -672,4 +672,3 @@ func TestWorkerPoolTracker_TimeoutsAndReplacement(t *testing.T) {
 		t.Errorf("expected 0 active paths, got: %v", active)
 	}
 }
-

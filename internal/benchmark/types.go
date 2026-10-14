@@ -21,19 +21,19 @@ const (
 
 // BenchmarkCorpusCase represents an individual test scenario in the validation corpus.
 type BenchmarkCorpusCase struct {
-	ID                string         `json:"id"`
-	Name              string         `json:"name"`
-	Category          CorpusCategory `json:"category"`
-	Subcategory       string         `json:"subcategory"`
-	TargetPath        string         `json:"target_path"`
-	FileMode          uint32         `json:"file_mode,omitempty"`
-	OwnerUID          uint32         `json:"owner_uid,omitempty"`
-	IsPackageOwned    bool           `json:"is_package_owned,omitempty"`
-	PackageName       string         `json:"package_name,omitempty"`
+	ID                string          `json:"id"`
+	Name              string          `json:"name"`
+	Category          CorpusCategory  `json:"category"`
+	Subcategory       string          `json:"subcategory"`
+	TargetPath        string          `json:"target_path"`
+	FileMode          uint32          `json:"file_mode,omitempty"`
+	OwnerUID          uint32          `json:"owner_uid,omitempty"`
+	IsPackageOwned    bool            `json:"is_package_owned,omitempty"`
+	PackageName       string          `json:"package_name,omitempty"`
 	Expected          ExpectedOutcome `json:"expected"`
-	FixtureContent    []byte         `json:"-"`
-	CorpusRelativeDir string         `json:"-"`
-	MockProcDir       string         `json:"mock_proc_dir,omitempty"`
+	FixtureContent    []byte          `json:"-"`
+	CorpusRelativeDir string          `json:"-"`
+	MockProcDir       string          `json:"mock_proc_dir,omitempty"`
 }
 
 // ExpectedOutcome defines the immutable analytical contract for a corpus case.
@@ -188,4 +188,3 @@ type BenchmarkRuntimeFixture struct {
 func (r *BenchmarkResult) Duration() time.Duration {
 	return time.Duration(r.DurationMs) * time.Millisecond
 }
-

@@ -12,7 +12,7 @@ import (
 const (
 	ProfileDesktopStandard     = "desktop-standard"
 	ProfileWorkstationDev      = "workstation-dev"
-	ProfileWorkstationPentest   = "workstation-pentest"
+	ProfileWorkstationPentest  = "workstation-pentest"
 	ProfileServerWeb           = "server-web"
 	ProfileServerMinimal       = "server-minimal"
 	ProfileContainerHost       = "container-host"

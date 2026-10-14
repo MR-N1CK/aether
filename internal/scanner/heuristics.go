@@ -452,23 +452,27 @@ func CheckSuspiciousPrivateKeyMaterial(path string, data []byte, pkgDB pkgdb.Pac
 }
 
 var (
-	reRevShellInteractive = regexp.MustCompile(`(?i)(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh)\s+-i\s+>&?\s*/dev/(?:tcp|udp)/\S+|/dev/(?:tcp|udp)/\S+\s+0>&1|exec\s+\d+<>/dev/(?:tcp|udp)/\S+|0<&196;\s*exec\s+196<>/dev/(?:tcp|udp)/`)
-	reOpenSSLRevShell     = regexp.MustCompile(`(?i)openssl\s+s_client\s+(?:-[a-zA-Z0-9_-]+\s+)*-connect\s+\S+[\s\S]*\|\s*(?:/(?:usr/)?bin/)?(?:ba)?sh|openssl\s+s_client\s+.*-connect\s+<\s*/tmp/`)
-	reSocatRevShell      = regexp.MustCompile(`(?i)socat\s+.*(?:exec|pty|system|openssl-connect)\s*:\s*['"]?(?:/(?:usr/)?bin/)?(?:ba)?sh|socat\s+openssl-connect:\S+`)
-	reProcHiding         = regexp.MustCompile(`(?i)mount\s+-t\s+tmpfs\s+(?:-o\s+\S+\s+)?(?:tmpfs\s+)?['"]?/proc/(?:\$\{[a-zA-Z0-9_]+\}|\$[a-zA-Z0-9_]+|\d+)`)
-	reRedTeamFramework   = regexp.MustCompile(`(?i)GHOST-SHELL|KALI-MASTER.*PERSISTENCE|TIER-1\s+RED\s+TEAM\s+IMPLANT|systemd-resolved-updater`)
-	reNetcatRevShell     = regexp.MustCompile(`(?i)(?:nc|ncat|netcat)(?:\.traditional)?\s+(?:-\S*\s+)*-[ec]\s+(?:/(?:usr/)?bin/)?(?:ba)?sh|mkfifo\s+\S+;\s*(?:/(?:usr/)?bin/)?(?:ba)?sh.*\|\s*(?:nc|ncat|netcat)\s+`)
-	reInlineScriptRev    = regexp.MustCompile(`(?i)(?:python[23]?|perl|php|ruby)\s+-[a-zA-Z0-9]*[cer]\s+[\s\S]*(?:socket\.(?:socket|connect)|use\s+Socket|fsockopen|TCPSocket|pty\.spawn)|(?:import\s+(?:ssl,\s*)?socket[\s\S]*socket\.socket[\s\S]*\.connect\s*\(\s*\([\s\S]*,\s*\S+\s*\)[\s\S]*(?:os\.dup2|subprocess|pty\.spawn|send\(b?['"]\+))`)
-	reWebshellGeneric    = regexp.MustCompile(`(?i)(?:eval|assert|passthru|shell_exec|system|popen|proc_open)\s*\(\s*(?:(?:base64_decode|gzinflate|gzuncompress|str_rot13)\s*\(\s*)?\$_(?:POST|GET|REQUEST|COOKIE)\[`)
-	reDownloadAndExec    = regexp.MustCompile(`(?i)(?:curl\s+-[a-zA-Z]*s[a-zA-Z]*|wget\s+-[a-zA-Z]*q[a-zA-Z]*)\s+https?://\S+\s*\|\s*(?:ba)?sh`)
-	reRansomwareScript   = regexp.MustCompile(`(?i)(?:from\s+cryptography\.fernet\s+import\s+Fernet|Crypto\.Cipher|AES\.new|Fernet\()[\s\S]*(?:os\.walk|os\.scandir|rglob|glob\.glob)[\s\S]*(?:\.encrypt\(|os\.remove|\.locked|\.enc\b|ransom|RESCUE|DECRYPT|victim|TARGET_DIR)`)
-	reDataExfiltration   = regexp.MustCompile(`(?i)(?:(?:socket\.socket|socket\.create_connection|requests\.post|urllib\.request)[\s\S]*(?:os\.walk|os\.listdir|os\.scandir|iter_files|rglob|TARGET_DIR)[\s\S]*(?:sendall|send\(|socket\.send)|(?:exfil|exfiltrat|stealer)[\s\S]*(?:socket|requests|urllib|sendall|b64encode)|(?:zlib\.compress|base64\.b64encode)[\s\S]*(?:sendall|send\(|socket\.send))`)
-	reExfilServer        = regexp.MustCompile(`(?i)socket\.socket[\s\S]*\.bind\s*\(\s*\([\s\S]*\.listen[\s\S]*\.accept[\s\S]*(?:zlib\.decompress|base64\.b64decode|exfil|stolen|victim|tree\.json|dump_payload)`)
+	reRevShellInteractive = regexp.MustCompile(`(?i)(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh|ash)\s+.*>/dev/(?:tcp|udp)/[^\s|;&]+|/dev/(?:tcp|udp)/[^\s|;&]+\s+(?:0>&1|>&0|>&2)|(?:exec\s+)?\d*<>/dev/(?:tcp|udp)/[^\s|;&]+|0<&\d+;\s*exec\s+\d+<>/dev/(?:tcp|udp)/|\bexec\s+>&?\s*/dev/(?:tcp|udp)/[^\s|;&]+`)
+	reOpenSSLRevShell     = regexp.MustCompile(`(?i)openssl\s+s_client\s+.*-connect\s+[^\s|;&]+.*\|\s*(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh)|openssl\s+s_client\s+.*-connect\s+.*<\s*/(?:tmp|var/tmp|dev/shm)/|mkfifo\s+\S+.*\|\s*openssl\s+s_client`)
+	reSocatRevShell       = regexp.MustCompile(`(?i)socat\s+.*(?:exec|pty|system)\s*:\s*['"]?(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh)|socat\s+(?:tcp(?:[46])?(?:-connect)?|openssl-connect):\S+.*(?:exec|pty|system)|socat\s+openssl-connect:\S+`)
+	reProcHiding          = regexp.MustCompile(`(?i)mount\s+(?:-t\s+tmpfs\s+(?:-o\s+\S+\s+)?(?:tmpfs\s+)?|--bind\s+\S+\s+|-o\s+bind\s+\S+\s+)['"]?/proc/(?:\$\{[a-zA-Z0-9_]+\}|\$[a-zA-Z0-9_]+|\d+)`)
+	reNetcatRevShell      = regexp.MustCompile(`(?i)(?:nc|ncat|netcat)(?:\.[a-z]+)?\s+.*(?:-[a-z]*[ec][a-z]*|--(?:sh-)?exec)\s+['"]?(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh)|(?:mkfifo|mknod)\s+\S+.*\|\s*(?:nc|ncat|netcat)(?:\.[a-z]+)?\s+|(?:nc|ncat|netcat)(?:\.[a-z]+)?\s+\S+\s+\d+\s*\|\s*(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh)`)
+	reInlineScriptRev     = regexp.MustCompile(`(?i)(?:python[23]?|perl|php|ruby|lua|node(?:js)?)\s+-[a-zA-Z0-9]*[cer]\s+[\s\S]*(?:socket\.(?:socket|connect)|use\s+Socket|fsockopen|TCPSocket|pty\.spawn|child_process|inet/tcp)|(?:import\s+(?:ssl,\s*)?socket[\s\S]*socket\.socket[\s\S]*\.connect\s*\(\s*\([\s\S]*,\s*\S+\s*\)[\s\S]*(?:os\.dup2|subprocess|pty\.spawn|send\(b?['"]\+))|awk\s+.*inet/tcp`)
+	reWebshellGeneric     = regexp.MustCompile(`(?i)(?:eval|assert|passthru|shell_exec|system|popen|proc_open|create_function|pcntl_exec)\s*\(\s*(?:(?:base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|hex2bin|pack)\s*\(\s*)*\$_(?:POST|GET|REQUEST|COOKIE|SERVER)\[|call_user_func(?:_array)?\s*\(\s*['"]?(?:eval|assert|passthru|shell_exec|system|popen|proc_open)['"]?\s*,\s*.*\$_(?:POST|GET|REQUEST|COOKIE|SERVER)|(?:\$[a-zA-Z0-9_]+\s*=\s*(?:(?:base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|hex2bin|stripslashes)\s*\(\s*)*\$_(?:POST|GET|REQUEST|COOKIE|SERVER)\[[\s\S]{0,150}(?:eval|assert|passthru|shell_exec|system|popen|proc_open)\s*\(\s*\$[a-zA-Z0-9_]+)`)
+	reWebshellTraits      = regexp.MustCompile(`(?i)\$password\s*=\s*['"][a-f0-9]{32}['"][\s\S]*(?:eval|system|passthru)|\$auth_pass\s*=[\s\S]*(?:eval|system|passthru)|(?:b374k|wso_version|c99shell|r57shell|weevely|alfa\s*team)[\s\S]*(?:eval|system|shell_exec|passthru)|\$_(?:POST|GET|REQUEST)\[['"](?:cmd|shell|exec|command|upload|action)['"]\][\s\S]{0,200}(?:move_uploaded_file|file_put_contents|fwrite)[\s\S]{0,200}(?:chmod|eval|system)`)
+	reDownloadAndExec     = regexp.MustCompile(`(?i)(?:(?:busybox\s+)?(?:curl|wget|fetch|aria2c)(?:\s+--?[a-zA-Z0-9_=-]+(?:\s+[^\s|;&]+)?)*\s+https?://[^\s|;&]+(?:\s+--?[a-zA-Z0-9_=-]+(?:\s+[^\s|;&]+)?)*)\s*\|\s*(?:sudo\s+)?(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh|ash|python[23]?|perl)(?:\s+-[a-zA-Z0-9_=-]+|\s+--)*`)
+	rePowerShellEncoded   = regexp.MustCompile(`(?i)(?:pwsh|powershell)(?:\.exe)?\s+.*-(?:e|enc|encodedcommand)\s+[A-Za-z0-9+/=]{10,}`)
+	reCloudExfilTool      = regexp.MustCompile(`(?i)(?:rclone\s+(?:copy|copyto|sync|move|rcat)|mega-(?:put|cmd|export)|aws\s+s3\s+(?:cp|sync|mv)|(?:gsutil|gcloud\s+storage)\s+(?:cp|rsync)|azcopy\s+(?:copy|sync)|s5cmd\s+(?:cp|sync|cat))\s+.*(?:/etc/|/root/|/home/|\.tar(?:\.gz|\.bz2|\.xz)?|\.zip|\.7z|\.sql|\.kdbx|\.db)|curl\s+.*(?:-T|--upload-file|-F)\s+.*https?://(?:transfer\.sh|file\.io|bashupload\.com|catbox\.moe|0x0\.st)`)
+	reLinkerAuditHook     = regexp.MustCompile(`(?i)(?:(?:LD_AUDIT|LD_PRELOAD|LD_LIBRARY_PATH)\s*=|/etc/ld\.so\.(?:audit|preload)|Environment\s*=.*LD_(?:AUDIT|PRELOAD))`)
+	rePamExecHook         = regexp.MustCompile(`(?i)(?:pam_exec\.so|pam_script\.so)\s+.*(?:/(?:tmp|var/tmp|dev/shm|root|home)|\/\.[a-zA-Z0-9_]+|\.sh\b|\.py\b|\.pl\b|seteuid)`)
+	reRansomwareScript    = regexp.MustCompile(`(?i)(?:from\s+cryptography\.fernet\s+import\s+Fernet|Crypto\.Cipher|AES\.new|ChaCha20|Fernet\()[\s\S]*(?:os\.walk|os\.scandir|rglob|glob\.glob|Path\.walk)[\s\S]*(?:\.encrypt\(|encrypt_file|os\.remove|\.locked|\.enc\b|ransom|RESCUE|DECRYPT|victim|TARGET_DIR)`)
+	reDataExfiltration    = regexp.MustCompile(`(?i)(?:(?:socket\.socket|socket\.create_connection|requests\.post|urllib\.request)[\s\S]*(?:os\.walk|os\.listdir|os\.scandir|iter_files|rglob|TARGET_DIR)[\s\S]*(?:sendall|send\(|socket\.send)|(?:exfil|exfiltrat|stealer)[\s\S]*(?:socket|requests|urllib|sendall|b64encode)|(?:zlib\.compress|base64\.b64encode)[\s\S]*(?:sendall|send\(|socket\.send))`)
+	reExfilServer         = regexp.MustCompile(`(?i)socket\.socket[\s\S]*\.bind\s*\(\s*\([\s\S]*\.listen[\s\S]*\.accept[\s\S]*(?:zlib\.decompress|base64\.b64decode|exfil|stolen|victim|tree\.json|dump_payload)`)
 )
 
 // CheckSuspiciousScriptContent evaluates file bytes for malicious script patterns,
 // including interactive/encrypted reverse shells, netcat/socat listeners, procfs manipulation,
-// red-team persistence frameworks, webshells, and download droppers.
+// webshells, droppers, ransomware encryptors, and data exfiltration routines.
 func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageDB, cfg *config.Config) *HeuristicMatch {
 	if len(data) == 0 {
 		return nil
@@ -482,41 +486,46 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 	isTest := strings.Contains(cleaned, "/test/") || strings.Contains(cleaned, "/tests/") ||
 		strings.HasPrefix(filepath.Base(cleaned), "test_") || strings.Contains(filepath.Base(cleaned), "_test.")
 
-	// If documentation metadata, suppress non-critical dropper/server/exfil text examples
-	if isDoc {
-		if !reRedTeamFramework.Match(data) && !reProcHiding.Match(data) && !reOpenSSLRevShell.Match(data) &&
+	// Check if path is in temporary or volatile execution directories (/tmp, /var/tmp, /dev/shm, /run)
+	isInTemp := strings.HasPrefix(cleaned, "/tmp/") || strings.HasPrefix(cleaned, "/var/tmp/") ||
+		strings.HasPrefix(cleaned, "/dev/shm/") || strings.HasPrefix(cleaned, "/run/") ||
+		cleaned == "/tmp" || cleaned == "/var/tmp" || cleaned == "/dev/shm"
+	if cfg != nil && len(cfg.Scan.TempDirs) > 0 {
+		for _, td := range cfg.Scan.TempDirs {
+			tdClean := filepath.Clean(td)
+			if cleaned == tdClean || strings.HasPrefix(cleaned, tdClean+string(filepath.Separator)) {
+				isInTemp = true
+				break
+			}
+		}
+	}
+
+	// If documentation metadata outside volatile temp directories, suppress non-critical dropper/server/exfil text examples
+	if isDoc && !isInTemp {
+		if !reProcHiding.Match(data) && !reOpenSSLRevShell.Match(data) &&
 			!reRevShellInteractive.Match(data) && !reNetcatRevShell.Match(data) && !reSocatRevShell.Match(data) &&
-			!reRansomwareScript.Match(data) {
+			!reRansomwareScript.Match(data) && !rePowerShellEncoded.Match(data) && !rePamExecHook.Match(data) &&
+			!reLinkerAuditHook.Match(data) {
 			return nil
 		}
 	}
 
 	// If unit test file, mock server listeners are benign test fixtures
-	if isTest && reExfilServer.Match(data) && !reRevShellInteractive.Match(data) && !reRansomwareScript.Match(data) && !reRedTeamFramework.Match(data) {
+	if isTest && reExfilServer.Match(data) && !reRevShellInteractive.Match(data) && !reRansomwareScript.Match(data) {
 		return nil
 	}
 
-	// 1. Red-team persistence framework / implant markers
-	if reRedTeamFramework.Match(data) {
-		return &HeuristicMatch{
-			Name:     "Script_RedTeam_Persistence_Framework",
-			Reason:   fmt.Sprintf("Red-team persistence framework signature or implant markers in %s", filepath.Base(cleaned)),
-			Score:    95,
-			Severity: report.SeverityAlert,
-		}
-	}
-
-	// 2. Process hiding via procfs mount manipulation
+	// 1. Process hiding via procfs mount manipulation
 	if reProcHiding.Match(data) {
 		return &HeuristicMatch{
 			Name:     "Script_Process_Hiding_Procfs",
-			Reason:   fmt.Sprintf("Stealth process hiding via procfs tmpfs mount manipulation in %s", filepath.Base(cleaned)),
+			Reason:   fmt.Sprintf("Stealth process hiding via procfs tmpfs/bind mount manipulation in %s", filepath.Base(cleaned)),
 			Score:    90,
 			Severity: report.SeverityAlert,
 		}
 	}
 
-	// 3. Encrypted OpenSSL reverse shell
+	// 2. Encrypted OpenSSL reverse shell
 	if reOpenSSLRevShell.Match(data) {
 		return &HeuristicMatch{
 			Name:     "Script_OpenSSL_Reverse_Shell",
@@ -526,7 +535,7 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		}
 	}
 
-	// 4. Interactive bash/sh /dev/tcp or /dev/udp reverse shell
+	// 3. Interactive bash/sh /dev/tcp or /dev/udp reverse shell
 	if reRevShellInteractive.Match(data) {
 		return &HeuristicMatch{
 			Name:     "Script_Reverse_Shell_Interactive",
@@ -536,17 +545,17 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		}
 	}
 
-	// 5. Netcat reverse shell
+	// 4. Netcat reverse shell
 	if reNetcatRevShell.Match(data) {
 		return &HeuristicMatch{
 			Name:     "Script_Netcat_Reverse_Shell",
-			Reason:   fmt.Sprintf("Netcat interactive reverse shell payload (-e /bin/sh) in script %s", filepath.Base(cleaned)),
+			Reason:   fmt.Sprintf("Netcat interactive reverse shell payload in script %s", filepath.Base(cleaned)),
 			Score:    90,
 			Severity: report.SeverityAlert,
 		}
 	}
 
-	// 6. Socat reverse shell (including openssl-connect)
+	// 5. Socat reverse shell (including openssl-connect)
 	if reSocatRevShell.Match(data) {
 		return &HeuristicMatch{
 			Name:     "Script_Socat_Reverse_Shell",
@@ -556,7 +565,7 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		}
 	}
 
-	// 7. Inline interpreter reverse shell (Python, Perl, PHP)
+	// 6. Inline interpreter reverse shell (Python, Perl, PHP, Ruby, Lua, Node)
 	if reInlineScriptRev.Match(data) {
 		return &HeuristicMatch{
 			Name:     "Script_Reverse_Shell_Inline",
@@ -566,7 +575,7 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		}
 	}
 
-	// 8. Generic PHP webshell / backdoor evaluation
+	// 7. Generic PHP webshell / backdoor evaluation
 	if reWebshellGeneric.Match(data) {
 		return &HeuristicMatch{
 			Name:     "Webshell_PHP_Generic_Backdoor",
@@ -576,7 +585,17 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		}
 	}
 
-	// 9. Download and execute dropper (curl | sh)
+	// 8. Webshell behavioral traits (login hash + eval, upload/file manager execution)
+	if reWebshellTraits.Match(data) {
+		return &HeuristicMatch{
+			Name:     "Script_Webshell_Traits",
+			Reason:   fmt.Sprintf("Webshell behavioral traits and command interface in %s", filepath.Base(cleaned)),
+			Score:    70,
+			Severity: report.SeverityWarning,
+		}
+	}
+
+	// 9. Download and execute dropper (curl/wget | sh)
 	if reDownloadAndExec.Match(data) {
 		return &HeuristicMatch{
 			Name:     "Script_Download_And_Execute",
@@ -586,7 +605,7 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		}
 	}
 
-	// 10. Python / Script Ransomware Encryptor (Fernet/AES + file walking + locking/deletion)
+	// 10. Python / Script Ransomware Encryptor
 	if reRansomwareScript.Match(data) {
 		return &HeuristicMatch{
 			Name:     "Script_Python_Ransomware_Encryptor",
@@ -596,7 +615,7 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		}
 	}
 
-	// 11. Data Exfiltration Stealer (socket/HTTP + directory traversal + compression/encoding)
+	// 11. Data Exfiltration Stealer
 	if reDataExfiltration.Match(data) {
 		return &HeuristicMatch{
 			Name:     "Script_Data_Exfiltration_Stealer",
@@ -616,7 +635,89 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		}
 	}
 
+	// 13. Encoded PowerShell command execution
+	if rePowerShellEncoded.Match(data) {
+		return &HeuristicMatch{
+			Name:     "Script_PowerShell_Encoded_Execution",
+			Reason:   fmt.Sprintf("Encoded PowerShell payload execution (-EncodedCommand) in %s", filepath.Base(cleaned)),
+			Score:    85,
+			Severity: report.SeverityAlert,
+		}
+	}
+
+	// 14. Pluggable Authentication Module (PAM) execution hook
+	if rePamExecHook.Match(data) {
+		return &HeuristicMatch{
+			Name:     "Persistence_PAM_Exec_Suspicious",
+			Reason:   fmt.Sprintf("Pluggable Authentication Module (PAM) execution hook targeting volatile/unprivileged path in %s", filepath.Base(cleaned)),
+			Score:    90,
+			Severity: report.SeverityAlert,
+		}
+	}
+
+	// 15. Dynamic Linker Auditing hook (LD_AUDIT / ld.so.audit)
+	if reLinkerAuditHook.Match(data) {
+		return &HeuristicMatch{
+			Name:     "Persistence_Linker_Audit_Hijack",
+			Reason:   fmt.Sprintf("Dynamic linker auditing intercept hook (LD_AUDIT/ld.so.audit) in %s", filepath.Base(cleaned)),
+			Score:    85,
+			Severity: report.SeverityAlert,
+		}
+	}
+
+	// 16. Automated cloud exfiltration tool
+	if reCloudExfilTool.Match(data) {
+		return &HeuristicMatch{
+			Name:     "Script_Cloud_Exfiltration_Tool",
+			Reason:   fmt.Sprintf("Automated cloud exfiltration staging/transfer command in %s", filepath.Base(cleaned)),
+			Score:    80,
+			Severity: report.SeverityWarning,
+		}
+	}
+
 	return nil
 }
 
+// CheckTrojanedPackageBinary checks whether a file in standard system directories
+// has an MD5 checksum mismatch against the package manager database.
+func CheckTrojanedPackageBinary(path string, actualMD5 string, pkgDB pkgdb.PackageDB, cfg *config.Config) *HeuristicMatch {
+	if pkgDB == nil || actualMD5 == "" {
+		return nil
+	}
+	cleaned := filepath.Clean(path)
+	systemDirs := []string{
+		"/bin",
+		"/sbin",
+		"/usr/bin",
+		"/usr/sbin",
+		"/usr/lib",
+		"/usr/libexec",
+		"/lib",
+		"/lib64",
+	}
+	inSystemDir := false
+	for _, sysDir := range systemDirs {
+		if strings.HasPrefix(cleaned, sysDir+"/") || cleaned == sysDir {
+			inSystemDir = true
+			break
+		}
+	}
+	if !inSystemDir {
+		return nil
+	}
 
+	match, expectedMD5, hasDigest := pkgDB.VerifyDigest(cleaned, actualMD5)
+	if hasDigest && !match {
+		score := config.DefaultScoreTrojanedPackageBinary
+		if cfg != nil && cfg.Scan.ScoreTrojanedPackageBinary > 0 {
+			score = cfg.Scan.ScoreTrojanedPackageBinary
+		}
+		return &HeuristicMatch{
+			Name:     "Trojaned_Package_Binary_Modified",
+			Reason:   fmt.Sprintf("System binary MD5 mismatch against package database (expected: %s, actual: %s)", expectedMD5, actualMD5),
+			Score:    score,
+			Severity: report.SeverityAlert,
+		}
+	}
+	return nil
+}

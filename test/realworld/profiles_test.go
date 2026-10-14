@@ -53,8 +53,20 @@ func runProfileAudit(t *testing.T, profileDir string) (*realworld.EnvironmentSna
 		t.Fatalf("LoadSnapshot failed for %s: %v", profileDir, err)
 	}
 
+	if snapshot.ProfileID == realworld.ProfilePrivilegeRestricted {
+		shadowFile := filepath.Join(snapshot.RootFS, "etc/shadow")
+		mapsFile := filepath.Join(snapshot.ProcRoot, "1001/maps")
+		_ = os.Chmod(shadowFile, 0000)
+		_ = os.Chmod(mapsFile, 0000)
+		t.Cleanup(func() {
+			_ = os.Chmod(shadowFile, 0644)
+			_ = os.Chmod(mapsFile, 0644)
+		})
+	}
+
 	cfg := config.NewDefaultConfig()
 	cfg.Scan.DemoRules = true
+	cfg.Scan.TrustInstalledPentestTools = (snapshot.ProfileID == realworld.ProfileWorkstationPentest)
 	cfg.Scan.Root = "/"
 	cfg.Scan.Paths = []string{snapshot.RootFS}
 	cfg.Scan.ExplicitPaths = true

@@ -38,10 +38,10 @@ const (
 )
 
 // ValidateRulesDirTrust enforces strict multi-user directory ownership and permission constraints:
-// - If trustRulesDir is true: explicitly bypasses all trust checks (e.g. for development/testing).
-// - As root (euid 0), verifies directory and all parent directories up to / are root-owned (UID 0)
-//   and not group- or world-writable (perm & 0022 == 0).
-// - As non-root, user rules dirs must be owned by the user (or root) and NOT group/world-writable.
+//   - If trustRulesDir is true: explicitly bypasses all trust checks (e.g. for development/testing).
+//   - As root (euid 0), verifies directory and all parent directories up to / are root-owned (UID 0)
+//     and not group- or world-writable (perm & 0022 == 0).
+//   - As non-root, user rules dirs must be owned by the user (or root) and NOT group/world-writable.
 func ValidateRulesDirTrust(dir string, isRoot bool, currentUID uint32, trustRulesDir bool) (bool, string) {
 	if trustRulesDir {
 		return true, ""

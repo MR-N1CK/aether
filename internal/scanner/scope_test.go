@@ -150,8 +150,8 @@ func TestScanner_QuickRunsAllModules(t *testing.T) {
 	bus.Close()
 	<-done
 
-	// Verify all 6 modules (process, persistence, users, network, kernel, filesystem) ran in quick mode
-	allExpected := []string{"process", "persistence", "users", "network", "kernel", "filesystem"}
+	// Verify all 7 modules (process, persistence, users, network, kernel, container, filesystem) ran in quick mode
+	allExpected := []string{"process", "persistence", "users", "network", "kernel", "container", "filesystem"}
 	startedMap := make(map[string]bool)
 	for _, m := range modulesStarted {
 		startedMap[m] = true

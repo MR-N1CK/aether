@@ -179,14 +179,14 @@ func inspectProfileFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 		if strings.HasPrefix(line, "LD_PRELOAD=") || strings.HasPrefix(line, "export LD_PRELOAD=") {
 			lastSuspiciousLine = line
 			signals = append(signals, &PersistenceSignal{
-				Class:       ClassObfuscation,
-				RuleName:    "Persistence_Profile_LD_PRELOAD",
-				Reason:      "Shell startup file defines LD_PRELOAD dynamic linker interceptor",
-				Score:       cfg.Scan.ScorePersistLoaderPreload,
-				Severity:    report.SeverityWarning,
-				IsStrong:    true,
-				LineNumber:  effectiveLineNum,
-				Snippet:     RedactSnippet(line),
+				Class:      ClassObfuscation,
+				RuleName:   "Persistence_Profile_LD_PRELOAD",
+				Reason:     "Shell startup file defines LD_PRELOAD dynamic linker interceptor",
+				Score:      cfg.Scan.ScorePersistLoaderPreload,
+				Severity:   report.SeverityWarning,
+				IsStrong:   true,
+				LineNumber: effectiveLineNum,
+				Snippet:    RedactSnippet(line),
 			})
 		}
 
@@ -195,14 +195,14 @@ func inspectProfileFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 			if strings.Contains(line, "/tmp") || strings.Contains(line, "/var/tmp") || strings.Contains(line, "/dev/shm") {
 				lastSuspiciousLine = line
 				signals = append(signals, &PersistenceSignal{
-					Class:       ClassExecFromTemp,
-					RuleName:    "Persistence_Profile_Temp_PATH",
-					Reason:      "PATH variable prepends volatile directory (binary hijacking risk)",
-					Score:       cfg.Scan.ScorePersistProfileTemp,
-					Severity:    report.SeverityWarning,
-					IsStrong:    true,
-					LineNumber:  effectiveLineNum,
-					Snippet:     RedactSnippet(line),
+					Class:      ClassExecFromTemp,
+					RuleName:   "Persistence_Profile_Temp_PATH",
+					Reason:     "PATH variable prepends volatile directory (binary hijacking risk)",
+					Score:      cfg.Scan.ScorePersistProfileTemp,
+					Severity:   report.SeverityWarning,
+					IsStrong:   true,
+					LineNumber: effectiveLineNum,
+					Snippet:    RedactSnippet(line),
 				})
 			}
 		}
@@ -211,14 +211,14 @@ func inspectProfileFile(virtPath, rootFS string, cfg *config.Config, pkgDB pkgdb
 		if reAliasPriv.MatchString(line) {
 			lastSuspiciousLine = line
 			signals = append(signals, &PersistenceSignal{
-				Class:       ClassPrivilegeAbuse,
-				RuleName:    "Persistence_Profile_Privileged_Alias",
-				Reason:      "Alias overrides critical security command (sudo/su/ssh credential harvesting risk)",
-				Score:       cfg.Scan.ScorePersistProfileAlias,
-				Severity:    report.SeverityWarning,
-				IsStrong:    true,
-				LineNumber:  effectiveLineNum,
-				Snippet:     RedactSnippet(line),
+				Class:      ClassPrivilegeAbuse,
+				RuleName:   "Persistence_Profile_Privileged_Alias",
+				Reason:     "Alias overrides critical security command (sudo/su/ssh credential harvesting risk)",
+				Score:      cfg.Scan.ScorePersistProfileAlias,
+				Severity:   report.SeverityWarning,
+				IsStrong:   true,
+				LineNumber: effectiveLineNum,
+				Snippet:    RedactSnippet(line),
 			})
 		}
 

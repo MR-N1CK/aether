@@ -31,8 +31,8 @@ func TestComplianceEvaluator_PassCleanProfile(t *testing.T) {
 		},
 		DualUseSoftware: []realworld.DualUseSoftwareCatalogEntry{
 			{
-				ToolName:                "wireshark",
-				PrimaryBinary:           "wireshark",
+				ToolName:               "wireshark",
+				PrimaryBinary:          "wireshark",
 				ExpectedPassiveVerdict: "SAFE",
 			},
 		},

@@ -1,5 +1,12 @@
 package ioc
 
+import (
+	"embed"
+)
+
+//go:embed intel/*.txt
+var embeddedIntelFS embed.FS
+
 const builtinDemoHashes = `# Aether Builtin Benign Demo Hash Indicators
 # Format: <hash> # <description>
 # Harmless test hash for verifying IOC pipeline
@@ -48,4 +55,3 @@ const builtinKnownBenignPatterns = `
 - path_regex: '^/var/tmp/\.mount_.*'
   reason: 'AppImage FUSE mount directory'
 `
-

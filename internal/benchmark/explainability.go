@@ -22,21 +22,21 @@ const (
 
 // ExplainabilityFindingAudit records the 8-question audit results for a single finding.
 type ExplainabilityFindingAudit struct {
-	FindingID       string                             `json:"finding_id"`
-	RuleName        string                             `json:"rule_name"`
-	TargetPath      string                             `json:"target_path"`
-	IsCompliant     bool                               `json:"is_compliant"`
-	QuestionsPassed map[ExplainabilityQuestion]bool    `json:"questions_passed"`
-	MissingElements []string                           `json:"missing_elements,omitempty"`
+	FindingID       string                          `json:"finding_id"`
+	RuleName        string                          `json:"rule_name"`
+	TargetPath      string                          `json:"target_path"`
+	IsCompliant     bool                            `json:"is_compliant"`
+	QuestionsPassed map[ExplainabilityQuestion]bool `json:"questions_passed"`
+	MissingElements []string                        `json:"missing_elements,omitempty"`
 }
 
 // ExplainabilitySummary aggregates compliance across all emitted scan findings.
 type ExplainabilitySummary struct {
-	TotalFindings      int                                `json:"total_findings"`
-	CompliantFindings  int                                `json:"compliant_findings"`
-	ComplianceRate     float64                            `json:"compliance_rate"`
-	QuestionBreakdown  map[ExplainabilityQuestion]float64 `json:"question_breakdown"`
-	FailedAudits       []ExplainabilityFindingAudit       `json:"failed_audits,omitempty"`
+	TotalFindings     int                                `json:"total_findings"`
+	CompliantFindings int                                `json:"compliant_findings"`
+	ComplianceRate    float64                            `json:"compliance_rate"`
+	QuestionBreakdown map[ExplainabilityQuestion]float64 `json:"question_breakdown"`
+	FailedAudits      []ExplainabilityFindingAudit       `json:"failed_audits,omitempty"`
 }
 
 // ExplainabilityAuditor verifies that findings satisfy the Aether 8-question explainability standard.
@@ -51,7 +51,7 @@ func NewExplainabilityAuditor() *ExplainabilityAuditor {
 func (a *ExplainabilityAuditor) AuditFinding(f *report.Finding) ExplainabilityFindingAudit {
 	if f == nil {
 		return ExplainabilityFindingAudit{
-			IsCompliant: false,
+			IsCompliant:     false,
 			MissingElements: []string{"nil finding provided"},
 		}
 	}

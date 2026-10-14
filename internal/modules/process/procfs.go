@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	ErrProcessVanished   = errors.New("process vanished")
-	ErrPermissionDenied  = errors.New("permission denied")
+	ErrProcessVanished  = errors.New("process vanished")
+	ErrPermissionDenied = errors.New("permission denied")
 )
 
 // MapEntry represents a line from /proc/<pid>/maps.
@@ -32,33 +32,36 @@ type MapEntry struct {
 
 // ProcessInfo holds metadata gathered by reading /proc/<pid>/* read-only.
 type ProcessInfo struct {
-	PID          int
-	Exe          string
-	ExeStat      *unix.Stat_t
-	Cwd          string
-	Cmdline      []string
-	Comm         string
-	Uid          uint32
-	Euid         uint32
-	Gid          uint32
-	Egid         uint32
-	PPid         int
-	Flags        uint32
-	IsKThread    bool
-	IsZombie     bool
-	ExeReadable  bool
-	ReadableExe  bool
-	CwdReadable  bool
-	CmdReadable  bool
-	MapsReadable bool
-	ReadableMaps bool
-	FDsReadable  bool
-	ReadableFDs  bool
-	MntNs        string
-	NetNs        string
-	Maps         []MapEntry
-	OpenSockets  []uint64
-	CoverageGaps []string
+	PID             int
+	Exe             string
+	ExeStat         *unix.Stat_t
+	Cwd             string
+	Cmdline         []string
+	Comm            string
+	Uid             uint32
+	Euid            uint32
+	Gid             uint32
+	Egid            uint32
+	PPid            int
+	Flags           uint32
+	IsKThread       bool
+	IsZombie        bool
+	ExeReadable     bool
+	CwdReadable     bool
+	CmdReadable     bool
+	MapsReadable    bool
+	FDsReadable     bool
+	MntNs           string
+	NetNs           string
+	Maps            []MapEntry
+	OpenSockets     []uint64
+	StdinTarget     string
+	StdoutTarget    string
+	StderrTarget    string
+	CapEff          uint64
+	Environ         map[string]string
+	EnvironReadable bool
+	CoverageGaps    []string
 }
 
 // ReadProcessInfo gathers metadata for a PID from /proc/<pid>.
@@ -90,6 +93,7 @@ func ReadProcessInfoWithRoot(procRoot string, pid int) (*ProcessInfo, error) {
 		Cmdline:      make([]string, 0),
 		Maps:         make([]MapEntry, 0),
 		OpenSockets:  make([]uint64, 0),
+		Environ:      make(map[string]string),
 		CoverageGaps: make([]string, 0),
 	}
 
@@ -143,7 +147,6 @@ func ReadProcessInfoWithRoot(procRoot string, pid int) (*ProcessInfo, error) {
 	exeTarget, err := os.Readlink(filepath.Join(procDir, "exe"))
 	if err == nil {
 		info.ExeReadable = true
-		info.ReadableExe = true
 		info.Exe = exeTarget
 		var st unix.Stat_t
 		if sErr := unix.Stat(filepath.Join(procDir, "exe"), &st); sErr == nil {
@@ -174,7 +177,6 @@ func ReadProcessInfoWithRoot(procRoot string, pid int) (*ProcessInfo, error) {
 	mapsBytes, err := os.ReadFile(filepath.Join(procDir, "maps"))
 	if err == nil {
 		info.MapsReadable = true
-		info.ReadableMaps = true
 		info.Maps = ParseMaps(string(mapsBytes))
 	} else if os.IsPermission(err) {
 		info.CoverageGaps = append(info.CoverageGaps, fmt.Sprintf("maps permission denied for pid %d", pid))
@@ -184,18 +186,52 @@ func ReadProcessInfoWithRoot(procRoot string, pid int) (*ProcessInfo, error) {
 	fdEntries, fdErr := os.ReadDir(filepath.Join(procDir, "fd"))
 	if fdErr == nil {
 		info.FDsReadable = true
-		info.ReadableFDs = true
 		for _, fdEntry := range fdEntries {
 			linkTarget, err := os.Readlink(filepath.Join(procDir, "fd", fdEntry.Name()))
-			if err == nil && strings.HasPrefix(linkTarget, "socket:[") && strings.HasSuffix(linkTarget, "]") {
-				inodeStr := linkTarget[8 : len(linkTarget)-1]
-				if inode, err := strconv.ParseUint(inodeStr, 10, 64); err == nil {
-					info.OpenSockets = append(info.OpenSockets, inode)
+			if err == nil {
+				switch fdEntry.Name() {
+				case "0":
+					info.StdinTarget = linkTarget
+				case "1":
+					info.StdoutTarget = linkTarget
+				case "2":
+					info.StderrTarget = linkTarget
+				}
+				if strings.HasPrefix(linkTarget, "socket:[") && strings.HasSuffix(linkTarget, "]") {
+					inodeStr := linkTarget[8 : len(linkTarget)-1]
+					if inode, err := strconv.ParseUint(inodeStr, 10, 64); err == nil {
+						info.OpenSockets = append(info.OpenSockets, inode)
+					}
 				}
 			}
 		}
 	} else if os.IsPermission(fdErr) {
 		info.CoverageGaps = append(info.CoverageGaps, fmt.Sprintf("fd directory permission denied for pid %d", pid))
+	}
+
+	// 9. Read environ (bounded by 128KB limit)
+	environPath := filepath.Join(procDir, "environ")
+	if envF, err := os.Open(environPath); err == nil {
+		lr := io.LimitReader(envF, 128*1024)
+		envData, rErr := io.ReadAll(lr)
+		envF.Close()
+		if rErr == nil && len(envData) > 0 {
+			info.EnvironReadable = true
+			entries := bytes.Split(envData, []byte{0})
+			for _, entry := range entries {
+				if len(entry) == 0 {
+					continue
+				}
+				parts := bytes.SplitN(entry, []byte{'='}, 2)
+				if len(parts) == 2 {
+					info.Environ[string(parts[0])] = string(parts[1])
+				} else if len(parts) == 1 {
+					info.Environ[string(parts[0])] = ""
+				}
+			}
+		}
+	} else if os.IsPermission(err) {
+		info.CoverageGaps = append(info.CoverageGaps, fmt.Sprintf("environ permission denied for pid %d", pid))
 	}
 
 	return info, nil
@@ -206,7 +242,7 @@ func (p *ProcessInfo) IsFullyReadable() bool {
 	if p == nil {
 		return false
 	}
-	return (p.ExeReadable || p.ReadableExe) && p.CwdReadable && p.CmdReadable && (p.MapsReadable || p.ReadableMaps)
+	return p.ExeReadable && p.CwdReadable && p.CmdReadable && p.MapsReadable
 }
 
 // IsKernelThread determines if the process is a kernel thread.
@@ -294,6 +330,10 @@ func parseStatus(content string, info *ProcessInfo) {
 				if e, err := strconv.ParseUint(fields[2], 10, 32); err == nil {
 					info.Egid = uint32(e)
 				}
+			}
+		case "CapEff:":
+			if capVal, err := strconv.ParseUint(fields[1], 16, 64); err == nil {
+				info.CapEff = capVal
 			}
 		}
 	}

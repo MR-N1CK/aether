@@ -16,12 +16,12 @@ import (
 
 // ShadowEntry holds non-sensitive metadata parsed from an /etc/shadow record.
 type ShadowEntry struct {
-	Username       string
-	IsEmpty        bool
-	IsLocked       bool
-	IsLegacyMD5    bool
-	IsLegacyDES    bool
-	HashType       string // e.g. "sha512", "yescrypt", "md5", "des", "empty", "locked"
+	Username    string
+	IsEmpty     bool
+	IsLocked    bool
+	IsLegacyMD5 bool
+	IsLegacyDES bool
+	HashType    string // e.g. "sha512", "yescrypt", "md5", "des", "empty", "locked"
 }
 
 // CheckShadow inspects /etc/shadow for empty password fields and legacy weak hashes.

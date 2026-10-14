@@ -224,10 +224,10 @@ func (eng *Engine) Entries() []AckEntry {
 }
 
 // Evaluate checks a finding against acknowledged entries.
-// - ALERT, IOC hits, and high-confidence primitives are NEVER acknowledged.
-// - If matched entry pin hashes match current file/target hashes:
-//   downgrades to report.SeverityInfo, marks f.Metadata["acknowledged"] = true.
-// - If pin hashes differ: voids acknowledgment with reason "acknowledged file was modified".
+//   - ALERT, IOC hits, and high-confidence primitives are NEVER acknowledged.
+//   - If matched entry pin hashes match current file/target hashes:
+//     downgrades to report.SeverityInfo, marks f.Metadata["acknowledged"] = true.
+//   - If pin hashes differ: voids acknowledgment with reason "acknowledged file was modified".
 func (eng *Engine) Evaluate(f *report.Finding, rootFS string) bool {
 	if f == nil {
 		return false

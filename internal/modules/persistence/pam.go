@@ -179,9 +179,11 @@ func inspectPAMModuleDirs(rootFS string, pkgDB pkgdb.PackageDB, cov *CheckCovera
 
 	dirs := []string{
 		"/lib/security",
+		"/lib64/security",
 		"/lib/x86_64-linux-gnu/security",
 		"/lib/aarch64-linux-gnu/security",
 		"/usr/lib/security",
+		"/usr/lib64/security",
 		"/usr/lib/x86_64-linux-gnu/security",
 		"/usr/lib/aarch64-linux-gnu/security",
 	}

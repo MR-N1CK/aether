@@ -524,4 +524,3 @@ func extractPathsFromKeyLine(line, comment string) []string {
 
 	return paths
 }
-

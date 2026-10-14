@@ -141,16 +141,27 @@ func TestDualUseToolDiscrimination_ActiveWeaponization(t *testing.T) {
 		t.Fatalf("Scanner.Run: %v", err)
 	}
 
-	findings := rep.Findings()
-	t.Logf("Observed %d findings on active weaponized nc shell", len(findings))
-
+	deadline := time.Now().Add(2 * time.Second)
+	var findings []report.Finding
 	foundAlert := false
+	for {
+		findings = rep.Findings()
+		for _, f := range findings {
+			if f.Severity == report.SeverityAlert || f.Verdict == report.VerdictMalicious {
+				foundAlert = true
+				break
+			}
+		}
+		if foundAlert || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Logf("Observed %d findings on active weaponized nc shell", len(findings))
 	for _, f := range findings {
 		t.Logf("  finding: rule=%s sev=%s verdict=%s path=%s reason=%s",
 			f.RuleName, f.Severity, f.Verdict, f.Path, f.Reason)
-		if f.Severity == report.SeverityAlert || f.Verdict == report.VerdictMalicious {
-			foundAlert = true
-		}
 	}
 
 	if !foundAlert {

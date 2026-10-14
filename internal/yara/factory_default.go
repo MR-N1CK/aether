@@ -24,4 +24,3 @@ func VersionInfo() string {
 func ValidateRulesDir(dir string) (*ValidationResult, error) {
 	return nil, errors.New("YARA engine is not compiled into this binary (compile with make build-yara-static or use -tags yara)")
 }
-

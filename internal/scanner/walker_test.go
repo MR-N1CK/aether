@@ -457,7 +457,7 @@ func (m *mockYaraEngine) Coverage() events.YARACoverageStats {
 		NotRunReason:    m.notRunReason,
 	}
 }
-func (m *mockYaraEngine) Close() error       { return nil }
+func (m *mockYaraEngine) Close() error        { return nil }
 func (m *mockYaraEngine) RecordRuleFileSeen() { m.ruleFilesSeen++ }
 func (m *mockYaraEngine) RecordSkipOversize() { m.skippedOversize++ }
 func (m *mockYaraEngine) Enabled() bool       { return m.notRunReason == "" }
@@ -1492,7 +1492,7 @@ func TestTopRules_RuleLevelSeverity(t *testing.T) {
 	// Create composite finding with tunnel (WARNING) and unowned-unit (NOTICE)
 	f := report.NewFinding("persistence", report.SeverityWarning, "/home/user/.config/systemd/user/tunnel.service", "tunnel detected", "Persistence_Autostart_Tunnel, Persistence_Systemd_Unowned_Unit")
 	f.Metadata["rule_severities"] = map[string]string{
-		"Persistence_Autostart_Tunnel":      "WARNING",
+		"Persistence_Autostart_Tunnel":     "WARNING",
 		"Persistence_Systemd_Unowned_Unit": "NOTICE",
 	}
 
@@ -1987,7 +1987,7 @@ func TestScanner_ScanStarted_BuildInfoLine(t *testing.T) {
 
 func TestScanner_YaraTrustRefusalNotices(t *testing.T) {
 	checks := []struct {
-		failingReason string
+		failingReason  string
 		expectedNotice string
 	}{
 		{
@@ -2163,7 +2163,7 @@ func TestScanner_OversizeStreamingHash(t *testing.T) {
 
 	cfg := config.NewDefaultConfig()
 	cfg.Scan.Paths = []string{tmpDir}
-	cfg.Scan.MaxFileSize = 50 * 1024       // 50KB: file exceeds MaxFileSize
+	cfg.Scan.MaxFileSize = 50 * 1024      // 50KB: file exceeds MaxFileSize
 	cfg.Scan.HashOversizeMax = 200 * 1024 // 200KB: file is under HashOversizeMax
 
 	bus := events.NewEventBus()
@@ -2327,6 +2327,9 @@ func (m *mockPkgDB) Owner(path string) (string, bool) {
 }
 func (m *mockPkgDB) IsAvailable() bool  { return true }
 func (m *mockPkgDB) StatusNote() string { return "mock" }
+func (m *mockPkgDB) VerifyDigest(path string, actualMD5 string) (bool, string, bool) {
+	return true, "", false
+}
 
 func TestScanner_YARA_PackageOwnership_Downgrade(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -2688,8 +2691,3 @@ func TestScanner_HeuristicSafety_GhostKeyNotDowngraded(t *testing.T) {
 		t.Errorf("expected rule File_Suspicious_Private_Key_Location, got %s", f.RuleName)
 	}
 }
-
-
-
-
-

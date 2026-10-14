@@ -2,6 +2,7 @@ package process_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,8 +74,8 @@ func TestCheckFilelessExecution(t *testing.T) {
 			{StartAddr: 0x3000, EndAddr: 0x4000, Perms: "rw-p", Pathname: "[heap]"},
 		},
 	}
-	if sig := process.CheckFilelessExecution(infoJIT, cfg); sig != nil {
-		t.Errorf("plain JIT mapping should NOT be flagged, got %+v", sig)
+	if sigs := process.CheckFilelessExecution(infoJIT, cfg); len(sigs) != 0 {
+		t.Errorf("plain JIT mapping should NOT be flagged, got %+v", sigs)
 	}
 
 	// 2. memfd mapping with unreadable memory -> records coverage gap instead of speculative finding
@@ -84,12 +85,32 @@ func TestCheckFilelessExecution(t *testing.T) {
 			{StartAddr: 0x1000, EndAddr: 0x2000, Perms: "r-xp", Pathname: "memfd:malware (deleted)"},
 		},
 	}
-	sigMemfd := process.CheckFilelessExecution(infoMemfd, cfg)
-	if sigMemfd != nil {
-		t.Fatalf("expected nil signal (coverage gap) for unreadable memfd mapping, got %+v", sigMemfd)
+	sigsMemfd := process.CheckFilelessExecution(infoMemfd, cfg)
+	if len(sigsMemfd) != 0 {
+		t.Fatalf("expected no signals (coverage gap) for unreadable memfd mapping, got %+v", sigsMemfd)
 	}
 	if len(infoMemfd.CoverageGaps) == 0 {
 		t.Fatalf("expected coverage gap recorded for unreadable memfd mapping")
+	}
+
+	// 3. Multi-mapping fixture: two mappings with the same memfd inode (deduped)
+	// Using current process PID and /proc/self/exe inode to test ELF header recognition
+	var stat unix.Stat_t
+	if err := unix.Stat(fmt.Sprintf("/proc/%d/exe", os.Getpid()), &stat); err == nil {
+		infoMulti := &process.ProcessInfo{
+			PID:     os.Getpid(),
+			ExeStat: &stat,
+			Maps: []process.MapEntry{
+				{StartAddr: 0x400000, EndAddr: 0x401000, Perms: "r-xp", Pathname: "memfd:payload (deleted)", Inode: stat.Ino},
+				{StartAddr: 0x500000, EndAddr: 0x501000, Perms: "r-xp", Pathname: "memfd:payload (deleted)", Inode: stat.Ino}, // same inode -> deduplicated
+			},
+		}
+		sigsMulti := process.CheckFilelessExecution(infoMulti, cfg)
+		if len(sigsMulti) != 1 {
+			t.Errorf("expected exactly 1 signal due to inode deduplication, got %d (%+v)", len(sigsMulti), sigsMulti)
+		} else if sigsMulti[0].RuleName != "Process_Fileless_Memory_ELF" {
+			t.Errorf("expected Process_Fileless_Memory_ELF, got %s", sigsMulti[0].RuleName)
+		}
 	}
 }
 
@@ -212,7 +233,7 @@ func TestHiddenPIDTwoPassFiltering(t *testing.T) {
 	// Candidate 300: missing in pass 1 AND missing in pass 2 AND active in stat -> CONFIRMED
 	discrepantPass1 := []int{100, 200, 300}
 	readdirPass2 := map[int]bool{
-		100: true,  // Now in readdir
+		100: true, // Now in readdir
 		400: true,
 	}
 
@@ -691,9 +712,9 @@ type testFindingReporter struct {
 func (r *testFindingReporter) Report(f report.Finding) {
 	r.findings = append(r.findings, f)
 }
-func (r *testFindingReporter) Findings() []report.Finding        { return r.findings }
+func (r *testFindingReporter) Findings() []report.Finding         { return r.findings }
 func (r *testFindingReporter) Summary() (int, int, int, int, int) { return 0, 0, 0, 0, 0 }
-func (r *testFindingReporter) Close() error                      { return nil }
+func (r *testFindingReporter) Close() error                       { return nil }
 
 func TestProcessModule_SelfPIDExclusion(t *testing.T) {
 	mod := process.NewModule(nil, nil, nil)
@@ -758,3 +779,217 @@ func TestConsolidateProcessSignals_RuleSeverities(t *testing.T) {
 	}
 }
 
+func TestCheckProcessReverseShell(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// 1. Bash shell with stdin/stdout redirected to socket -> ALERT
+	infoRev := &process.ProcessInfo{
+		PID:          1337,
+		Comm:         "bash",
+		Exe:          "/usr/bin/bash",
+		StdinTarget:  "socket:[45678]",
+		StdoutTarget: "socket:[45678]",
+	}
+	sigRev := process.CheckProcessReverseShell(infoRev, cfg)
+	if sigRev == nil {
+		t.Fatalf("expected signal for reverse shell")
+	}
+	if sigRev.Severity != report.SeverityAlert {
+		t.Errorf("expected ALERT severity, got %v", sigRev.Severity)
+	}
+	if sigRev.Score != 95 {
+		t.Errorf("expected score 95, got %d", sigRev.Score)
+	}
+	if sigRev.RuleName != "Process_Interactive_Reverse_Shell" {
+		t.Errorf("expected rule Process_Interactive_Reverse_Shell, got %s", sigRev.RuleName)
+	}
+
+	// 2. Python process with stdout redirected to socket -> ALERT
+	infoPy := &process.ProcessInfo{
+		PID:          1338,
+		Comm:         "python3",
+		Exe:          "/usr/bin/python3",
+		StdoutTarget: "socket:[45679]",
+	}
+	sigPy := process.CheckProcessReverseShell(infoPy, cfg)
+	if sigPy == nil {
+		t.Fatalf("expected signal for python reverse shell")
+	}
+	if sigPy.Severity != report.SeverityAlert {
+		t.Errorf("expected ALERT severity, got %v", sigPy.Severity)
+	}
+
+	// 3. Normal interactive shell with tty -> nil
+	infoBenign := &process.ProcessInfo{
+		PID:          1339,
+		Comm:         "bash",
+		Exe:          "/usr/bin/bash",
+		StdinTarget:  "/dev/pts/1",
+		StdoutTarget: "/dev/pts/1",
+	}
+	if sig := process.CheckProcessReverseShell(infoBenign, cfg); sig != nil {
+		t.Errorf("expected nil for benign shell, got %+v", sig)
+	}
+
+	// 4. Non-shell process with socket (e.g. nginx) -> nil
+	infoNginx := &process.ProcessInfo{
+		PID:          1340,
+		Comm:         "nginx",
+		Exe:          "/usr/sbin/nginx",
+		StdinTarget:  "socket:[45680]",
+		StdoutTarget: "socket:[45680]",
+	}
+	if sig := process.CheckProcessReverseShell(infoNginx, cfg); sig != nil {
+		t.Errorf("expected nil for non-shell process, got %+v", sig)
+	}
+}
+
+func TestCheckContainerCapabilities(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	selfMntNs := "mnt:[4026531840]"
+	containerMntNs := "mnt:[4026532888]"
+
+	// 1. Container process with CAP_SYS_ADMIN (bit 21: 1 << 21 = 0x200000) -> WARNING
+	infoPriv := &process.ProcessInfo{
+		PID:    2001,
+		Comm:   "dockerd_payload",
+		MntNs:  containerMntNs,
+		CapEff: uint64(1 << 21),
+	}
+	sigPriv := process.CheckContainerCapabilities(infoPriv, selfMntNs, cfg)
+	if sigPriv == nil {
+		t.Fatalf("expected signal for privileged container process")
+	}
+	if sigPriv.Severity != report.SeverityWarning {
+		t.Errorf("expected WARNING severity, got %v", sigPriv.Severity)
+	}
+	if sigPriv.Score != 75 {
+		t.Errorf("expected score 75, got %d", sigPriv.Score)
+	}
+	if sigPriv.RuleName != "Container_Dangerous_Capability_Overprivilege" {
+		t.Errorf("expected rule Container_Dangerous_Capability_Overprivilege, got %s", sigPriv.RuleName)
+	}
+
+	// 2. Host process with CAP_SYS_ADMIN (matching selfMntNs) -> nil (expected on host)
+	infoHost := &process.ProcessInfo{
+		PID:    1,
+		Comm:   "systemd",
+		MntNs:  selfMntNs,
+		CapEff: uint64(1 << 21),
+	}
+	if sig := process.CheckContainerCapabilities(infoHost, selfMntNs, cfg); sig != nil {
+		t.Errorf("expected nil for host process, got %+v", sig)
+	}
+
+	// 3. Unprivileged container process -> nil
+	infoUnpriv := &process.ProcessInfo{
+		PID:    2002,
+		Comm:   "web_server",
+		MntNs:  containerMntNs,
+		CapEff: 0,
+	}
+	if sig := process.CheckContainerCapabilities(infoUnpriv, selfMntNs, cfg); sig != nil {
+		t.Errorf("expected nil for unprivileged container process, got %+v", sig)
+	}
+}
+
+func TestCheckProcessEnviron(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// 1. LD_PRELOAD injection -> ALERT (score 90)
+	infoPreload := &process.ProcessInfo{
+		PID:  1234,
+		Comm: "evil_app",
+		Environ: map[string]string{
+			"LD_PRELOAD": "/lib/libhook.so",
+			"PATH":       "/bin:/usr/bin",
+		},
+	}
+	sigs := process.CheckProcessEnviron(infoPreload, cfg)
+	if len(sigs) != 1 {
+		t.Fatalf("expected 1 signal for LD_PRELOAD, got %d", len(sigs))
+	}
+	if sigs[0].RuleName != "Process_Environ_LDPreload" || sigs[0].Severity != report.SeverityAlert || sigs[0].Score != 90 {
+		t.Errorf("unexpected LD_PRELOAD signal: %+v", sigs[0])
+	}
+
+	// 2. Anti-forensic history suppression -> WARNING (score 70)
+	infoAntiForensic := &process.ProcessInfo{
+		PID:  1235,
+		Comm: "bash",
+		Environ: map[string]string{
+			"HISTFILE": "/dev/null",
+			"HISTSIZE": "0",
+		},
+	}
+	sigs = process.CheckProcessEnviron(infoAntiForensic, cfg)
+	if len(sigs) != 1 {
+		t.Fatalf("expected 1 signal for anti-forensic environ, got %d", len(sigs))
+	}
+	if sigs[0].RuleName != "Process_Environ_AntiForensic" || sigs[0].Severity != report.SeverityWarning || sigs[0].Score != 70 {
+		t.Errorf("unexpected anti-forensic signal: %+v", sigs[0])
+	}
+
+	// 3. C2 Framework indicator -> WARNING (score 75)
+	infoC2 := &process.ProcessInfo{
+		PID:  1236,
+		Comm: "implant",
+		Environ: map[string]string{
+			"SLIVER_CANARY": "xyz",
+		},
+	}
+	sigs = process.CheckProcessEnviron(infoC2, cfg)
+	if len(sigs) != 1 {
+		t.Fatalf("expected 1 signal for C2 artifact, got %d", len(sigs))
+	}
+	if sigs[0].RuleName != "Process_Environ_C2_Artifact" || sigs[0].Severity != report.SeverityWarning || sigs[0].Score != 75 {
+		t.Errorf("unexpected C2 signal: %+v", sigs[0])
+	}
+
+	// 4. Benign environment -> nil
+	infoBenign := &process.ProcessInfo{
+		PID:  1237,
+		Comm: "systemd",
+		Environ: map[string]string{
+			"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin",
+			"HOME": "/root",
+		},
+	}
+	sigs = process.CheckProcessEnviron(infoBenign, cfg)
+	if len(sigs) != 0 {
+		t.Errorf("expected 0 signals for benign environment, got %d", len(sigs))
+	}
+}
+
+func TestReadProcessInfo_EnvironParsing(t *testing.T) {
+	tmpDir := t.TempDir()
+	procDir := filepath.Join(tmpDir, "9999")
+	if err := os.MkdirAll(procDir, 0755); err != nil {
+		t.Fatalf("failed creating test proc dir: %v", err)
+	}
+
+	_ = os.WriteFile(filepath.Join(procDir, "comm"), []byte("testproc\n"), 0644)
+	_ = os.WriteFile(filepath.Join(procDir, "status"), []byte("Name:\ttestproc\nPid:\t9999\nPPid:\t1\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\n"), 0644)
+	_ = os.WriteFile(filepath.Join(procDir, "stat"), []byte("9999 (testproc) S 1 9999 9999 0 -1 4194304 0 0 0 0 0 0 0 0 20 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"), 0644)
+	_ = os.WriteFile(filepath.Join(procDir, "cmdline"), []byte("testproc\x00arg1\x00"), 0644)
+
+	environRaw := []byte("FOO=BAR\x00HISTFILE=/dev/null\x00EMPTY=\x00JUSTKEY\x00")
+	_ = os.WriteFile(filepath.Join(procDir, "environ"), environRaw, 0644)
+
+	info, err := process.ReadProcessInfoWithRoot(tmpDir, 9999)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !info.EnvironReadable {
+		t.Errorf("expected EnvironReadable to be true")
+	}
+	if info.Environ["FOO"] != "BAR" {
+		t.Errorf("expected FOO=BAR, got %q", info.Environ["FOO"])
+	}
+	if info.Environ["HISTFILE"] != "/dev/null" {
+		t.Errorf("expected HISTFILE=/dev/null, got %q", info.Environ["HISTFILE"])
+	}
+	if _, ok := info.Environ["JUSTKEY"]; !ok {
+		t.Errorf("expected JUSTKEY to be present in Environ map")
+	}
+}

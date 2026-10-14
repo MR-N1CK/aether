@@ -19,34 +19,37 @@ func (m *mockPkgDB) Owner(path string) (string, bool) {
 	return owner, ok
 }
 
-func (m *mockPkgDB) IsAvailable() bool { return true }
+func (m *mockPkgDB) IsAvailable() bool  { return true }
 func (m *mockPkgDB) StatusNote() string { return "mock db" }
+func (m *mockPkgDB) VerifyDigest(path string, actualMD5 string) (bool, string, bool) {
+	return true, "", false
+}
 
 func TestDetermineVerdict_Matrix(t *testing.T) {
 	pkgDB := &mockPkgDB{
 		owners: map[string]string{
 			"/usr/lib/python3/dist-packages/elasticsearch.dist-info/METADATA": "python3-elasticsearch",
 			"/usr/lib/python3/dist-packages/twisted/test/test_fdset.py":       "python3-twisted",
-			"/usr/sbin/nginx":                                                "nginx",
-			"/usr/bin/curl":                                                  "curl",
+			"/usr/sbin/nginx": "nginx",
+			"/usr/bin/curl":   "curl",
 		},
 	}
 
 	tests := []struct {
-		name                 string
-		path                 string
-		ruleName             string
-		reason               string
-		isExec               bool
-		isDoc                bool
-		isTestFixture        bool
-		corroboration        []string
-		expectedVerdict      report.Verdict
-		expectedSeverity     report.Severity
-		expectedConfidence   report.Confidence
-		expectedPkgStatus    string
-		expectedStrength     report.EvidenceStrength
-		expectedProfile      string
+		name               string
+		path               string
+		ruleName           string
+		reason             string
+		isExec             bool
+		isDoc              bool
+		isTestFixture      bool
+		corroboration      []string
+		expectedVerdict    report.Verdict
+		expectedSeverity   report.Severity
+		expectedConfidence report.Confidence
+		expectedPkgStatus  string
+		expectedStrength   report.EvidenceStrength
+		expectedProfile    string
 	}{
 		{
 			name:               "Direct malware on unowned path",

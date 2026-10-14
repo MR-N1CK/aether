@@ -25,6 +25,7 @@ import (
 
 	"aether/internal/config"
 	"aether/internal/events"
+	"aether/internal/ioc"
 	"aether/internal/modules/persistence"
 	"aether/internal/realworld"
 	"aether/internal/report"
@@ -53,33 +54,35 @@ type globalFlags struct {
 	quiet      bool
 	plain      bool
 	noAnim     bool
+	noColor    bool
 }
 
 type scanCmdFlags struct {
-	paths             []string
-	root              string
-	excludes          []string
-	quick             bool
-	full              bool
-	maxFileSize     int64
-	jsonOut           string
-	htmlOut           string
-	noReport          bool
-	redactHosts       bool
-	maxReportFindings int
-	threads           int
-	nice            int
-	iocDir          string
-	allowlist       string
-	oneFileSystem   bool
+	paths                      []string
+	root                       string
+	excludes                   []string
+	quick                      bool
+	full                       bool
+	maxFileSize                int64
+	jsonOut                    string
+	htmlOut                    string
+	noReport                   bool
+	redactHosts                bool
+	maxReportFindings          int
+	threads                    int
+	nice                       int
+	iocDir                     string
+	iocFile                    string
+	allowlist                  string
+	oneFileSystem              bool
 	rulesDir                   string
 	trustRulesDir              bool
 	trustInstalledPentestTools bool
 	yaraMaxFileSize            int64
 	demoRules                  bool
-	modules         []string
-	fileTimeout     time.Duration
-	hashOversizeMax int64
+	modules                    []string
+	fileTimeout                time.Duration
+	hashOversizeMax            int64
 }
 
 func isTerminal() bool {
@@ -101,11 +104,12 @@ func attachScanFlags(cmd *cobra.Command, sFlags *scanCmdFlags) {
 	cmd.Flags().IntVarP(&sFlags.threads, "threads", "t", runtime.NumCPU(), "Worker pool concurrency")
 	cmd.Flags().IntVar(&sFlags.nice, "nice", config.DefaultNice, "CPU scheduling priority (-20 to 19, higher = lower priority)")
 	cmd.Flags().StringVar(&sFlags.iocDir, "ioc-dir", "", "Custom directory containing IOC signature files (.txt, .yaml)")
+	cmd.Flags().StringVar(&sFlags.iocFile, "ioc-file", "", "Custom single IOC signature file (.txt, .hashes, .ips, .yaml)")
 	cmd.Flags().StringVar(&sFlags.allowlist, "allowlist", "", "Path to trusted SHA256 allowlist file")
 	cmd.Flags().BoolVar(&sFlags.oneFileSystem, "one-file-system", false, "Do not cross filesystem mount boundaries (default on for --full)")
 	cmd.Flags().StringVar(&sFlags.rulesDir, "rules-dir", "", "Custom directory containing YARA rules (*.yar, *.yara)")
 	cmd.Flags().BoolVar(&sFlags.trustRulesDir, "trust-rules-dir", false, "Explicitly trust rules directory without ownership/permission checks (development/testing only)")
-	cmd.Flags().BoolVar(&sFlags.trustInstalledPentestTools, "trust-installed-pentest-tools", true, "Downgrade YARA findings in well-known pentest tool directories to INFO (for pentest workstations/VMs; disable on suspect end-user systems)")
+	cmd.Flags().BoolVar(&sFlags.trustInstalledPentestTools, "trust-installed-pentest-tools", false, "Downgrade YARA findings in well-known pentest tool directories to INFO (opt-in for pentest workstations/VMs; keep disabled for suspect endpoints)")
 	cmd.Flags().Int64Var(&sFlags.yaraMaxFileSize, "yara-max-filesize", config.DefaultYaraMaxFileSize, "Maximum file size in bytes for in-memory YARA scanning (default: 20MB); files above this are stream-hashed but skip YARA")
 	cmd.Flags().BoolVar(&sFlags.demoRules, "demo-rules", false, "Load synthetic demonstration YARA rules (harmless EICAR/marker patterns)")
 	cmd.Flags().StringSliceVar(&sFlags.modules, "modules", nil, "Comma-separated list of modules to run (filesystem, process, persistence, users, network, kernel)")
@@ -192,6 +196,9 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 	}
 	if cmd.Flags().Changed("ioc-dir") {
 		cfg.Scan.IOCDir = sFlags.iocDir
+	}
+	if cmd.Flags().Changed("ioc-file") {
+		cfg.Scan.IOCFile = sFlags.iocFile
 	}
 	if cmd.Flags().Changed("allowlist") {
 		cfg.Scan.AllowlistPath = sFlags.allowlist
@@ -287,14 +294,14 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 		mode = "full"
 	}
 
-	th := theme.NewTheme(theme.DetectNoColor())
+	th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor())
 
 	if usePlain {
 		var outWriter io.Writer = os.Stdout
 		if sFlags.jsonOut == "-" {
 			outWriter = os.Stderr
 		}
-		consumer := plain.NewConsumer(outWriter, th, gFlags.verbose)
+		consumer := plain.NewConsumer(outWriter, th, gFlags.verbose).WithQuiet(gFlags.quiet)
 		plainSub := bus.Subscribe()
 		defer plainSub.Close()
 
@@ -312,7 +319,15 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 				greenStyle = lipgloss.NewStyle().Bold(true)
 				boldStyle = lipgloss.NewStyle().Bold(true)
 			}
-			fmt.Fprintf(outWriter, "\n  %s %s: %s\n\n", greenStyle.Render("✓"), boldStyle.Render("Executive HTML Report"), cfg.Scan.HTMLOut)
+			absPath, err := filepath.Abs(cfg.Scan.HTMLOut)
+			if err != nil {
+				absPath = cfg.Scan.HTMLOut
+			}
+			reportLink := cfg.Scan.HTMLOut
+			if !th.NoColor && isTerminal() {
+				reportLink = fmt.Sprintf("\x1b]8;;file://%s\x1b\\%s\x1b]8;;\x1b\\", absPath, cfg.Scan.HTMLOut)
+			}
+			fmt.Fprintf(outWriter, "\n  %s %s: %s\n\n", greenStyle.Render("✓"), boldStyle.Render("Executive HTML Report"), reportLink)
 		}
 		return scanErr
 	}
@@ -336,13 +351,21 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 			greenStyle = lipgloss.NewStyle().Bold(true)
 			boldStyle = lipgloss.NewStyle().Bold(true)
 		}
-		fmt.Printf("\n  %s %s: %s\n\n", greenStyle.Render("✓"), boldStyle.Render("Executive HTML Report"), cfg.Scan.HTMLOut)
+		absPath, err := filepath.Abs(cfg.Scan.HTMLOut)
+		if err != nil {
+			absPath = cfg.Scan.HTMLOut
+		}
+		reportLink := cfg.Scan.HTMLOut
+		if !th.NoColor && isTerminal() {
+			reportLink = fmt.Sprintf("\x1b]8;;file://%s\x1b\\%s\x1b]8;;\x1b\\", absPath, cfg.Scan.HTMLOut)
+		}
+		fmt.Printf("\n  %s %s: %s\n\n", greenStyle.Render("✓"), boldStyle.Render("Executive HTML Report"), reportLink)
 	}
 	return tuiErr
 }
 
 func runInteractiveLauncher(cmd *cobra.Command, gFlags *globalFlags, sFlags *scanCmdFlags) error {
-	th := theme.NewTheme(theme.DetectNoColor())
+	th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor())
 
 	res, err := tui.RunInteractiveLauncher(th)
 	if err != nil {
@@ -469,6 +492,7 @@ scanner inspired by THOR Lite. It executes read-only inspections utilizing IOC
 matching and YARA signature engines without altering scanned systems.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Version:       version,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				// If a path was passed directly like: aether /var/www
@@ -487,6 +511,7 @@ matching and YARA signature engines without altering scanned systems.`,
 	rootCmd.PersistentFlags().BoolVarP(&gFlags.quiet, "quiet", "q", false, "Quiet mode (errors only)")
 	rootCmd.PersistentFlags().BoolVar(&gFlags.plain, "plain", false, "Force plain text line-based output (no TUI)")
 	rootCmd.PersistentFlags().BoolVar(&gFlags.noAnim, "no-anim", false, "Disable animations and splash screen")
+	rootCmd.PersistentFlags().BoolVar(&gFlags.noColor, "no-color", false, "Disable color and styled terminal output")
 
 	// Scan command
 	scanCmd := &cobra.Command{
@@ -543,7 +568,7 @@ of compromise (IOCs) and YARA signature matches in strict read-only mode.`,
 verifies directory permissions, optionally installs binary to /usr/local/bin, and downloads
 the latest verified YARA-Forge Core ruleset.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			th := theme.NewTheme(theme.DetectNoColor())
+			th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor())
 			opts := setup.SetupOptions{
 				DownloadRules: setupDownload,
 				CustomDir:     setupCustomDir,
@@ -603,7 +628,7 @@ the latest verified YARA-Forge Core ruleset.`,
 			bus := events.NewEventBus()
 			defer bus.Close()
 
-			th := theme.NewTheme(theme.DetectNoColor())
+			th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor())
 
 			var reporter *report.ConcurrentReporter
 			if demoJSONOut != "" {
@@ -914,7 +939,91 @@ using the YARA-X engine, checking syntax, namespaces, and variables without runn
 	}
 	rulesCmd.AddCommand(validateCmd)
 
-	rootCmd.AddCommand(scanCmd, quickCmd, fullCmd, setupCmd, ackCmd, updateCmd, versionCmd, demoCmd, rulesCmd)
+	// Threat intelligence command
+	intelCmd := &cobra.Command{
+		Use:   "intel",
+		Short: "Manage threat intelligence indicators and feeds",
+	}
+
+	var importOutDir string
+	var importOverwrite bool
+	intelImportCmd := &cobra.Command{
+		Use:   "import <file>",
+		Short: "Import indicators from a file into Aether's persistent IOC store",
+		Long: `Validates and ingests threat intelligence from local files (STIX 2.x JSON bundles,
+line-delimited hash lists, CSV, or indicator feeds) into Aether's persistent IOC directory.
+Indicators are deduplicated and saved as static forensic rules for subsequent scans.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			src := filepath.Clean(args[0])
+			summary, err := ioc.ImportIntelFile(src, importOutDir, importOverwrite)
+			if err != nil {
+				return err
+			}
+
+			fmt.Println("[AETHER] Threat Intelligence Ingestion Report:")
+			fmt.Printf("  Source File:        %s\n", summary.SourceFile)
+			fmt.Printf("  Destination File:   %s\n", summary.DestFile)
+			fmt.Printf("  Total Parsed:       %d\n", summary.TotalParsed)
+			fmt.Printf("  New Imported:       %d\n", summary.NewImported)
+			fmt.Printf("  Duplicates Skipped: %d\n", summary.DuplicatesSkipped)
+			fmt.Println("\n[AETHER] Ingestion status: SUCCESS (indicators active for subsequent scans)")
+			return nil
+		},
+	}
+	intelImportCmd.Flags().StringVar(&importOutDir, "out", "", "Destination directory override (default: ~/.config/aether/iocs or /etc/aether/iocs)")
+	intelImportCmd.Flags().BoolVar(&importOverwrite, "overwrite", false, "Overwrite existing imported indicators instead of appending/deduplicating")
+
+	intelListCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List loaded threat intelligence feeds and indicator statistics",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _, err := config.LoadConfig(gFlags.configPath)
+			if err != nil {
+				return fmt.Errorf("configuration error: %w", err)
+			}
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			eng, err := ioc.NewEngine(cfg, logger)
+			if err != nil {
+				return fmt.Errorf("failed to initialize threat intelligence engine: %w", err)
+			}
+
+			sources := eng.SourceSummary()
+			fmt.Println("[AETHER] Loaded Threat Intelligence Sources & Feeds:")
+			if len(sources) == 0 {
+				fmt.Println("  No threat intelligence sources loaded.")
+			} else {
+				for _, s := range sources {
+					fmt.Printf("  • [%s] %-35s (%d indicators, category: %s)\n", s.Type, s.Source, s.Count, s.Category)
+				}
+			}
+
+			fmt.Println("\n[AETHER] Indicator Totals:")
+			fmt.Printf("  Hash Signatures:       %d\n", eng.HashRuleCount())
+			fmt.Printf("  Path/Name Patterns:    %d\n", eng.PatternRuleCount())
+			fmt.Printf("  IP/CIDR Indicators:    %d\n", eng.IPRuleCount())
+			fmt.Printf("  Suppression (Benign):  %d\n", eng.BenignRuleCount())
+			return nil
+		},
+	}
+	intelCmd.AddCommand(intelImportCmd, intelListCmd)
+
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "hunt", Title: "Threat Hunting & Inspection Commands:"},
+		&cobra.Group{ID: "intel", Title: "Threat Intelligence & Signatures:"},
+		&cobra.Group{ID: "admin", Title: "System Configuration & Triage:"},
+	)
+	scanCmd.GroupID = "hunt"
+	quickCmd.GroupID = "hunt"
+	fullCmd.GroupID = "hunt"
+	intelCmd.GroupID = "intel"
+	rulesCmd.GroupID = "intel"
+	ackCmd.GroupID = "admin"
+	setupCmd.GroupID = "admin"
+	updateCmd.GroupID = "admin"
+	versionCmd.GroupID = "admin"
+
+	rootCmd.AddCommand(scanCmd, quickCmd, fullCmd, setupCmd, ackCmd, updateCmd, versionCmd, demoCmd, rulesCmd, intelCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

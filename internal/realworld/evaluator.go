@@ -10,18 +10,18 @@ import (
 
 // ComplianceResult holds the detailed outcome of verifying actual scan findings against an independent manifest.
 type ComplianceResult struct {
-	ProfileID         string                  `json:"profile_id"`
-	Compliant         bool                    `json:"compliant"`
-	Violations        []string                `json:"violations,omitempty"`
-	AlertsObserved    int                     `json:"alerts_observed"`
-	WarningsObserved  int                     `json:"warnings_observed"`
-	NoticesObserved   int                     `json:"notices_observed"`
-	InfosObserved     int                     `json:"infos_observed"`
-	UnknownsObserved  int                     `json:"unknowns_observed"`
-	TotalObserved     int                     `json:"total_observed"`
-	ExpectedStatus    SystemPosture           `json:"expected_status"`
-	EvaluatedStatus   SystemPosture           `json:"evaluated_status"`
-	ForbiddenTriggers []report.Finding        `json:"forbidden_triggers,omitempty"`
+	ProfileID         string           `json:"profile_id"`
+	Compliant         bool             `json:"compliant"`
+	Violations        []string         `json:"violations,omitempty"`
+	AlertsObserved    int              `json:"alerts_observed"`
+	WarningsObserved  int              `json:"warnings_observed"`
+	NoticesObserved   int              `json:"notices_observed"`
+	InfosObserved     int              `json:"infos_observed"`
+	UnknownsObserved  int              `json:"unknowns_observed"`
+	TotalObserved     int              `json:"total_observed"`
+	ExpectedStatus    SystemPosture    `json:"expected_status"`
+	EvaluatedStatus   SystemPosture    `json:"evaluated_status"`
+	ForbiddenTriggers []report.Finding `json:"forbidden_triggers,omitempty"`
 }
 
 // ComplianceEvaluator compares actual scan findings against ProfileManifest expectations without mutating detection state.

@@ -347,10 +347,10 @@ func getDefaultScannerRunner() ScannerRunner {
 type ScaleBenchmarkConfig struct {
 	FileCount     int           `json:"file_count"`
 	TargetDir     string        `json:"target_dir"`
-	MaxMemoryMB   float64       `json:"max_memory_mb"`   // default 250.0 MB
-	MinThroughput float64       `json:"min_throughput"`  // default 2500 files/sec
-	SampleRate    time.Duration `json:"sample_rate"`     // default 20ms
-	Threads       int           `json:"threads"`         // 0 = default NumCPU
+	MaxMemoryMB   float64       `json:"max_memory_mb"`  // default 250.0 MB
+	MinThroughput float64       `json:"min_throughput"` // default 2500 files/sec
+	SampleRate    time.Duration `json:"sample_rate"`    // default 20ms
+	Threads       int           `json:"threads"`        // 0 = default NumCPU
 	Runner        ScannerRunner `json:"-"`
 }
 

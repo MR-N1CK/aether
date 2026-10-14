@@ -18,9 +18,9 @@ type privMemoryReporter struct {
 func (r *privMemoryReporter) Report(f report.Finding) {
 	r.findings = append(r.findings, f)
 }
-func (r *privMemoryReporter) Findings() []report.Finding          { return r.findings }
+func (r *privMemoryReporter) Findings() []report.Finding         { return r.findings }
 func (r *privMemoryReporter) Summary() (int, int, int, int, int) { return 0, 0, 0, 0, 0 }
-func (r *privMemoryReporter) Close() error                         { return nil }
+func (r *privMemoryReporter) Close() error                       { return nil }
 
 func TestProcessNonRootPermissionDenied(t *testing.T) {
 	root := t.TempDir()
@@ -64,10 +64,10 @@ func TestProcessUnreadableMapsRecordsCoverageGap(t *testing.T) {
 	}
 
 	cfg := config.NewDefaultConfig()
-	sig := process.CheckFilelessExecution(info, cfg)
+	sigs := process.CheckFilelessExecution(info, cfg)
 
-	if sig != nil {
-		t.Errorf("unreadable memfd mapping must not emit finding, got %+v", sig)
+	if len(sigs) != 0 {
+		t.Errorf("unreadable memfd mapping must not emit finding, got %+v", sigs)
 	}
 
 	if len(info.CoverageGaps) == 0 {

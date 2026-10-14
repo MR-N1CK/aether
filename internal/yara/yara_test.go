@@ -286,9 +286,9 @@ func TestDiscoverRuleFiles(t *testing.T) {
 
 func TestGetRuleNamespace(t *testing.T) {
 	cases := map[string]string{
-		"/path/to/my_rule.yar":     "my_rule",
+		"/path/to/my_rule.yar":       "my_rule",
 		"/etc/rules/123_custom.yara": "ns_123_custom",
-		"special-chars.name.yar":   "special_chars_name",
+		"special-chars.name.yar":     "special_chars_name",
 	}
 
 	for input, want := range cases {

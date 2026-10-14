@@ -54,9 +54,9 @@ type ScanStarted struct {
 	Notices     []string  `json:"notices,omitempty"`
 }
 
-func (e ScanStarted) Type() EventType     { return TypeScanStarted }
+func (e ScanStarted) Type() EventType      { return TypeScanStarted }
 func (e ScanStarted) Timestamp() time.Time { return e.Time }
-func (e ScanStarted) IsCritical() bool    { return true }
+func (e ScanStarted) IsCritical() bool     { return true }
 
 // ModuleStarted indicates that an inspection module has begun execution.
 type ModuleStarted struct {
@@ -65,9 +65,9 @@ type ModuleStarted struct {
 	Description string    `json:"description"`
 }
 
-func (e ModuleStarted) Type() EventType     { return TypeModuleStarted }
+func (e ModuleStarted) Type() EventType      { return TypeModuleStarted }
 func (e ModuleStarted) Timestamp() time.Time { return e.Time }
-func (e ModuleStarted) IsCritical() bool    { return true }
+func (e ModuleStarted) IsCritical() bool     { return true }
 
 // ModuleFinished indicates that an inspection module has concluded.
 type ModuleFinished struct {
@@ -80,9 +80,9 @@ type ModuleFinished struct {
 	Status         string        `json:"status,omitempty"` // "OK", "NOT IMPLEMENTED", "FAILED"
 }
 
-func (e ModuleFinished) Type() EventType     { return TypeModuleFinished }
+func (e ModuleFinished) Type() EventType      { return TypeModuleFinished }
 func (e ModuleFinished) Timestamp() time.Time { return e.Time }
-func (e ModuleFinished) IsCritical() bool    { return true }
+func (e ModuleFinished) IsCritical() bool     { return true }
 
 // ProcessDurationBreakdown captures per-phase durations of process hunting.
 type ProcessDurationBreakdown struct {
@@ -187,9 +187,9 @@ type FileScanned struct {
 	Duration time.Duration `json:"duration"`
 }
 
-func (e FileScanned) Type() EventType     { return TypeFileScanned }
+func (e FileScanned) Type() EventType      { return TypeFileScanned }
 func (e FileScanned) Timestamp() time.Time { return e.Time }
-func (e FileScanned) IsCritical() bool    { return false } // Ephemeral: can be dropped/coalesced
+func (e FileScanned) IsCritical() bool     { return false } // Ephemeral: can be dropped/coalesced
 
 // FindingRaised is a critical event emitted whenever a threat or anomaly is flagged.
 type FindingRaised struct {
@@ -197,9 +197,9 @@ type FindingRaised struct {
 	Finding report.Finding `json:"finding"`
 }
 
-func (e FindingRaised) Type() EventType     { return TypeFindingRaised }
+func (e FindingRaised) Type() EventType      { return TypeFindingRaised }
 func (e FindingRaised) Timestamp() time.Time { return e.Time }
-func (e FindingRaised) IsCritical() bool    { return true }
+func (e FindingRaised) IsCritical() bool     { return true }
 
 // Progress provides scanning velocity and progress estimation.
 type Progress struct {
@@ -211,9 +211,9 @@ type Progress struct {
 	ActivePaths   []string      `json:"active_paths,omitempty"`
 }
 
-func (e Progress) Type() EventType     { return TypeProgress }
+func (e Progress) Type() EventType      { return TypeProgress }
 func (e Progress) Timestamp() time.Time { return e.Time }
-func (e Progress) IsCritical() bool    { return false } // Ephemeral: can be dropped/coalesced
+func (e Progress) IsCritical() bool     { return false } // Ephemeral: can be dropped/coalesced
 
 // DirCount represents an inspected directory and the count of files scanned within it.
 type DirCount struct {
@@ -281,9 +281,9 @@ type ScanFinished struct {
 	AcknowledgedWarnings []report.Finding          `json:"acknowledged_warnings,omitempty"`
 }
 
-func (e ScanFinished) Type() EventType     { return TypeScanFinished }
+func (e ScanFinished) Type() EventType      { return TypeScanFinished }
 func (e ScanFinished) Timestamp() time.Time { return e.Time }
-func (e ScanFinished) IsCritical() bool    { return true }
+func (e ScanFinished) IsCritical() bool     { return true }
 
 // Error captures an operational error encountered during the scan.
 type Error struct {
@@ -294,9 +294,9 @@ type Error struct {
 	IsFatal bool      `json:"is_fatal"`
 }
 
-func (e Error) Type() EventType     { return TypeError }
+func (e Error) Type() EventType      { return TypeError }
 func (e Error) Timestamp() time.Time { return e.Time }
-func (e Error) IsCritical() bool    { return true }
+func (e Error) IsCritical() bool     { return true }
 
 // isWeakFinding checks if a finding matches any of the weak rules.
 func isWeakFinding(f report.Finding, weakRules []string) bool {

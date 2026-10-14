@@ -15,6 +15,9 @@ import (
 type PackageDB interface {
 	// Owner returns the package owning the given file path, if known.
 	Owner(path string) (string, bool)
+	// VerifyDigest verifies whether actualMD5 matches the expected package checksum.
+	// Returns (match, expectedMD5, hasDigest).
+	VerifyDigest(path string, actualMD5 string) (bool, string, bool)
 	// IsAvailable returns true if a supported package database was found and loaded.
 	IsAvailable() bool
 	// StatusNote returns informational notes about the package DB state (e.g. RPM unavailable).
@@ -28,13 +31,15 @@ type DB struct {
 	available  bool
 	statusNote string
 	ownerMap   map[string]string // normalized path -> package name
+	digestMap  map[string]string // normalized path -> expected md5 hash
 }
 
 // New creates a new PackageDB rooted at rootFS (empty string for system root "/").
 func New(rootFS string) *DB {
 	return &DB{
-		rootFS:   rootFS,
-		ownerMap: make(map[string]string),
+		rootFS:    rootFS,
+		ownerMap:  make(map[string]string),
+		digestMap: make(map[string]string),
 	}
 }
 
@@ -71,6 +76,17 @@ func NormalizePath(p string) string {
 		return "/usr/lib64"
 	}
 	return cleaned
+}
+
+func isSystemBinaryPath(norm string) bool {
+	return strings.HasPrefix(norm, "/usr/bin/") ||
+		strings.HasPrefix(norm, "/usr/sbin/") ||
+		strings.HasPrefix(norm, "/bin/") ||
+		strings.HasPrefix(norm, "/sbin/") ||
+		strings.HasPrefix(norm, "/usr/lib/") ||
+		strings.HasPrefix(norm, "/usr/libexec/") ||
+		strings.HasPrefix(norm, "/lib/") ||
+		strings.HasPrefix(norm, "/lib64/")
 }
 
 // resolve translates a virtual absolute path to the corresponding path under rootFS.
@@ -125,37 +141,69 @@ func (d *DB) loadDpkg(dpkgInfoDir string) {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".list") {
+		if entry.IsDir() {
 			continue
 		}
 
-		// Extract package name: strip .list and arch qualification (e.g. libc6:amd64.list -> libc6)
-		pkgName := strings.TrimSuffix(entry.Name(), ".list")
-		if idx := strings.Index(pkgName, ":"); idx != -1 {
-			pkgName = pkgName[:idx]
-		}
+		if strings.HasSuffix(entry.Name(), ".list") {
+			// Extract package name: strip .list and arch qualification (e.g. libc6:amd64.list -> libc6)
+			pkgName := strings.TrimSuffix(entry.Name(), ".list")
+			if idx := strings.Index(pkgName, ":"); idx != -1 {
+				pkgName = pkgName[:idx]
+			}
 
-		filePath := filepath.Join(dpkgInfoDir, entry.Name())
-		f, oErr := os.Open(filePath)
-		if oErr != nil {
-			continue
-		}
-
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" || line == "/." {
+			filePath := filepath.Join(dpkgInfoDir, entry.Name())
+			f, oErr := os.Open(filePath)
+			if oErr != nil {
 				continue
 			}
-			norm := NormalizePath(line)
-			d.ownerMap[norm] = pkgName
-			// Also record raw cleaned path if different from normalized
-			cleaned := filepath.Clean(line)
-			if cleaned != norm {
-				d.ownerMap[cleaned] = pkgName
+
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line == "" || line == "/." {
+					continue
+				}
+				norm := NormalizePath(line)
+				d.ownerMap[norm] = pkgName
+				cleaned := filepath.Clean(line)
+				if cleaned != norm {
+					d.ownerMap[cleaned] = pkgName
+				}
 			}
+			f.Close()
+		} else if strings.HasSuffix(entry.Name(), ".md5sums") {
+			filePath := filepath.Join(dpkgInfoDir, entry.Name())
+			f, oErr := os.Open(filePath)
+			if oErr != nil {
+				continue
+			}
+
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if len(line) < 35 {
+					continue
+				}
+				parts := strings.Fields(line)
+				if len(parts) >= 2 && len(parts[0]) == 32 {
+					relPath := parts[1]
+					if !strings.HasPrefix(relPath, "/") {
+						relPath = "/" + relPath
+					}
+					norm := NormalizePath(relPath)
+					if isSystemBinaryPath(norm) {
+						md5Hash := strings.ToLower(parts[0])
+						d.digestMap[norm] = md5Hash
+						cleaned := filepath.Clean(relPath)
+						if cleaned != norm {
+							d.digestMap[cleaned] = md5Hash
+						}
+					}
+				}
+			}
+			f.Close()
 		}
-		f.Close()
 	}
 
 	// Parse /var/lib/dpkg/diversions if present
@@ -311,4 +359,23 @@ func (d *DB) IsAvailable() bool {
 func (d *DB) StatusNote() string {
 	d.init()
 	return d.statusNote
+}
+
+// VerifyDigest checks whether actualMD5 matches the expected package checksum recorded in the package DB.
+// Returns (match, expectedMD5, hasDigest).
+func (d *DB) VerifyDigest(path string, actualMD5 string) (bool, string, bool) {
+	d.init()
+	if !d.available || len(d.digestMap) == 0 {
+		return true, "", false
+	}
+	norm := NormalizePath(path)
+	expected, ok := d.digestMap[norm]
+	if !ok {
+		cleaned := filepath.Clean(path)
+		expected, ok = d.digestMap[cleaned]
+	}
+	if !ok {
+		return true, "", false
+	}
+	return strings.EqualFold(expected, actualMD5), expected, true
 }

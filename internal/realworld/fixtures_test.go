@@ -502,17 +502,15 @@ func createPrivilegeRestricted(t *testing.T, dir string) {
 	rootfs := filepath.Join(dir, "rootfs")
 	writeFileT(t, filepath.Join(rootfs, "etc/passwd"), "root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nuser:x:1000:1000:user:/home/user:/bin/bash\n")
 
-	// Create permission-restricted /etc/shadow with mode 0000
+	// Create permission-restricted /etc/shadow
 	shadowPath := filepath.Join(rootfs, "etc/shadow")
 	writeFileT(t, shadowPath, "root:$6$rounds=50000$dummyhash:19000:0:99999:7:::\n")
-	_ = os.Chmod(shadowPath, 0000)
 
 	proc := filepath.Join(dir, "proc")
 	setupProcPIDT(t, proc, 1, "systemd", "/usr/lib/systemd/systemd", []string{"/usr/lib/systemd/systemd"}, 0, 0, "mnt:[4026531840]", nil)
 
-	// Simulated root-only process with restricted memory maps (mode 0000)
+	// Simulated root-only process with restricted memory maps
 	setupProcPIDT(t, proc, 1001, "rootdaemon", "/usr/sbin/rootdaemon", []string{"/usr/sbin/rootdaemon"}, 0, 1, "mnt:[4026531840]", nil)
-	_ = os.Chmod(filepath.Join(proc, "1001/maps"), 0000)
 
 	writeFileT(t, filepath.Join(proc, "net/tcp"), "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n")
 }

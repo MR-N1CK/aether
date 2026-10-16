@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +25,14 @@ const (
 	stateDashboard
 	stateDetail
 	stateFinished
+)
+
+// sortMode selects the ordering of the findings feed.
+type sortMode int
+
+const (
+	sortBySeverity sortMode = iota // worst first, score tiebreak
+	sortByArrival                  // chronological detection order
 )
 
 type frameTickMsg time.Time
@@ -71,10 +81,11 @@ type Model struct {
 
 	// Findings
 	findings      []report.Finding
-	filtered      []report.Finding
+	visible       []report.Finding // display list: filtered (fuzzy) + sorted
 	selectedIndex int
 	isFiltering   bool
 	filterQuery   string
+	sortBy        sortMode
 
 	// Completion metrics
 	scanFinished bool
@@ -86,6 +97,7 @@ type Model struct {
 	activeTab          int
 	modalScrollY       int
 	showPalette        bool
+	confirmQuit        bool
 	toastMessage       string
 	toastUntil         time.Time
 
@@ -129,9 +141,10 @@ func NewModel(ctx context.Context, cancel context.CancelFunc, sub *events.Subscr
 		paths:           paths,
 		activeModules:   make(map[string]*ModuleStatus),
 		findings:        make([]report.Finding, 0),
-		filtered:        make([]report.Finding, 0),
+		visible:         make([]report.Finding, 0),
 		velocitySamples: make([]float64, 0, 10),
 		activeTab:       0,
+		sortBy:          sortBySeverity,
 		spinner:         sp,
 	}
 }
@@ -258,7 +271,7 @@ func (m *Model) handleScanEvent(e events.Event) {
 
 	case events.FindingRaised:
 		m.findings = append(m.findings, ev.Finding)
-		m.applyFilter()
+		m.recomputeVisible()
 		if mod, exists := m.activeModules[ev.Finding.Module]; exists {
 			mod.Findings++
 		}
@@ -294,6 +307,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
+	// Quit confirmation modal: swallow every key except the verdict keys so a
+	// stray j/k or / cannot interact with the dashboard underneath.
+	if m.confirmQuit {
+		switch msg.String() {
+		case "y", "Y":
+			if m.cancelScan != nil {
+				m.cancelScan()
+			}
+			return tea.Quit
+		case "n", "N", "esc":
+			m.confirmQuit = false
+			m.showToast("Scan continues — press [q] to abort")
+		}
+		return nil
+	}
+
 	// Any key during splash skips to dashboard or finished view
 	if m.state == stateSplash {
 		if m.scanFinished {
@@ -313,17 +342,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		case tea.KeyEsc:
 			m.isFiltering = false
 			m.filterQuery = ""
-			m.applyFilter()
+			m.recomputeVisible()
 			return nil
 		case tea.KeyBackspace:
 			if len(m.filterQuery) > 0 {
 				m.filterQuery = m.filterQuery[:len(m.filterQuery)-1]
-				m.applyFilter()
+				m.recomputeVisible()
 			}
 			return nil
 		case tea.KeyRunes:
 			m.filterQuery += string(msg.Runes)
-			m.applyFilter()
+			m.recomputeVisible()
 			return nil
 		}
 		return nil
@@ -420,10 +449,27 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return tea.Quit
 
 	case "q":
+		// Guarded quit: an in-flight scan is aborted by accident far more
+		// easily than on purpose, so require confirmation while it runs.
+		if !m.scanFinished {
+			m.confirmQuit = true
+			return nil
+		}
 		if m.cancelScan != nil {
 			m.cancelScan()
 		}
 		return tea.Quit
+
+	case "s":
+		if m.sortBy == sortBySeverity {
+			m.sortBy = sortByArrival
+			m.showToast("Feed sorted by arrival time")
+		} else {
+			m.sortBy = sortBySeverity
+			m.showToast("Feed sorted by severity (worst first)")
+		}
+		m.recomputeVisible()
+		return nil
 
 	case "?":
 		m.showPalette = true
@@ -476,7 +522,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "esc":
 		if m.filterQuery != "" {
 			m.filterQuery = ""
-			m.applyFilter()
+			m.recomputeVisible()
 			m.showToast("Search filter cleared")
 		}
 
@@ -551,33 +597,121 @@ func (m *Model) copySelectedCommand() {
 }
 
 func (m *Model) currentList() []report.Finding {
-	if m.filterQuery != "" {
-		return m.filtered
-	}
-	return m.findings
+	return m.visible
 }
 
-func (m *Model) applyFilter() {
-	if m.filterQuery == "" {
-		m.filtered = m.findings
-		return
+// findingKey builds a stable identity key for selection anchoring across
+// recomputes (path, rule, and nanosecond timestamp make duplicates unlikely).
+func findingKey(f report.Finding) string {
+	return f.Path + "\x1f" + f.RuleName + "\x1f" + strconv.FormatInt(f.Timestamp.UnixNano(), 10)
+}
+
+// recomputeVisible rebuilds the display list from the raw findings:
+// fuzzy filter (when a query is active), then ordering per the active sort
+// mode. The cursor is anchored to the same finding across recomputes so new
+// high-severity detections arriving mid-scan do not move it unexpectedly.
+func (m *Model) recomputeVisible() {
+	anchorKey := ""
+	if m.selectedIndex >= 0 && m.selectedIndex < len(m.visible) {
+		anchorKey = findingKey(m.visible[m.selectedIndex])
 	}
 
-	q := strings.ToLower(m.filterQuery)
-	filtered := make([]report.Finding, 0)
-	for _, f := range m.findings {
-		if strings.Contains(strings.ToLower(f.Path), q) ||
-			strings.Contains(strings.ToLower(f.Reason), q) ||
-			strings.Contains(strings.ToLower(f.Module), q) ||
-			strings.Contains(strings.ToLower(string(f.Severity)), q) ||
-			strings.Contains(strings.ToLower(f.RuleName), q) {
-			filtered = append(filtered, f)
+	visible := make([]report.Finding, 0, len(m.findings))
+	if m.filterQuery == "" {
+		visible = append(visible, m.findings...)
+	} else {
+		for _, f := range m.findings {
+			if _, ok := fuzzyScore(fuzzyHaystack(f.Path, f.Reason, f.Module, string(f.Severity), f.RuleName), m.filterQuery); ok {
+				visible = append(visible, f)
+			}
 		}
 	}
-	m.filtered = filtered
-	if m.selectedIndex >= len(filtered) {
-		m.selectedIndex = 0
+	m.sortFindings(visible)
+	m.visible = visible
+
+	reanchored := false
+	if anchorKey != "" {
+		for i := range m.visible {
+			if findingKey(m.visible[i]) == anchorKey {
+				m.selectedIndex = i
+				reanchored = true
+				break
+			}
+		}
 	}
+	if !reanchored {
+		if m.selectedIndex >= len(m.visible) {
+			m.selectedIndex = maxInt(0, len(m.visible)-1)
+		}
+		if m.selectedIndex < 0 {
+			m.selectedIndex = 0
+		}
+	}
+}
+
+// sortFindings orders the display list in place per the active sort mode.
+// Arrival mode keeps the underlying detection order.
+func (m *Model) sortFindings(list []report.Finding) {
+	if m.sortBy != sortBySeverity {
+		return
+	}
+	sort.SliceStable(list, func(i, j int) bool {
+		ri, rj := severityRank(list[i].Severity), severityRank(list[j].Severity)
+		if ri != rj {
+			return ri > rj
+		}
+		si, sj := findingScore(list[i]), findingScore(list[j])
+		if si != sj {
+			return si > sj
+		}
+		return list[i].Timestamp.Before(list[j].Timestamp)
+	})
+}
+
+// severityRank orders the full report severity vocabulary; unknown values rank last.
+func severityRank(s report.Severity) int {
+	switch s {
+	case report.SeverityCritical:
+		return 8
+	case report.SeverityAlert:
+		return 7
+	case report.SeverityHigh:
+		return 6
+	case report.SeverityWarning:
+		return 5
+	case report.SeverityMedium:
+		return 4
+	case report.SeverityNotice:
+		return 3
+	case report.SeverityLow:
+		return 2
+	case report.SeverityInfo:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// findingScore extracts the additive detection score from finding metadata
+// (0 when absent or of an unexpected type).
+func findingScore(f report.Finding) int {
+	switch v := f.Metadata["score"].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // SelectedFinding returns the currently highlighted finding if any.

@@ -179,7 +179,7 @@ func TestRenderFindingsFeed_HeadersAndColumns(t *testing.T) {
 	m := Model{
 		theme:    th,
 		findings: findings,
-		filtered: findings,
+		visible:  findings,
 	}
 
 	rendered := m.renderFindingsFeed(100)
@@ -195,13 +195,96 @@ func TestRenderFindingsFeed_HeadersAndColumns(t *testing.T) {
 func TestRenderFindingsFeed_CleanEmpty(t *testing.T) {
 	th := theme.NewTheme(true)
 	m := Model{
-		theme:    th,
+		theme:   th,
 		findings: nil,
-		filtered: nil,
+		visible: nil,
 	}
 
 	rendered := m.renderFindingsFeed(100)
 	if !strings.Contains(rendered, "No security indicators or anomalies detected") {
 		t.Errorf("expected clean message for empty findings feed, got: %s", rendered)
+	}
+}
+
+func TestRenderFindingsFeed_FilterNoMatchMessage(t *testing.T) {
+	th := theme.NewTheme(true)
+	m := Model{
+		theme:       th,
+		filterQuery: "nomatchquery",
+		visible:     []report.Finding{},
+	}
+
+	rendered := m.renderFindingsFeed(100)
+	if !strings.Contains(rendered, "No findings match filter") {
+		t.Errorf("expected no-match message for filtered empty feed, got: %s", rendered)
+	}
+	if strings.Contains(rendered, "No security indicators") {
+		t.Error("clean message must not appear when a filter matched nothing")
+	}
+}
+
+func newFeedModel() Model {
+	th := theme.NewTheme(true)
+	findings := []report.Finding{
+		{
+			Timestamp: time.Now(),
+			Module:    "process",
+			Severity:  report.SeverityAlert,
+			Path:      "/tmp/revshell.sh",
+			RuleName:  "Process_Deleted_Binary",
+			Reason:    "Interactive reverse shell connected to 10.0.0.1:4444",
+		},
+	}
+	m := Model{
+		theme:    th,
+		findings: findings,
+		visible:  findings,
+	}
+	m.recomputeVisible()
+	return m
+}
+
+func countLines(s string) int { return strings.Count(s, "\n") }
+
+func TestRenderFindingsFeed_SplitPane(t *testing.T) {
+	m := newFeedModel()
+
+	wide := m.renderFindingsFeed(120)   // above split threshold: side-by-side
+	narrow := m.renderFindingsFeed(100) // below threshold: stacked sections
+
+	if !strings.Contains(wide, "TARGET PATH") || !strings.Contains(wide, "THREAT PREVIEW") {
+		t.Errorf("split pane must render both the feed table and the preview, got: %s", wide)
+	}
+	if !strings.Contains(narrow, "THREAT PREVIEW") {
+		t.Errorf("stacked layout keeps preview below the feed, got: %s", narrow)
+	}
+	if countLines(wide) >= countLines(narrow) {
+		t.Errorf("split pane (%d lines) should reclaim vertical space vs stacked (%d lines)", countLines(wide), countLines(narrow))
+	}
+}
+
+func TestRenderQuitConfirm_Content(t *testing.T) {
+	th := theme.NewTheme(true)
+	m := Model{theme: th, width: 120, height: 40, confirmQuit: true}
+
+	rendered := m.renderQuitConfirm()
+	for _, want := range []string{"SCAN IN PROGRESS", "[y]", "[n]"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("expected quit confirm modal to contain %q, got: %s", want, rendered)
+		}
+	}
+}
+
+func TestView_ConfirmQuitReplacesDashboard(t *testing.T) {
+	m := newFeedModel()
+	m.width, m.height = 120, 40
+	m.confirmQuit = true
+
+	rendered := m.View()
+	if !strings.Contains(rendered, "SCAN IN PROGRESS") {
+		t.Error("expected confirm modal to replace dashboard view")
+	}
+	if strings.Contains(rendered, "Findings Feed") {
+		t.Error("dashboard must be hidden while the quit confirm modal is open")
 	}
 }

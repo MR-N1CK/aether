@@ -35,6 +35,10 @@ func (m Model) View() string {
 		return m.renderCommandPalette()
 	}
 
+	if m.confirmQuit {
+		return m.renderQuitConfirm()
+	}
+
 	var baseView string
 	switch m.state {
 	case stateSplash:
@@ -211,10 +215,16 @@ func (m Model) renderDashboard() string {
 	b.WriteString(findingsView + "\n")
 
 	// 5. Status / Keybinding Footer
-	footerText := fmt.Sprintf("%s Nav   %s Dossier   %s Filter   %s Yank   %s Shortcuts   %s Cancel",
+	sortLabel := "severity"
+	if m.sortBy == sortByArrival {
+		sortLabel = "arrival"
+	}
+	footerText := fmt.Sprintf("%s Nav   %s Dossier   %s Filter   %s Sort:%s   %s Yank   %s Shortcuts   %s Quit",
 		m.theme.KeyHint.Render("[j/k]"),
 		m.theme.KeyHint.Render("[Enter]"),
 		m.theme.KeyHint.Render("[/]"),
+		m.theme.KeyHint.Render("[s]"),
+		sortLabel,
 		m.theme.KeyHint.Render("[y/h/c]"),
 		m.theme.KeyHint.Render("[?]"),
 		m.theme.KeyHint.Render("[q]"),
@@ -563,20 +573,103 @@ func formatPathCol(p string, width int) string {
 	return res
 }
 
+// splitPaneMinWidth is the total width at which the findings feed and threat
+// preview attempt a side-by-side split instead of stacked sections.
+const splitPaneMinWidth = 110
+
+// Feed table floors: how much room the path and reason columns need before
+// rows wrap and break the table grid. The compact variant is used by the
+// split-pane layout, where the feed shares width with the preview.
+const (
+	feedTableFixedOverhead = 40
+	compactMinInnerWidth   = feedTableFixedOverhead + 12 + 10 // 62
+	normalMinInnerWidth    = feedTableFixedOverhead + 18 + 14 // 72
+)
+
 func (m Model) renderFindingsFeed(width int) string {
+	sel := m.SelectedFinding()
+
+	// Decide whether the wide side-by-side layout fits: the feed pane must
+	// hold the compact table without wrapping.
+	splitPane := false
+	feedWidth, previewWidth := 0, 0
+	if sel != nil && width >= splitPaneMinWidth {
+		feedWidth = width * 62 / 100
+		if feedWidth-6 >= compactMinInnerWidth {
+			previewWidth = width - feedWidth
+			splitPane = true
+		}
+	}
+
+	maxVisible := 5
+	if m.height > 26 {
+		maxVisible = 7
+	}
+	if splitPane && m.height > 30 {
+		// The split pane reclaims the vertical space the stacked preview
+		// used to consume, so show more feed rows when the window allows.
+		maxVisible = 10
+	}
+
+	feedInner, _ := m.renderFeedInner(width, maxVisible, false)
+
+	if !splitPane {
+		feedBox := m.theme.CardBox.Width(width).Render(feedInner)
+		if sel == nil {
+			return feedBox
+		}
+		previewInner, _ := m.previewContent(sel, width)
+		previewBox := m.theme.CardActive.Width(width).Render(previewInner)
+		return feedBox + "\n" + previewBox
+	}
+
+	narrowInner, _ := m.renderFeedInner(feedWidth, maxVisible, true)
+	previewInner, _ := m.previewContent(sel, previewWidth)
+
+	// Measure the true rendered height of each pane's content (including any
+	// wrapped lines) so the bordered boxes bottom-align regardless of wrap
+	// behavior inside either pane.
+	feedMeasure := lipgloss.NewStyle().Width(feedWidth).Render(narrowInner)
+	previewMeasure := lipgloss.NewStyle().Width(previewWidth).Render(previewInner)
+	paneHeight := lipgloss.Height(feedMeasure)
+	if h := lipgloss.Height(previewMeasure); h > paneHeight {
+		paneHeight = h
+	}
+
+	feedBox := m.theme.CardBox.Width(feedWidth).Height(paneHeight).Render(narrowInner)
+	previewBox := m.theme.CardActive.Width(previewWidth).Height(paneHeight).Render(previewInner)
+	return lipgloss.JoinHorizontal(lipgloss.Top, feedBox, previewBox)
+}
+
+// renderFeedInner renders the findings feed content (section header, table
+// header, and the visible row window) and reports its rendered line count.
+// In compact mode (split-pane layout) the path and reason column floors
+// shrink so the full table still fits inside the narrower feed pane.
+func (m Model) renderFeedInner(width, maxVisible int, compact bool) (string, int) {
 	list := m.currentList()
 
 	var b strings.Builder
 	header := fmt.Sprintf("Findings Feed (%d total", len(m.findings))
 	if m.filterQuery != "" {
 		header += fmt.Sprintf(", %d matched filter %q", len(list), m.filterQuery)
+	} else {
+		switch m.sortBy {
+		case sortBySeverity:
+			header += " · worst-first"
+		case sortByArrival:
+			header += " · arrival order"
+		}
 	}
 	header += "):"
 	b.WriteString(m.theme.SectionHeader.Render(header) + "\n\n")
 
 	if len(list) == 0 {
-		b.WriteString(m.theme.StatValueSafe.Render("  ✓ No security indicators or anomalies detected. All inspected files verified clean.") + "\n")
-		return m.theme.CardBox.Width(width).Render(b.String())
+		if m.filterQuery != "" {
+			b.WriteString(m.theme.StatValueSafe.Render(fmt.Sprintf("  No findings match filter %q. Press [Esc] to clear the query.", m.filterQuery)) + "\n")
+		} else {
+			b.WriteString(m.theme.StatValueSafe.Render("  ✓ No security indicators or anomalies detected. All inspected files verified clean.") + "\n")
+		}
+		return b.String(), strings.Count(b.String(), "\n")
 	}
 
 	// Calculate inner usable width inside CardBox (accounting for borders and padding)
@@ -587,19 +680,26 @@ func (m Model) renderFindingsFeed(width int) string {
 
 	// Dynamic column layout
 	// prefix: 2 | badge: 9 | space: 1 | ts: 8 | div1: 3 | mod: 11 | div2: 3 | div3: 3 = 40 runes
-	fixedOverhead := 40
+	fixedOverhead := feedTableFixedOverhead
 	availForPathReason := innerWidth - fixedOverhead
 	if availForPathReason < 24 {
 		availForPathReason = 24
 	}
 
+	// Column floors adapt to the layout: the split-pane feed pane is compact
+	// (path 12 / reason 10), the full-width stacked layout gets roomier ones.
+	minPath, minReason := 18, 14
+	if compact {
+		minPath, minReason = 12, 10
+	}
+
 	pathWidth := availForPathReason * 42 / 100
-	if pathWidth < 18 {
-		pathWidth = 18
+	if pathWidth < minPath {
+		pathWidth = minPath
 	}
 	reasonWidth := availForPathReason - pathWidth
-	if reasonWidth < 14 {
-		reasonWidth = 14
+	if reasonWidth < minReason {
+		reasonWidth = minReason
 	}
 
 	// Table Column Header row
@@ -610,20 +710,16 @@ func (m Model) renderFindingsFeed(width int) string {
 		div,
 		m.theme.TableHead.Render("MODULE"),
 		div,
-		pathWidth, m.theme.TableHead.Render("TARGET PATH"),
+		pathWidth, m.theme.TableHead.Render(runewidth.Truncate("TARGET PATH", pathWidth, "…")),
 		div,
-		reasonWidth, m.theme.TableHead.Render("OBSERVED EVIDENCE / DETAILS"),
+		reasonWidth, m.theme.TableHead.Render(runewidth.Truncate("OBSERVED EVIDENCE / DETAILS", reasonWidth, "…")),
 	)
 	b.WriteString(tblHeader + "\n")
 	sepLine := strings.Repeat("─", innerWidth)
 	b.WriteString(m.theme.Divider.Render(sepLine) + "\n")
 
-	// Determine vertical window to display
-	maxVisible := 5
-	if m.height > 26 {
-		maxVisible = 7
-	}
-
+	// Vertical window is computed by the caller (stacked vs split-pane layouts
+	// expose different amounts of vertical room for the feed).
 	start := 0
 	if m.selectedIndex >= maxVisible {
 		start = m.selectedIndex - maxVisible + 1
@@ -668,46 +764,49 @@ func (m Model) renderFindingsFeed(width int) string {
 		}
 	}
 
-	feedBox := m.theme.CardBox.Width(width).Render(b.String())
+	return b.String(), strings.Count(b.String(), "\n")
+}
 
-	// If a finding is currently highlighted, append a sleek Live Quick-Preview Box!
-	sel := m.SelectedFinding()
-	if sel != nil {
-		report.PopulateFindingDetails(sel)
-		var p strings.Builder
-		pTitle := fmt.Sprintf("🔍 THREAT PREVIEW  •  %s  %s", m.theme.SeverityBadge(sel.Severity), m.theme.BrandTitle.Render(sel.Title))
-		p.WriteString(pTitle + "\n")
+// previewContent renders the live quick-preview body for the selected finding
+// and reports its rendered line count.
+func (m Model) previewContent(sel *report.Finding, width int) (string, int) {
+	report.PopulateFindingDetails(sel)
 
-		p.WriteString(fmt.Sprintf("  %s %s\n",
-			m.theme.ModalFieldKey.Render("Target File: "),
-			m.theme.FindingPath.Render(sel.Path),
-		))
-		if sel.Why != "" {
-			whyText := runewidth.Truncate(sel.Why, width-20, "…")
-			p.WriteString(fmt.Sprintf("  %s %s\n",
-				m.theme.ModalFieldKey.Render("Assessment:  "),
-				m.theme.FindingRowNormal.Render(whyText),
-			))
-		}
-		if len(sel.Remediation) > 0 {
-			remText := runewidth.Truncate(sel.Remediation[0], width-20, "…")
-			p.WriteString(fmt.Sprintf("  %s %s\n",
-				m.theme.ModalFieldKey.Render("Containment: "),
-				m.theme.FindingReason.Render(remText),
-			))
-		}
-		p.WriteString("  " + m.theme.ModalFieldKey.Render("Actions:     ") +
-			m.theme.KeyHint.Render("[Enter]") + m.theme.FindingReason.Render(" Open Dossier  •  ") +
-			m.theme.KeyHint.Render("[y]") + m.theme.FindingReason.Render(" Yank Path  •  ") +
-			m.theme.KeyHint.Render("[h]") + m.theme.FindingReason.Render(" Yank Hash  •  ") +
-			m.theme.KeyHint.Render("[c]") + m.theme.FindingReason.Render(" Yank Cmd  •  ") +
-			m.theme.KeyHint.Render("[?]") + m.theme.FindingReason.Render(" Shortcuts"))
-
-		previewBox := m.theme.CardActive.Width(width).Render(p.String())
-		return feedBox + "\n" + previewBox
+	textWidth := width - 20
+	if textWidth < 12 {
+		textWidth = 12
 	}
 
-	return feedBox
+	var p strings.Builder
+	pTitle := fmt.Sprintf("🔍 THREAT PREVIEW  •  %s  %s", m.theme.SeverityBadge(sel.Severity), m.theme.BrandTitle.Render(sel.Title))
+	p.WriteString(pTitle + "\n")
+
+	p.WriteString(fmt.Sprintf("  %s %s\n",
+		m.theme.ModalFieldKey.Render("Target File: "),
+		m.theme.FindingPath.Render(sel.Path),
+	))
+	if sel.Why != "" {
+		whyText := runewidth.Truncate(sel.Why, textWidth, "…")
+		p.WriteString(fmt.Sprintf("  %s %s\n",
+			m.theme.ModalFieldKey.Render("Assessment:  "),
+			m.theme.FindingRowNormal.Render(whyText),
+		))
+	}
+	if len(sel.Remediation) > 0 {
+		remText := runewidth.Truncate(sel.Remediation[0], textWidth, "…")
+		p.WriteString(fmt.Sprintf("  %s %s\n",
+			m.theme.ModalFieldKey.Render("Containment: "),
+			m.theme.FindingReason.Render(remText),
+		))
+	}
+	p.WriteString("  " + m.theme.ModalFieldKey.Render("Actions:     ") +
+		m.theme.KeyHint.Render("[Enter]") + m.theme.FindingReason.Render(" Open Dossier  •  ") +
+		m.theme.KeyHint.Render("[y]") + m.theme.FindingReason.Render(" Yank Path  •  ") +
+		m.theme.KeyHint.Render("[h]") + m.theme.FindingReason.Render(" Yank Hash  •  ") +
+		m.theme.KeyHint.Render("[c]") + m.theme.FindingReason.Render(" Yank Cmd  •  ") +
+		m.theme.KeyHint.Render("[?]") + m.theme.FindingReason.Render(" Shortcuts"))
+
+	return p.String(), strings.Count(p.String(), "\n")
 }
 
 func (m Model) renderDetailModal() string {
@@ -852,6 +951,30 @@ func (m Model) renderDetailModal() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
+// renderQuitConfirm renders the guarded-quit confirmation shown while a scan
+// is still in flight and [q] was pressed.
+func (m Model) renderQuitConfirm() string {
+	w := 64
+	if m.width > 80 {
+		w = m.width - 20
+	}
+	if w > 72 {
+		w = 72
+	}
+
+	var b strings.Builder
+	b.WriteString(m.theme.ModalHeader.Render("⚠  SCAN IN PROGRESS — ABORT?") + "\n\n")
+	b.WriteString(m.theme.FindingRowNormal.Render("Quitting now stops all detection modules mid-flight.") + "\n")
+	b.WriteString(m.theme.FindingRowNormal.Render("Findings gathered so far stay on screen but no final") + "\n")
+	b.WriteString(m.theme.FindingRowNormal.Render("report is written.") + "\n\n")
+	b.WriteString("\n" + m.theme.KeyHint.Render("[y]") + m.theme.FindingReason.Render(" Abort & quit      ") +
+		m.theme.KeyHint.Render("[n]") + m.theme.FindingReason.Render(" Continue scanning      ") +
+		m.theme.KeyHint.Render("[Esc]") + m.theme.FindingReason.Render(" Continue"))
+
+	box := m.theme.CommandPalette.Width(w).Render(b.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
 func (m Model) renderCommandPalette() string {
 	w := 72
 	if m.width > 80 {
@@ -873,13 +996,15 @@ func (m Model) renderCommandPalette() string {
 		{"PgUp / PgDn", "Scroll 5 findings or dossier lines up / down"},
 		{"Enter", "Open Forensic Threat Dossier for selected finding"},
 		{"/", "Live fuzzy search / filter findings feed"},
+		{"s", "Toggle feed sort: severity (worst first) / arrival"},
 		{"Esc", "Clear active search filter / close modal"},
 		{"c", "Copy actionable remediation command to clipboard"},
 		{"y", "Copy selected finding path to clipboard"},
 		{"h", "Copy selected finding cryptographic hash (SHA256/MD5)"},
 		{"Tab / 1-4", "Switch dossier tabs (Assessment, Artifact, MITRE, Remediation)"},
 		{"?", "Toggle this Keyboard Shortcuts Command Palette"},
-		{"q / Ctrl+C", "Quit scanner / Close modal dialog"},
+		{"q", "Quit (asks to confirm abort while scan runs) / Close modal"},
+		{"Ctrl+C", "Quit immediately (no confirmation) / Close modal"},
 	}
 
 	for _, it := range items {

@@ -80,37 +80,53 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 	barEmpty := strings.Repeat("░", meterBlocks-filledBlocks)
 
 	if th.NoColor {
-		fmt.Fprintf(w, "\n+=========================================================================+\n")
-		fmt.Fprintf(w, "|                       SYSTEM EXECUTIVE RISK ASSESSMENT                  |\n")
-		fmt.Fprintf(w, "+=========================================================================+\n")
-		fmt.Fprintf(w, "| Host Posture:  %-56s |\n", fmt.Sprintf("[%s] %s", ass.Posture, postureTitle))
-		fmt.Fprintf(w, "| Risk Level:    %-56s |\n", fmt.Sprintf("%s (Score: %d/100)", riskLevel, threatScore))
-		fmt.Fprintf(w, "| Rationale:     %-56s |\n", ass.SummaryRationale)
-		fmt.Fprintf(w, "| Coverage:      %-56s |\n", coverageState)
-		if len(ev.ModulesNotRun) > 0 {
-			fmt.Fprintf(w, "| Modules Not Run: %-53s |\n", strings.Join(ev.ModulesNotRun, ", "))
+		cardWidth := ContentWidth(w, 75)
+		if cardWidth > MaxCardWidth {
+			cardWidth = MaxCardWidth
 		}
-		fmt.Fprintf(w, "| Findings:      %d Alerts, %d Warnings, %d Notices, %d Infos       |\n",
-			ev.Alerts, ev.Warnings, ev.Notices, ev.Infos)
-		fmt.Fprintf(w, "| Risk Meter:    [%s%s] %3d%%                      |\n", barFilled, barEmpty, threatScore)
-		fmt.Fprintf(w, "| Duration:      %-15s  Inspected: %-15d Files        |\n",
-			ev.TotalDuration.Round(time.Millisecond), ev.Coverage.FilesScanned)
-		fmt.Fprintf(w, "+-------------------------------------------------------------------------+\n")
-		fmt.Fprintf(w, "| Subsystem Timing Breakdown:                                             |\n")
-		fmt.Fprintf(w, "| Walk: %-10s Hash: %-10s Heuristics: %-10s YARA: %-8s |\n",
-			bd.FilesystemWalk.Round(time.Millisecond), bd.Hashing.Round(time.Millisecond),
-			bd.Heuristics.Round(time.Millisecond), bd.YARA.Round(time.Millisecond))
-		fmt.Fprintf(w, "| Process: %-7s Network: %-7s Correlation: %-7s Total: %-7s |\n",
-			bd.Process.Round(time.Millisecond), bd.Network.Round(time.Millisecond),
-			bd.Correlation.Round(time.Millisecond), bd.Total.Round(time.Millisecond))
-		if len(ass.NextActions) > 0 {
-			fmt.Fprintf(w, "+-------------------------------------------------------------------------+\n")
-			fmt.Fprintf(w, "| Prioritized Action Recommendations:                                     |\n")
-			for _, act := range ass.NextActions {
-				fmt.Fprintf(w, "| [P%d] %-30s -> %-28s |\n", act.Priority, act.Title, act.Command)
+		if cardWidth < MinUsableWidth {
+			cardWidth = MinUsableWidth
+		}
+		cellWidth := cardWidth - 21 // borders(2) + label(16: "Modules Not Run:") + separators(2)
+		hr := strings.Repeat("=", cardWidth-2)
+		hrFine := strings.Repeat("-", cardWidth-2)
+		row := func(label, value string) {
+			for i, l := range WrapWords(value, cellWidth) {
+				lbl := strings.Repeat(" ", 16)
+				if i == 0 {
+					lbl = fmt.Sprintf("%-16s", label+":")
+				}
+				fmt.Fprintf(w, "| %s %-*s |\n", lbl, cellWidth, l)
 			}
 		}
-		fmt.Fprintf(w, "+=========================================================================+\n\n")
+
+		fmt.Fprintf(w, "+%s+\n", hr)
+		fmt.Fprintf(w, "|%-*s|\n", cardWidth-2, "                       SYSTEM EXECUTIVE RISK ASSESSMENT                  ")
+		fmt.Fprintf(w, "+%s+\n", hr)
+		row("Host Posture", fmt.Sprintf("[%s] %s", ass.Posture, postureTitle))
+		row("Risk Level", fmt.Sprintf("%s (Score: %d/100)", riskLevel, threatScore))
+		row("Rationale", ass.SummaryRationale)
+		row("Coverage", coverageState)
+		if len(ev.ModulesNotRun) > 0 {
+			row("Modules Not Run", strings.Join(ev.ModulesNotRun, ", "))
+		}
+		row("Findings", fmt.Sprintf("%d Alerts, %d Warnings, %d Notices, %d Infos", ev.Alerts, ev.Warnings, ev.Notices, ev.Infos))
+		row("Risk Meter", fmt.Sprintf("[%s%s] %d/100", barFilled, barEmpty, threatScore))
+		row("Duration", fmt.Sprintf("%s  Inspected: %d files", ev.TotalDuration.Round(time.Millisecond), ev.Coverage.FilesScanned))
+		fmt.Fprintf(w, "+%s+\n", hrFine)
+		fmt.Fprintf(w, "|%-*s|\n", cardWidth-2, " Subsystem Timing Breakdown ")
+		row("Walk / Hash", fmt.Sprintf("%s / %s", bd.FilesystemWalk.Round(time.Millisecond), bd.Hashing.Round(time.Millisecond)))
+		row("Heuristics", fmt.Sprintf("%s (YARA: %s)", bd.Heuristics.Round(time.Millisecond), bd.YARA.Round(time.Millisecond)))
+		row("Proc/Net", fmt.Sprintf("%s / %s", bd.Process.Round(time.Millisecond), bd.Network.Round(time.Millisecond)))
+		row("Correlation", fmt.Sprintf("total %s", bd.Total.Round(time.Millisecond)))
+		if len(ass.NextActions) > 0 {
+			fmt.Fprintf(w, "+%s+\n", hrFine)
+			fmt.Fprintf(w, "|%-*s|\n", cardWidth-2, " Prioritized Action Recommendations ")
+			for _, act := range ass.NextActions {
+				row("Action", fmt.Sprintf("[P%d] %s -> %s", act.Priority, act.Title, act.Command))
+			}
+		}
+		fmt.Fprintf(w, "+%s+\n\n", hr)
 		return
 	}
 
@@ -124,8 +140,7 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 
 	statusStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(riskColor).
-		Render(postureTitle)
+		Foreground(riskColor)
 
 	keyStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -134,6 +149,12 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 
 	valStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#F8FAFC"))
+
+	verdictContentW := ContentWidth(w, DefaultContentWidth) - 8 // border + Padding(1,2)
+	verdictValW := verdictContentW - 19                         // key column (18) + space
+	if verdictValW < 16 {
+		verdictValW = 16
+	}
 
 	meterStyled := lipgloss.NewStyle().Foreground(riskColor).Render(barFilled) +
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#334155")).Render(barEmpty)
@@ -144,14 +165,30 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 	badgeInfo := lipgloss.NewStyle().Background(lipgloss.Color("#334155")).Foreground(lipgloss.Color("#FFFFFF")).Padding(0, 1).Render(fmt.Sprintf("%d Infos", ev.Infos))
 
 	var lines []string
+	verdictRow := func(label, value string, render func(...string) string) {
+		if value == "" {
+			return
+		}
+		wrapped := WrapWords(value, verdictValW)
+		lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render(label), render(wrapped[0])))
+		for _, cont := range wrapped[1:] {
+			lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render(""), render(cont)))
+		}
+	}
 	lines = append(lines, titleBanner)
 	lines = append(lines, "")
-	lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render("Status:"), statusStyle))
+	statusLines := WrapWords(postureTitle, verdictValW)
+	lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render("Status:"), statusStyle.Render(statusLines[0])))
+	for _, cont := range statusLines[1:] {
+		lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render(""), statusStyle.Render(cont)))
+	}
 	lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render("Risk Level:"), lipgloss.NewStyle().Foreground(riskColor).Bold(true).Render(fmt.Sprintf("%s (Score: %d/100)", riskLevel, threatScore))))
-	lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render("Rationale:"), valStyle.Render(ass.SummaryRationale)))
+	verdictRow("Rationale:", ass.SummaryRationale, valStyle.Render)
 	lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render("Coverage:"), valStyle.Render(coverageState)))
 	if len(ev.ModulesNotRun) > 0 {
-		lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render("Modules Not Run:"), lipgloss.NewStyle().Foreground(lipgloss.Color("#FDA4AF")).Render(strings.Join(ev.ModulesNotRun, ", "))))
+		modVal := strings.Join(ev.ModulesNotRun, ", ")
+		modStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FDA4AF"))
+		verdictRow("Modules Not Run:", modVal, modStyle.Render)
 	}
 	lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render("Risk Meter:"), fmt.Sprintf("[%s] %d%%", meterStyled, threatScore)))
 	lines = append(lines, fmt.Sprintf("%s %s %s %s %s", keyStyle.Render("Breakdown:"), badgeAlert, badgeWarn, badgeNotice, badgeInfo))

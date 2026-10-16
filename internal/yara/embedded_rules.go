@@ -75,14 +75,16 @@ rule Linux_Backdoor_Reverse_Shell_OneLiner {
         $devtcp_redir  = /\/dev\/(tcp|udp)\/[^\s;]+\s+(0>&1|>&0|>&2)/ nocase
         $bash_exec_tcp = /(exec\s+)?[0-9]*<>\/dev\/(tcp|udp)\/[^\s;]+/ nocase
         $nc_e          = /(nc|ncat|netcat)(\.[a-z]+)?\s+.*(-[a-z]*[ec][a-z]*|--(sh-)?exec)\s+['"]?((\/usr)?\/bin\/)?(ba|da|z|k)?sh/ nocase
-        $nc_pipe       = /(mkfifo|mknod)\s+\S+.*\|\s*(nc|ncat|netcat)(\.[a-z]+)?/ nocase
+        $nc_fifo_sh1   = /(mkfifo|mknod)\s+[^\s;|]+[\s\S]{0,120}(?:ba|da|z|k|a)?sh\b[\s\S]{0,120}(?:nc|ncat|netcat)/ nocase
+        $nc_fifo_sh2   = /(mkfifo|mknod)\s+[^\s;|]+[\s\S]{0,120}(?:nc|ncat|netcat)(?:\.[a-z]+)?[\s\S]{0,120}(?:\/(?:usr\/)?bin\/)?(?:ba|da|z|k|a)?sh\b/ nocase
         $py_socket     = /python[23]?\s+.*['"]import\s+(ssl,\s*)?socket.*socket\.socket/ nocase
         $perl_socket   = /perl\s+.*['"]use\s+Socket/ nocase
         $ruby_socket   = /ruby\s+.*['"](require\s+['"]socket['"]|TCPSocket\.open)/ nocase
         $lua_socket    = /lua\s+.*['"]require\s*\(?['"]socket['"]\)?.*socket\.tcp/ nocase
         $node_socket   = /node(js)?\s+.*['"]require\s*\(?['"](net|child_process)['"]\)?/ nocase
         $awk_tcp       = /awk\s+.*inet\/tcp/ nocase
-        $socat_exec    = /socat\s+(exec|pty|tcp|system).*(exec|pty|tcp|system)/ nocase
+        $socat_exec    = /socat\s+(exec|system):/ nocase
+        $socat_exec2   = /socat\s+[^\n]{0,120}[\s,](exec|system):/ nocase
     condition:
         filesize < 2MB and (any of them)
 }
@@ -310,17 +312,19 @@ rule Linux_Script_Cloud_Exfiltration_Tool {
 
 rule Linux_Persistence_Linker_Audit_Hijack {
     meta:
-        description = "Detects dynamic linker audit or preload interface hijacking (LD_AUDIT / LD_PRELOAD / ld.so.preload)"
+        description = "Detects dynamic linker audit or preload interface hijacking (LD_AUDIT / LD_PRELOAD / ld.so.preload) with value inspection: volatile or non-standard library directories, relative paths, or ld.so preload/audit configuration"
         severity = "alert"
         score = 85
         author = "Aether Security Team"
         mitre = "T1574.006"
         confidence = "high"
     strings:
-        $ld_hook      = /(LD_AUDIT|LD_PRELOAD|LD_LIBRARY_PATH)\s*=/ nocase
+        $ld_hook_dir       = /(LD_AUDIT|LD_PRELOAD)\s*=\s*['"]?\s*\/(tmp|var\/tmp|dev\/shm|run\/user|opt|srv|home|media|mnt|var\/lib|etc)\/[^\s'"]*\.(so|so\.[0-9.]+)/ nocase
+        $ld_hook_relative  = /(LD_AUDIT|LD_PRELOAD)\s*=\s*['"]?(~\/|\$HOME\/|\.{1,2}\/)[^\s'"]*\.(so|so\.[0-9.]+)/ nocase
+        $ld_libpath_volatile = /LD_LIBRARY_PATH\s*=\s*['"]?\s*\/(tmp|var\/tmp|dev\/shm|run\/user)\// nocase
         $preload_file = "/etc/ld.so.preload" ascii
         $audit_file   = "/etc/ld.so.audit" ascii
-        $env_inject   = /Environment\s*=.*LD_(AUDIT|PRELOAD)/ nocase
+        $env_inject   = /Environment\s*=\s*['"]?LD_(AUDIT|PRELOAD)\s*=/ nocase
     condition:
         filesize < 2MB and (any of them)
 }

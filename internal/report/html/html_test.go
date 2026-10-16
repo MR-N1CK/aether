@@ -764,3 +764,66 @@ func TestHTMLReport_ExportJSONAndSeniorStudioFeatures(t *testing.T) {
 		t.Errorf("missing aria-modal attribute in drawer JS")
 	}
 }
+
+// 14. Severity Vocabulary Normalization: findings carrying the extended vocabulary
+// (CRITICAL/HIGH/MEDIUM/LOW) must fold onto the four canonical bands so badges
+// stay styled and the ALERT/WARNING/NOTICE/INFO filter pills remain exhaustive.
+func TestHTMLReport_SeverityVocabularyNormalized(t *testing.T) {
+	data := sampleReportData()
+	startTime := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	data.Findings = []report.Finding{
+		{Timestamp: startTime, Module: "filesystem", Severity: report.SeverityCritical, Path: "/tmp/x1", Reason: "r1", RuleName: "R1"},
+		{Timestamp: startTime, Module: "filesystem", Severity: report.SeverityHigh, Path: "/tmp/x2", Reason: "r2", RuleName: "R2"},
+		{Timestamp: startTime, Module: "filesystem", Severity: report.SeverityMedium, Path: "/tmp/x3", Reason: "r3", RuleName: "R3"},
+		{Timestamp: startTime, Module: "filesystem", Severity: report.SeverityLow, Path: "/tmp/x4", Reason: "r4", RuleName: "R4"},
+	}
+	data.TopRules = []report.RuleSummary{
+		{RuleName: "R1", Severity: report.SeverityCritical, Count: 1},
+		{RuleName: "R2", Severity: report.SeverityHigh, Count: 1},
+	}
+
+	rep, err := htmlreport.GenerateHTMLReport(data)
+	if err != nil {
+		t.Fatalf("report generation failed: %v", err)
+	}
+	out := string(rep)
+
+	for _, banned := range []string{"sev-critical", "sev-high", "sev-medium", "sev-low", `"severity":"CRITICAL"`, `"severity":"HIGH"`, `"severity":"MEDIUM"`, `"severity":"LOW"`} {
+		if strings.Contains(out, banned) {
+			t.Errorf("extended severity vocabulary leaked into report: %q", banned)
+		}
+	}
+	for _, required := range []string{`"severity":"ALERT"`, `"severity":"WARNING"`, `"severity":"NOTICE"`, `"severity":"INFO"`} {
+		if !strings.Contains(out, required) {
+			t.Errorf("canonical severity %s missing from embedded findings payload", required)
+		}
+	}
+	if !strings.Contains(out, "sev-alert") || !strings.Contains(out, "sev-warning") {
+		t.Errorf("top-rules badges missing canonical classes")
+	}
+}
+
+// 15. Donut Theme Contrast: the donut track and center labels must resolve
+// through theme-aware CSS classes, never hard-coded dark-only colors.
+func TestHTMLReport_Donut_ThemeClasses(t *testing.T) {
+	data := sampleReportData()
+
+	rep, err := htmlreport.GenerateHTMLReport(data)
+	if err != nil {
+		t.Fatalf("report generation failed: %v", err)
+	}
+	out := string(rep)
+
+	if !strings.Contains(out, `class="donut-track"`) {
+		t.Errorf("donut track missing theme-aware class")
+	}
+	if strings.Contains(out, `stroke="#1f2937"`) {
+		t.Errorf("donut track still hard-codes dark-theme stroke color")
+	}
+	if !strings.Contains(out, "donut-center-text") || !strings.Contains(out, "donut-center-muted") {
+		t.Errorf("donut center labels missing theme-aware classes")
+	}
+	if !strings.Contains(out, `[data-theme="light"] .donut-track`) {
+		t.Errorf("light theme override for donut track missing")
+	}
+}

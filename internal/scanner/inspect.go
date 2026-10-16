@@ -59,7 +59,12 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		Ino: uint64(desc.Stat.Ino),
 	}
 
-	hashRes, fileData, isHashedOversize, rErr := s.resolveFileHashAndData(ctx, desc, virtPath, inoKey, yScanner)
+	hashRes, fileData, isHashedOversize, releasePooled, rErr := s.resolveFileHashAndData(ctx, desc, virtPath, inoKey, yScanner)
+	if releasePooled != nil {
+		// The pooled backing buffer stays charged until every consumer below
+		// (hash IOC check, heuristics, decode, YARA) has finished reading fileData.
+		defer releasePooled()
+	}
 	if rErr != nil {
 		return false, false, rErr
 	}
@@ -389,6 +394,11 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		f.Hashes["MD5"] = hashRes.Hashes.MD5
 		f.Hashes["SHA1"] = hashRes.Hashes.SHA1
 		f.Hashes["SHA256"] = hashRes.Hashes.SHA256
+		// Normalize the additive score to the documented 0-100 band. Severity already
+		// derives from the highest rule severity, so this only normalizes display data.
+		if totalScore > 100 {
+			totalScore = 100
+		}
 		f.Metadata["score"] = totalScore
 		f.Metadata["size"] = hashRes.BytesRead
 		f.Metadata["rule_severities"] = ruleSeverities
@@ -471,6 +481,19 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		}
 
 		report.DetermineVerdict(&f, s.pkgDB, (mode&0111) != 0, isDoc, isTestFixture, nil)
+
+		// Keep per-rule attribution consistent with the adjudicated finding: when the
+		// verdict engine demotes the finding (contextual/package/pentest downgrades),
+		// per-rule severities that exceeded the effective severity clamp down with it,
+		// so the TopRules summary never advertises a higher level than the finding
+		// table shows for the same detection. Lower attributions are preserved.
+		if sevs, ok := f.Metadata["rule_severities"].(map[string]string); ok {
+			for name, sv := range sevs {
+				if rankSeverity(report.Severity(sv)) > rankSeverity(f.Severity) {
+					sevs[name] = f.Severity.String()
+				}
+			}
+		}
 
 		s.accumulator.Add(virtPath, primaryRule, reason, f.Severity, totalScore, f)
 	}

@@ -1019,7 +1019,9 @@ func (s *Scanner) Run(ctx context.Context) error {
 			return false
 		}
 
-		var walkErr error
+		// Assignments below must hit the outer `walkErr` declared in the Run-scope
+		// var block, which is returned at the end of Run. Re-declaring it here would
+		// shadow it and silently discard walk failures from the error contract.
 		for _, rootPath := range scanTargets {
 			if isPathExcluded(rootPath) {
 				skippedExcluded.Add(1)
@@ -1573,12 +1575,20 @@ func CollectRootStartupNotices(euid uint32, sudoUser string, exePath string, sta
 
 func rankSeverity(s report.Severity) int {
 	switch s {
+	case report.SeverityCritical:
+		return 6
 	case report.SeverityAlert:
+		return 5
+	case report.SeverityHigh:
 		return 4
 	case report.SeverityWarning:
 		return 3
+	case report.SeverityMedium:
+		return 2
 	case report.SeverityNotice:
 		return 2
+	case report.SeverityLow:
+		return 1
 	case report.SeverityInfo:
 		return 1
 	default:

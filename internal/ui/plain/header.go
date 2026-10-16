@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"aether/internal/events"
 	"aether/internal/ui/theme"
@@ -23,15 +24,21 @@ func RenderScanHeader(w io.Writer, ev events.ScanStarted, th *theme.Theme) {
 	if host == "" {
 		host = "unknown-host"
 	}
+	if runewidth.StringWidth(host) > 15 {
+		host = runewidth.Truncate(host, 15, "…")
+	}
 
 	privStr := fmt.Sprintf("non-root (uid=%d)", os.Geteuid())
 	if os.Geteuid() == 0 {
 		privStr = "root (uid=0) - FULL PRIVILEGES"
 	}
 
+	// Header cells have fixed budgets; truncate rune-safely so multi-byte
+	// hostnames/paths never split mid-rune (mojibake) and the 75-column
+	// border silhouette stays intact.
 	targetStr := strings.Join(ev.Paths, ", ")
-	if len(targetStr) > 40 {
-		targetStr = targetStr[:37] + "..."
+	if runewidth.StringWidth(targetStr) > 25 {
+		targetStr = runewidth.Truncate(targetStr, 25, "…")
 	}
 
 	bName := ev.BinaryName
@@ -41,6 +48,9 @@ func RenderScanHeader(w io.Writer, ev events.ScanStarted, th *theme.Theme) {
 	verStr := ev.Version
 	if verStr == "" {
 		verStr = "0.1.0-dev"
+	}
+	if runewidth.StringWidth(verStr) > 15 {
+		verStr = runewidth.Truncate(verStr, 15, "…")
 	}
 
 	if th.NoColor {

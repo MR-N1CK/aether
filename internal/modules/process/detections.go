@@ -697,6 +697,68 @@ func ConsolidateProcessSignals(signals []*ProcessSignal, info *ProcessInfo, isCo
 	return &finding
 }
 
+// volatileExecDir reports whether a cleaned path references a temporary or volatile
+// execution directory commonly used for staged payloads.
+func volatileExecDir(p string) bool {
+	return p == "/tmp" || strings.HasPrefix(p, "/tmp/") ||
+		p == "/dev/shm" || strings.HasPrefix(p, "/dev/shm/") ||
+		p == "/var/tmp" || strings.HasPrefix(p, "/var/tmp/") ||
+		strings.HasPrefix(p, "/run/user/")
+}
+
+// hookValueSeen reports whether a dynamic linker hook environment value is present.
+func hookValueSeen(v string) bool {
+	return strings.TrimSpace(v) != ""
+}
+
+// classifyLinkerHook inspects a dynamic linker hook value (LD_PRELOAD / LD_AUDIT) and
+// returns a suspicion tier with a plain-English reason:
+//   2 — verifiably anomalous (volatile directory, non-absolute path, or missing library).
+//   1 — unverified (absolute path outside standard linker directories, or unreadable).
+//   0 — trusted (absolute path inside standard linker directories verified on disk).
+func classifyLinkerHook(value string) (int, string) {
+	clean := strings.TrimSpace(value)
+	if clean == "" {
+		return 0, ""
+	}
+
+	trustedLinkerDir := func(p string) bool {
+		switch {
+		case p == "/lib", p == "/lib64", p == "/usr/lib", p == "/usr/lib64", p == "/usr/local/lib":
+			return true
+		case strings.HasPrefix(p, "/lib/"), strings.HasPrefix(p, "/lib64/"),
+			strings.HasPrefix(p, "/usr/lib/"), strings.HasPrefix(p, "/usr/lib64/"),
+			strings.HasPrefix(p, "/usr/local/lib/"):
+			return true
+		}
+		return false
+	}
+
+	for _, raw := range strings.FieldsFunc(clean, func(r rune) bool { return r == ':' || r == ' ' || r == '\t' }) {
+		p := filepath.Clean(strings.TrimSpace(raw))
+		if p == "" || p == "." {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			return 2, fmt.Sprintf("non-absolute library path (%s) cannot be resolved against trusted linker directories", p)
+		}
+		if volatileExecDir(p) {
+			return 2, fmt.Sprintf("library path references a volatile/temporary directory (%s)", p)
+		}
+		if _, statErr := os.Stat(p); statErr == nil {
+			if trustedLinkerDir(p) {
+				continue
+			}
+			return 1, fmt.Sprintf("library outside standard linker directories (%s)", p)
+		} else if os.IsNotExist(statErr) {
+			return 2, fmt.Sprintf("hook references a library that does not exist on disk (%s) (deleted after injection or in-memory only)", p)
+		}
+		// Permission/other stat failure: cannot adjudicate identity here.
+		return 1, fmt.Sprintf("library path could not be verified (%s)", p)
+	}
+	return 0, ""
+}
+
 // CheckProcessEnviron inspects the runtime environment variables for rootkit hooks,
 // anti-forensics history suppression, and C2 framework indicators.
 func CheckProcessEnviron(info *ProcessInfo, cfg *config.Config) []*ProcessSignal {
@@ -706,30 +768,44 @@ func CheckProcessEnviron(info *ProcessInfo, cfg *config.Config) []*ProcessSignal
 
 	var signals []*ProcessSignal
 
-	// 1. LD_PRELOAD injection hook
-	if ldp, ok := info.Environ["LD_PRELOAD"]; ok {
-		clean := strings.TrimSpace(ldp)
-		if clean != "" {
+	// 1. LD_PRELOAD / LD_AUDIT injection hooks — value-inspected classification.
+	// A bare environment-variable mention is not sufficient evidence of a rootkit hook:
+	// legitimate tooling (ASan, valgrind, profiling SDKs, faketime) uses LD_PRELOAD for
+	// preloaded libraries inside standard linker directories. The hook is only escalated
+	// when the referenced path is verifiably anomalous:
+	//   Alert — volatile/temporary execution directory, non-absolute path, or a library
+	//           that no longer exists on disk (staged injection or post-exploit cleanup).
+	//   Warning — absolute path to an existing library outside standard linker directories
+	//             (identity unverifiable by package database in this pass).
+	//   No signal — absolute path inside standard linker directories verified on disk.
+	for _, hook := range []struct {
+		ruleName string
+		label    string
+		value    string
+	}{
+		{"Process_Environ_LDPreload", "LD_PRELOAD", info.Environ["LD_PRELOAD"]},
+		{"Process_Environ_LDAudit", "LD_AUDIT", info.Environ["LD_AUDIT"]},
+	} {
+		if !hookValueSeen(hook.value) {
+			continue
+		}
+		tier, why := classifyLinkerHook(hook.value)
+		switch tier {
+		case 2:
 			signals = append(signals, &ProcessSignal{
-				RuleName: "Process_Environ_LDPreload",
-				Reason:   fmt.Sprintf("Process running with active LD_PRELOAD environment variable (%s)", clean),
+				RuleName: hook.ruleName,
+				Reason:   fmt.Sprintf("Process running with %s injection hook: %s (value: %s)", hook.label, why, strings.TrimSpace(hook.value)),
 				Score:    90,
 				Severity: report.SeverityAlert,
 				IsStrong: true,
 			})
-		}
-	}
-
-	// 1b. LD_AUDIT injection hook
-	if lda, ok := info.Environ["LD_AUDIT"]; ok {
-		clean := strings.TrimSpace(lda)
-		if clean != "" {
+		case 1:
 			signals = append(signals, &ProcessSignal{
-				RuleName: "Process_Environ_LDAudit",
-				Reason:   fmt.Sprintf("Process running with active LD_AUDIT dynamic linker auditing hook (%s)", clean),
-				Score:    90,
-				Severity: report.SeverityAlert,
-				IsStrong: true,
+				RuleName: hook.ruleName,
+				Reason:   fmt.Sprintf("Process running with %s hook outside standard linker directories: %s (value: %s)", hook.label, why, strings.TrimSpace(hook.value)),
+				Score:    60,
+				Severity: report.SeverityWarning,
+				IsStrong: false,
 			})
 		}
 	}

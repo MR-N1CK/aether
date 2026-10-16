@@ -239,16 +239,16 @@ func init() {
 		ConfidenceMedium)
 
 	mustRegister("Persistence_Linker_Audit_Hijack",
-		"Dynamic Linker Audit Interface Hijack (LD_AUDIT)",
-		"The dynamic linker audit mechanism (LD_AUDIT environment variable or /etc/ld.so.audit file) is configured. Adversaries use this mechanism to intercept library resolution and execute arbitrary code prior to process startup.",
+		"Dynamic Linker Hook Hijack (LD_PRELOAD / LD_AUDIT)",
+		"A script or service configures a dynamic linker hook (LD_PRELOAD or LD_AUDIT) pointing at a volatile directory, a relative path, a missing library, or a location outside the standard linker directories. Adversaries use these hooks to intercept library resolution and execute code in every subsequent process before startup.",
 		[]MITREMapping{
 			{Tactic: "Persistence", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"},
 			{Tactic: "Defense Evasion", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"},
 		},
 		[]string{
-			"Inspect /etc/ld.so.audit and system-wide environment files for rogue library references.",
-			"Verify the integrity and digital signatures of any shared libraries loaded via linker audit.",
-			"Remove unauthorized LD_AUDIT entries from shell profiles and systemd service environments.",
+			"Inspect /etc/ld.so.preload, /etc/ld.so.audit, and system-wide environment files for rogue library references.",
+			"Verify the integrity and package ownership of any preloaded or audit library; delete-or-restore entries referencing volatile paths.",
+			"Remove unauthorized LD_PRELOAD / LD_AUDIT entries from shell profiles and systemd service environments.",
 		},
 		ConfidenceHigh)
 

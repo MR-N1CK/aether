@@ -882,10 +882,10 @@ func registerScannerRules() {
 		ConfidenceMedium)
 
 	m("Linux_Persistence_Linker_Audit_Hijack",
-		"Dynamic Linker Audit Interface Hijack (LD_AUDIT) (YARA)",
-		"YARA rule matched dynamic linker audit interface hijacking (/etc/ld.so.audit or LD_AUDIT environment configuration).",
+		"Dynamic Linker Hook Hijack (LD_PRELOAD / LD_AUDIT) (YARA)",
+		"YARA rule matched a dynamic linker hook value referencing a volatile or non-standard library directory, a relative path, or ld.so preload/audit configuration.",
 		[]MITREMapping{{Tactic: "Persistence", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}, {Tactic: "Defense Evasion", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}},
-		[]string{"Inspect /etc/ld.so.audit and environment configurations for rogue library paths.", "Verify integrity and signatures of libraries loaded via LD_AUDIT.", "Remove unauthorized LD_AUDIT entries."},
+		[]string{"Inspect /etc/ld.so.preload, /etc/ld.so.audit, and environment configurations for rogue library paths.", "Verify integrity and package ownership of preloaded or audit libraries.", "Remove unauthorized LD_PRELOAD / LD_AUDIT entries."},
 		ConfidenceHigh)
 
 	m("Linux_Persistence_PAM_Exec_Suspicious",
@@ -898,9 +898,9 @@ func registerScannerRules() {
 	// Phase 5: Linux System Visibility Expansion
 	m("Process_Environ_LDPreload",
 		"Process Environment Injected with LD_PRELOAD Hook",
-		"The process was launched with an active LD_PRELOAD environment variable pointing to a dynamic library, typically used by userland rootkits to intercept libc function calls.",
+		"The process was launched with an LD_PRELOAD value adjudicated as anomalous (volatile directory, non-absolute path, missing library, or a library outside the standard linker directories) — the classic userland rootkit preload pattern used to intercept libc calls in every child process.",
 		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}},
-		[]string{"Inspect the preloaded library file path.", "Terminate the infected process and investigate the parent process that spawned it.", "Audit /etc/ld.so.preload and shell startup files."},
+		[]string{"Inspect the preloaded library file path and verify package ownership.", "Terminate the injected process and investigate the parent process that spawned it.", "Audit /etc/ld.so.preload and shell startup files."},
 		ConfidenceHigh)
 
 	m("Process_Environ_AntiForensic",

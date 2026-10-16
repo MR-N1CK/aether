@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"aether/internal/ui/theme"
 	"aether/internal/yara"
@@ -383,12 +384,23 @@ func (m LauncherModel) View() string {
 		} else {
 			keyBadge := subStyle.Render("[" + item.keyNumber + "]")
 			itemTitle := titleStyle.Render(item.title)
-			desc := subStyle.Render(item.description)
 
-			// Clean compact row for unselected items
-			row := fmt.Sprintf("   %s %s %-32s %s", keyBadge, item.icon, itemTitle, desc)
+			// Clean compact row for unselected items. Truncation is applied to the
+			// raw description text BEFORE styling so multi-byte runes and ANSI
+			// sequences are never split mid-sequence, and the untouched item
+			// description is preserved across re-renders.
+			descText := item.description
+			prefixW := lipgloss.Width(keyBadge) + 1 + lipgloss.Width(item.icon) + 1 + lipgloss.Width(item.title) + 2
+			descBudget := wBox - prefixW
+			if descBudget < 1 {
+				descBudget = 1
+			}
+			if lipgloss.Width(descText) > descBudget {
+				descText = runewidth.Truncate(descText, descBudget-1, "…")
+			}
+			row := fmt.Sprintf("   %s %s %-32s %s", keyBadge, item.icon, itemTitle, subStyle.Render(descText))
 			if lipgloss.Width(row) > wBox {
-				row = row[:wBox-3] + "..."
+				row = runewidth.Truncate(row, wBox-1, "…")
 			}
 			b.WriteString(row + "\n")
 		}

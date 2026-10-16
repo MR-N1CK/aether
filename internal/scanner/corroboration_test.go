@@ -136,3 +136,70 @@ func TestScanner_DropperEscalationWithCorroboration(t *testing.T) {
 		t.Errorf("expected corroborated dropper confidence HIGH, got %s", fCorroborated.Confidence)
 	}
 }
+
+// TestTopRules_MatchAdjudicatedSeverity guards summary-box consistency: when the
+// verdict engine demotes a finding (e.g. contextual downgrade of a linker-hook
+// script), the TopRules summary must reflect the adjudicated severity instead of
+// the raw fire-time severity, so the summary never disagrees with the findings table.
+func TestTopRules_MatchAdjudicatedSeverity(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "linker_hook.sh")
+	content := []byte("#!/bin/bash\nexport LD_PRELOAD=/tmp/.stealth/libhook.so\n")
+	if err := os.WriteFile(filePath, content, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.Root = tmpDir
+	cfg.Scan.Paths = []string{filePath}
+	cfg.Scan.ExplicitPaths = true
+	cfg.Scan.Threads = 1
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	var findings []report.Finding
+	var scanFin *events.ScanFinished
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			switch e := ev.(type) {
+			case events.FindingRaised:
+				findings = append(findings, e.Finding)
+			case events.ScanFinished:
+				sf := e
+				scanFin = &sf
+				return
+			}
+		}
+	}()
+
+	s := scanner.NewScanner(cfg, bus, nil, nil, scanner.WithModules(nil))
+	if err := s.Run(context.Background()); err != nil {
+		t.Fatalf("scanner Run failed: %v", err)
+	}
+	<-done
+
+	if len(findings) == 0 {
+		t.Fatalf("expected at least one finding for linker hook script")
+	}
+	f := findings[0]
+	if f.RuleName != "Persistence_Linker_Audit_Hijack" {
+		t.Fatalf("expected linker hook rule, got %s", f.RuleName)
+	}
+	if f.Severity != report.SeverityWarning {
+		t.Fatalf("expected contextual demotion to WARNING, got %s", f.Severity)
+	}
+
+	if scanFin == nil {
+		t.Fatalf("expected ScanFinished event")
+	}
+	for _, tr := range scanFin.TopRules {
+		if tr.RuleName == "Persistence_Linker_Audit_Hijack" && tr.Severity != report.SeverityWarning {
+			t.Errorf("TopRules severity (%s) disagrees with adjudicated finding severity (%s)", tr.Severity, f.Severity)
+		}
+	}
+}

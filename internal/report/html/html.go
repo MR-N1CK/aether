@@ -200,6 +200,28 @@ func aggregateMITRE(findings []report.Finding) []mitreTacticGroup {
 	return result
 }
 
+// canonicalSeverity folds the extended severity vocabulary onto the four canonical
+// report bands the HTML report styles and filters. Without this fold, findings
+// carrying CRITICAL/HIGH/MEDIUM/LOW render unstyled badges and become unreachable
+// by the ALERT/WARNING/NOTICE/INFO filter pills.
+func canonicalSeverity(s report.Severity) report.Severity {
+	switch s {
+	case report.SeverityCritical:
+		return report.SeverityAlert
+	case report.SeverityHigh:
+		return report.SeverityWarning
+	case report.SeverityMedium:
+		return report.SeverityNotice
+	case report.SeverityLow:
+		return report.SeverityInfo
+	default:
+		return s
+	}
+}
+
+// renderDonutSVG renders the severity distribution donut for the report header.
+// Track and center-label colors resolve through CSS classes so both color themes
+// keep contrast; the segment strokes are theme-invariant verdict/ severity colors.
 func renderDonutSVG(alerts, warnings, notices, infos int, verdict events.Verdict) string {
 	total := alerts + warnings + notices + infos
 	var buf bytes.Buffer
@@ -207,14 +229,14 @@ func renderDonutSVG(alerts, warnings, notices, infos int, verdict events.Verdict
 
 	if total == 0 {
 		buf.WriteString(`  <circle cx="80" cy="80" r="52" fill="none" stroke="#10b981" stroke-width="14" stroke-opacity="0.8"/>` + "\n")
-		buf.WriteString(`  <text x="80" y="74" text-anchor="middle" font-size="22" font-weight="800" fill="#10b981">0</text>` + "\n")
-		buf.WriteString(`  <text x="80" y="92" text-anchor="middle" font-size="9" font-weight="700" fill="#9ca3af" letter-spacing="1">CLEAN</text>` + "\n")
+		buf.WriteString(`  <text class="donut-center-text" x="80" y="74" text-anchor="middle" font-size="22" font-weight="800" fill="#10b981">0</text>` + "\n")
+		buf.WriteString(`  <text class="donut-center-muted" x="80" y="92" text-anchor="middle" font-size="9" font-weight="700" letter-spacing="1">CLEAN</text>` + "\n")
 		buf.WriteString(`</svg>`)
 		return buf.String()
 	}
 
 	circumference := 2.0 * 3.141592653589793 * 52.0
-	buf.WriteString(`  <circle cx="80" cy="80" r="52" fill="none" stroke="#1f2937" stroke-width="14"/>` + "\n")
+	buf.WriteString(`  <circle class="donut-track" cx="80" cy="80" r="52" fill="none" stroke-width="14"/>` + "\n")
 
 	slices := []struct {
 		count int
@@ -250,8 +272,8 @@ func renderDonutSVG(alerts, warnings, notices, infos int, verdict events.Verdict
 		verdictLabel = "SUSPECT"
 	}
 
-	buf.WriteString(fmt.Sprintf(`  <text x="80" y="74" text-anchor="middle" font-size="22" font-weight="800" fill="#f3f4f6">%d</text>`+"\n", total))
-	buf.WriteString(fmt.Sprintf(`  <text x="80" y="92" text-anchor="middle" font-size="9" font-weight="700" fill="%s" letter-spacing="1">%s</text>`+"\n", verdictColor, verdictLabel))
+	buf.WriteString(fmt.Sprintf(`  <text class="donut-center-text" x="80" y="74" text-anchor="middle" font-size="22" font-weight="800">%d</text>`+"\n", total))
+	buf.WriteString(fmt.Sprintf(`  <text class="donut-center-muted" x="80" y="92" text-anchor="middle" font-size="9" font-weight="700" fill="%s" letter-spacing="1">%s</text>`+"\n", verdictColor, verdictLabel))
 	buf.WriteString(`</svg>`)
 	return buf.String()
 }
@@ -311,7 +333,7 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 			Index:               i + 1,
 			Timestamp:           ts,
 			Module:              f.Module,
-			Severity:            string(f.Severity),
+			Severity:            string(canonicalSeverity(f.Severity)),
 			Confidence:          string(f.Confidence),
 			Verdict:             string(f.Verdict),
 			ConfidenceRationale: f.ConfidenceRationale,
@@ -735,7 +757,7 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 		buf.WriteString("          </thead>\n")
 		buf.WriteString("          <tbody>\n")
 		for _, tr := range data.TopRules {
-			badgeClass := "sev-" + strings.ToLower(string(tr.Severity))
+			badgeClass := "sev-" + strings.ToLower(string(canonicalSeverity(tr.Severity)))
 			ackStr := "No"
 			if tr.Acknowledged {
 				ackStr = "Yes"
@@ -743,7 +765,7 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 			buf.WriteString(fmt.Sprintf("            <tr><td><code>%s</code></td><td><span class=\"badge %s\">%s</span></td><td><strong>%d</strong></td><td>%s</td></tr>\n",
 				html.EscapeString(tr.RuleName),
 				badgeClass,
-				html.EscapeString(string(tr.Severity)),
+				html.EscapeString(string(canonicalSeverity(tr.Severity))),
 				tr.Count,
 				ackStr,
 			))
@@ -1215,6 +1237,24 @@ code, pre {
     transition: none !important;
     animation: none !important;
   }
+}
+.donut-track {
+  stroke: #1f2937;
+}
+.donut-center-text {
+  fill: #f3f4f6;
+}
+.donut-center-muted {
+  fill: #9ca3af;
+}
+[data-theme="light"] .donut-track {
+  stroke: #e5e7eb;
+}
+[data-theme="light"] .donut-center-text {
+  fill: #111827;
+}
+[data-theme="light"] .donut-center-muted {
+  fill: #6b7280;
 }
 .search-highlight {
   background-color: rgba(245, 158, 11, 0.35);

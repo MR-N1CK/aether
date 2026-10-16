@@ -196,8 +196,10 @@ func (m Model) renderDashboard() string {
 		statText += fmt.Sprintf("  │  Velocity: %.0f files/sec [%s]", m.filesPerSec, spark)
 	}
 
-	// Render custom smooth progress track
-	barWidth := cardWidth - len(statText) - 10
+	// Render custom smooth progress track. Measure the visual width of the
+	// ANSI-styled stat text with lipgloss.Width — a raw len() would count
+	// escape sequences and skew the gauge alignment mid-render.
+	barWidth := cardWidth - lipgloss.Width(statText) - 10
 	if barWidth > 15 {
 		gauge := m.renderProgressBar(barWidth)
 		statText = fmt.Sprintf("%s   %s", gauge, statText)

@@ -456,19 +456,95 @@ var (
 	reOpenSSLRevShell     = regexp.MustCompile(`(?i)openssl\s+s_client\s+.*-connect\s+[^\s|;&]+.*\|\s*(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh)|openssl\s+s_client\s+.*-connect\s+.*<\s*/(?:tmp|var/tmp|dev/shm)/|mkfifo\s+\S+.*\|\s*openssl\s+s_client`)
 	reSocatRevShell       = regexp.MustCompile(`(?i)socat\s+.*(?:exec|pty|system)\s*:\s*['"]?(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh)|socat\s+(?:tcp(?:[46])?(?:-connect)?|openssl-connect):\S+.*(?:exec|pty|system)|socat\s+openssl-connect:\S+`)
 	reProcHiding          = regexp.MustCompile(`(?i)mount\s+(?:-t\s+tmpfs\s+(?:-o\s+\S+\s+)?(?:tmpfs\s+)?|--bind\s+\S+\s+|-o\s+bind\s+\S+\s+)['"]?/proc/(?:\$\{[a-zA-Z0-9_]+\}|\$[a-zA-Z0-9_]+|\d+)`)
-	reNetcatRevShell      = regexp.MustCompile(`(?i)(?:nc|ncat|netcat)(?:\.[a-z]+)?\s+.*(?:-[a-z]*[ec][a-z]*|--(?:sh-)?exec)\s+['"]?(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh)|(?:mkfifo|mknod)\s+\S+.*\|\s*(?:nc|ncat|netcat)(?:\.[a-z]+)?\s+|(?:nc|ncat|netcat)(?:\.[a-z]+)?\s+\S+\s+\d+\s*\|\s*(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh)`)
+	reNetcatRevShell      = regexp.MustCompile(`(?i)(?:nc|ncat|netcat)(?:\.[a-z]+)?\s+.*(?:-[a-z]*[ec][a-z]*|--(?:sh-)?exec)\s+['"]?(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh)|(?:mkfifo|mknod)\s+[^\s;|]+[\s\S]{0,120}(?:ba|da|z|k|a)?sh\b[\s\S]{0,120}(?:nc|ncat|netcat)|(?:mkfifo|mknod)\s+[^\s;|]+[\s\S]{0,120}(?:nc|ncat|netcat)(?:\.[a-z]+)?[\s\S]{0,120}(?:/(?:usr/)?bin/)?(?:ba|da|z|k|a)?sh\b|(?:nc|ncat|netcat)(?:\.[a-z]+)?\s+\S+\s+\d+\s*\|\s*(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh)`)
 	reInlineScriptRev     = regexp.MustCompile(`(?i)(?:python[23]?|perl|php|ruby|lua|node(?:js)?)\s+-[a-zA-Z0-9]*[cer]\s+[\s\S]*(?:socket\.(?:socket|connect)|use\s+Socket|fsockopen|TCPSocket|pty\.spawn|child_process|inet/tcp)|(?:import\s+(?:ssl,\s*)?socket[\s\S]*socket\.socket[\s\S]*\.connect\s*\(\s*\([\s\S]*,\s*\S+\s*\)[\s\S]*(?:os\.dup2|subprocess|pty\.spawn|send\(b?['"]\+))|awk\s+.*inet/tcp`)
 	reWebshellGeneric     = regexp.MustCompile(`(?i)(?:eval|assert|passthru|shell_exec|system|popen|proc_open|create_function|pcntl_exec)\s*\(\s*(?:(?:base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|hex2bin|pack)\s*\(\s*)*\$_(?:POST|GET|REQUEST|COOKIE|SERVER)\[|call_user_func(?:_array)?\s*\(\s*['"]?(?:eval|assert|passthru|shell_exec|system|popen|proc_open)['"]?\s*,\s*.*\$_(?:POST|GET|REQUEST|COOKIE|SERVER)|(?:\$[a-zA-Z0-9_]+\s*=\s*(?:(?:base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|hex2bin|stripslashes)\s*\(\s*)*\$_(?:POST|GET|REQUEST|COOKIE|SERVER)\[[\s\S]{0,150}(?:eval|assert|passthru|shell_exec|system|popen|proc_open)\s*\(\s*\$[a-zA-Z0-9_]+)`)
 	reWebshellTraits      = regexp.MustCompile(`(?i)\$password\s*=\s*['"][a-f0-9]{32}['"][\s\S]*(?:eval|system|passthru)|\$auth_pass\s*=[\s\S]*(?:eval|system|passthru)|(?:b374k|wso_version|c99shell|r57shell|weevely|alfa\s*team)[\s\S]*(?:eval|system|shell_exec|passthru)|\$_(?:POST|GET|REQUEST)\[['"](?:cmd|shell|exec|command|upload|action)['"]\][\s\S]{0,200}(?:move_uploaded_file|file_put_contents|fwrite)[\s\S]{0,200}(?:chmod|eval|system)`)
 	reDownloadAndExec     = regexp.MustCompile(`(?i)(?:(?:busybox\s+)?(?:curl|wget|fetch|aria2c)(?:\s+--?[a-zA-Z0-9_=-]+(?:\s+[^\s|;&]+)?)*\s+https?://[^\s|;&]+(?:\s+--?[a-zA-Z0-9_=-]+(?:\s+[^\s|;&]+)?)*)\s*\|\s*(?:sudo\s+)?(?:(?:/(?:usr/)?bin/)?(?:ba)?sh|dash|zsh|ksh|ash|python[23]?|perl)(?:\s+-[a-zA-Z0-9_=-]+|\s+--)*`)
 	rePowerShellEncoded   = regexp.MustCompile(`(?i)(?:pwsh|powershell)(?:\.exe)?\s+.*-(?:e|enc|encodedcommand)\s+[A-Za-z0-9+/=]{10,}`)
 	reCloudExfilTool      = regexp.MustCompile(`(?i)(?:rclone\s+(?:copy|copyto|sync|move|rcat)|mega-(?:put|cmd|export)|aws\s+s3\s+(?:cp|sync|mv)|(?:gsutil|gcloud\s+storage)\s+(?:cp|rsync)|azcopy\s+(?:copy|sync)|s5cmd\s+(?:cp|sync|cat))\s+.*(?:/etc/|/root/|/home/|\.tar(?:\.gz|\.bz2|\.xz)?|\.zip|\.7z|\.sql|\.kdbx|\.db)|curl\s+.*(?:-T|--upload-file|-F)\s+.*https?://(?:transfer\.sh|file\.io|bashupload\.com|catbox\.moe|0x0\.st)`)
-	reLinkerAuditHook     = regexp.MustCompile(`(?i)(?:(?:LD_AUDIT|LD_PRELOAD|LD_LIBRARY_PATH)\s*=|/etc/ld\.so\.(?:audit|preload)|Environment\s*=.*LD_(?:AUDIT|PRELOAD))`)
+	reLinkerHookDirect    = regexp.MustCompile(`(?i)/etc/ld\.so\.(?:audit|preload)|(?:Environment|ExecEnv)\s*=\s*['"]?.*LD_(?:AUDIT|PRELOAD)\s*=`)
+	reLinkerHookValue     = regexp.MustCompile(`(?i)(LD_(?:AUDIT|PRELOAD|LIBRARY_PATH))\s*=\s*['"]?\s*([^\s'"]+)`)
 	rePamExecHook         = regexp.MustCompile(`(?i)(?:pam_exec\.so|pam_script\.so)\s+.*(?:/(?:tmp|var/tmp|dev/shm|root|home)|\/\.[a-zA-Z0-9_]+|\.sh\b|\.py\b|\.pl\b|seteuid)`)
 	reRansomwareScript    = regexp.MustCompile(`(?i)(?:from\s+cryptography\.fernet\s+import\s+Fernet|Crypto\.Cipher|AES\.new|ChaCha20|Fernet\()[\s\S]*(?:os\.walk|os\.scandir|rglob|glob\.glob|Path\.walk)[\s\S]*(?:\.encrypt\(|encrypt_file|os\.remove|\.locked|\.enc\b|ransom|RESCUE|DECRYPT|victim|TARGET_DIR)`)
 	reDataExfiltration    = regexp.MustCompile(`(?i)(?:(?:socket\.socket|socket\.create_connection|requests\.post|urllib\.request)[\s\S]*(?:os\.walk|os\.listdir|os\.scandir|iter_files|rglob|TARGET_DIR)[\s\S]*(?:sendall|send\(|socket\.send)|(?:exfil|exfiltrat|stealer)[\s\S]*(?:socket|requests|urllib|sendall|b64encode)|(?:zlib\.compress|base64\.b64encode)[\s\S]*(?:sendall|send\(|socket\.send))`)
 	reExfilServer         = regexp.MustCompile(`(?i)socket\.socket[\s\S]*\.bind\s*\(\s*\([\s\S]*\.listen[\s\S]*\.accept[\s\S]*(?:zlib\.decompress|base64\.b64decode|exfil|stolen|victim|tree\.json|dump_payload)`)
 )
+
+// linkerVolatileDir reports paths inside volatile execution directories.
+func linkerVolatileDir(p string) bool {
+	switch {
+	case p == "/tmp", strings.HasPrefix(p, "/tmp/"),
+		p == "/dev/shm", strings.HasPrefix(p, "/dev/shm/"),
+		p == "/var/tmp", strings.HasPrefix(p, "/var/tmp/"),
+		strings.HasPrefix(p, "/run/user/"),
+		strings.HasPrefix(p, "~/"), strings.HasPrefix(p, "$HOME"):
+		return true
+	}
+	return false
+}
+
+// linkerTrustedDir reports whether a preload target lives inside the standard
+// dynamic linker library directories (mirrors the process module classifier).
+func linkerTrustedDir(p string) bool {
+	switch {
+	case p == "/lib", p == "/lib64", p == "/usr/lib", p == "/usr/lib64", p == "/usr/local/lib":
+		return true
+	case strings.HasPrefix(p, "/lib/"), strings.HasPrefix(p, "/lib64/"),
+		strings.HasPrefix(p, "/usr/lib/"), strings.HasPrefix(p, "/usr/lib64/"),
+		strings.HasPrefix(p, "/usr/local/lib/"):
+		return true
+	}
+	return false
+}
+
+// linkerValueTokens splits a colon/space separated linker hook value list.
+func linkerValueTokens(value string) []string {
+	return strings.FieldsFunc(value, func(r rune) bool { return r == ':' || r == ' ' || r == '\t' })
+}
+
+// linkerHookMatch evaluates dynamic linker hooks with value inspection, mirroring the
+// runtime environment classifier in the process module. A hook is anomalous when:
+//   - it configures the system-wide preload/audit files, or
+//   - the referenced target is volatile, relative/non-absolute, or missing from disk
+//     (LD_PRELOAD/LD_AUDIT libraries deleted after staging), or
+//   - an LD_PRELOAD/LD_AUDIT library exists outside the standard linker directories.
+// LD_LIBRARY_PATH values are held to volatile/referential checks only, matching the
+// lower runtime expectation for development paths.
+func linkerHookMatch(data []byte) bool {
+	if reLinkerHookDirect.Match(data) {
+		return true
+	}
+	for _, m := range reLinkerHookValue.FindAllSubmatch(data, -1) {
+		hook := strings.ToUpper(string(m[1]))
+		value := strings.Trim(string(m[2]), "'\"")
+		if value == "" {
+			continue
+		}
+		for _, raw := range linkerValueTokens(value) {
+			p := filepath.Clean(raw)
+			if p == "" || p == "." {
+				continue
+			}
+			if !filepath.IsAbs(p) || linkerVolatileDir(p) {
+				return true
+			}
+			if hook == "LD_LIBRARY_PATH" && p != "" {
+				continue // runtime enrichment flags volatile dirs above; do not alert on sdk/dev dirs
+			}
+			if _, err := os.Stat(p); err != nil {
+				if os.IsNotExist(err) {
+					return true
+				}
+				continue // unreadable target: defer to runtime/evidence stage
+			}
+			if !linkerTrustedDir(p) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // CheckSuspiciousScriptContent evaluates file bytes for malicious script patterns,
 // including interactive/encrypted reverse shells, netcat/socat listeners, procfs manipulation,
@@ -505,7 +581,7 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		if !reProcHiding.Match(data) && !reOpenSSLRevShell.Match(data) &&
 			!reRevShellInteractive.Match(data) && !reNetcatRevShell.Match(data) && !reSocatRevShell.Match(data) &&
 			!reRansomwareScript.Match(data) && !rePowerShellEncoded.Match(data) && !rePamExecHook.Match(data) &&
-			!reLinkerAuditHook.Match(data) {
+			!linkerHookMatch(data) {
 			return nil
 		}
 	}
@@ -655,11 +731,11 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		}
 	}
 
-	// 15. Dynamic Linker Auditing hook (LD_AUDIT / ld.so.audit)
-	if reLinkerAuditHook.Match(data) {
+	// 15. Dynamic linker hijack — value-inspected (volatile/relative/missing library targets, ld.so preload/audit config)
+	if linkerHookMatch(data) {
 		return &HeuristicMatch{
 			Name:     "Persistence_Linker_Audit_Hijack",
-			Reason:   fmt.Sprintf("Dynamic linker auditing intercept hook (LD_AUDIT/ld.so.audit) in %s", filepath.Base(cleaned)),
+			Reason:   fmt.Sprintf("Dynamic linker intercept hook referencing a volatile or relative library path, or ld.so preload/audit configuration, in %s", filepath.Base(cleaned)),
 			Score:    85,
 			Severity: report.SeverityAlert,
 		}

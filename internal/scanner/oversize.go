@@ -11,18 +11,21 @@ import (
 
 // resolveFileHashAndData determines the cryptographic hashes and inspectable byte buffer for a file.
 // It handles oversize streaming, memory budgeting, hardlink caching, and YARA oversize skip tracking.
+//
+// Buffer ownership contract: when fileData is non-empty, it is backed by a pooled buffer
+// charged against the memory budget. The caller MUST invoke the returned release function
+// (after its final read of fileData) or the buffer would leak from the budget and be reused
+// by another worker while still in use. When release is nil, no pooled buffer was issued.
 func (s *Scanner) resolveFileHashAndData(
 	ctx context.Context,
 	desc *FileDescriptor,
 	virtPath string,
 	inoKey InodeKey,
 	yScanner yara.Scanner,
-) (*HashStreamResult, []byte, bool, error) {
+) (hashRes *HashStreamResult, fileData []byte, isHashedOversize bool, release func(), err error) {
 	statSize := desc.Stat.Size
-	var fileData []byte
-	var hashRes *HashStreamResult
-	isHashedOversize := false
 	isHardlinkCandidate := desc.Stat.Nlink > 1
+	isHashedOversize = false
 
 	if statSize > s.cfg.Scan.MaxFileSize {
 		isHashedOversize = true
@@ -34,7 +37,7 @@ func (s *Scanner) resolveFileHashAndData(
 		if hashRes == nil {
 			sRes, sErr := StreamHashAndHeader(desc.File)
 			if sErr != nil {
-				return nil, nil, false, sErr
+				return nil, nil, false, nil, sErr
 			}
 			hashRes = sRes
 			if isHardlinkCandidate {
@@ -57,9 +60,9 @@ func (s *Scanner) resolveFileHashAndData(
 		if s.yaraEngine != nil && s.yaraEngine.Enabled() && yScanner != nil && statSize <= s.cfg.Scan.YaraMaxFileSize && statSize >= 0 {
 			buf, capSize, bErr := s.memoryBudget.Acquire(ctx, statSize)
 			if bErr == nil {
-				defer s.memoryBudget.Release(buf, capSize)
 				n, _ := io.ReadFull(desc.File, buf)
 				fileData = buf[:n]
+				release = func() { s.memoryBudget.Release(buf, capSize) }
 			}
 		}
 	} else {
@@ -67,7 +70,7 @@ func (s *Scanner) resolveFileHashAndData(
 			// Stream hash file without buffering entire content
 			sRes, sErr := StreamHashAndHeader(desc.File)
 			if sErr != nil {
-				return nil, nil, false, sErr
+				return nil, nil, false, nil, sErr
 			}
 			hashRes = sRes
 			if isHardlinkCandidate {
@@ -95,13 +98,13 @@ func (s *Scanner) resolveFileHashAndData(
 		} else {
 			buf, capSize, bErr := s.memoryBudget.Acquire(ctx, statSize)
 			if bErr != nil {
-				return nil, nil, false, bErr
+				return nil, nil, false, nil, bErr
 			}
-			defer s.memoryBudget.Release(buf, capSize)
 
 			n, rErr := io.ReadFull(desc.File, buf)
 			if rErr != nil && rErr != io.EOF && rErr != io.ErrUnexpectedEOF {
-				return nil, nil, false, rErr
+				s.memoryBudget.Release(buf, capSize)
+				return nil, nil, false, nil, rErr
 			}
 			data := buf[:n]
 			hashRes = HashFromBytes(data)
@@ -109,8 +112,9 @@ func (s *Scanner) resolveFileHashAndData(
 				s.hashCache.Store(inoKey, hashRes)
 			}
 			fileData = data
+			release = func() { s.memoryBudget.Release(buf, capSize) }
 		}
 	}
 
-	return hashRes, fileData, isHashedOversize, nil
+	return hashRes, fileData, isHashedOversize, release, nil
 }

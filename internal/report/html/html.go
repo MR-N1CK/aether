@@ -278,6 +278,92 @@ func renderDonutSVG(alerts, warnings, notices, infos int, verdict events.Verdict
 	return buf.String()
 }
 
+// killchainStage describes one adversarial stage strip node.
+type killchainStage struct {
+	tactic string // exact MITRE tactic name as used by detections
+	label  string // compact display label inside/under the node
+}
+
+var killchainOrder = []killchainStage{
+	{"Initial Access", "INITIAL ACCESS"},
+	{"Execution", "EXECUTION"},
+	{"Persistence", "PERSISTENCE"},
+	{"Privilege Escalation", "PRIV. ESCAL."},
+	{"Defense Evasion", "DEF. EVASION"},
+	{"Credential Access", "CRED. ACCESS"},
+	{"Discovery", "DISCOVERY"},
+	{"Lateral Movement", "LAT. MOVEMENT"},
+	{"Collection", "COLLECTION"},
+	{"Command and Control", "CMD AND CTRL"},
+	{"Exfiltration", "EXFILTRATION"},
+	{"Impact", "IMPACT"},
+}
+
+// renderKillchainSVG renders the horizontal adversary kill-chain strip:
+// one node per kill-chain stage, filled when any finding maps to that
+// tactic. It is a narrative summary for analysts — ATT&CK tactics are not a
+// strict sequential chain, so stage ordering is illustrative, not official.
+// Colors resolve through CSS classes so both themes keep contrast.
+func renderKillchainSVG(groups []mitreTacticGroup) string {
+	countByTactic := make(map[string]int, len(groups))
+	for _, g := range groups {
+		countByTactic[g.Tactic] = g.TotalCount
+	}
+
+	const (
+		nodeW   = 86.0
+		nodeH   = 46.0
+		gap     = 12.0
+		startY  = 22.0
+		marginX = 10.0
+	)
+	viewW := marginX*2 + float64(len(killchainOrder))*(nodeW+gap) - gap
+	viewH := 108.0
+
+	var buf bytes.Buffer
+	buf.WriteString(fmt.Sprintf(`<svg class="killchain-svg" viewBox="0 0 %.0f %.0f" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Adversary kill-chain stage coverage: which MITRE tactic stages have detections">`+"\n", viewW, viewH))
+	buf.WriteString(`  <desc>Each rounded node is one kill-chain stage; a filled node with a count means findings mapped to that tactic, a hollow node means none.</desc>` + "\n")
+
+	for i, stage := range killchainOrder {
+		x := marginX + float64(i)*(nodeW+gap)
+		count := countByTactic[stage.tactic]
+
+		// Connector arrow from this node to the next.
+		if i < len(killchainOrder)-1 {
+			ax0 := x + nodeW + 2
+			ax1 := x + nodeW + gap - 3
+			midY := startY + nodeH/2
+			buf.WriteString(fmt.Sprintf(`  <path class="kill-arrow" d="M %.0f %.0f L %.0f %.0f"/><path class="kill-arrow-head" transform="translate(%.0f,%.0f) scale(0.9)" d="M -5 -4 L 1 0 L -5 4 z"/>`+"\n",
+				ax0, midY, ax1, midY, ax1+2, midY))
+		}
+
+		nodeClass := "kill-node-none"
+		stageClass := "kill-stage"
+		countText := fmt.Sprintf("%d", count)
+		if count > 5 {
+			nodeClass = "kill-node-hit kill-intensity-hot"
+		} else if count >= 2 {
+			nodeClass = "kill-node-hit kill-intensity-mid"
+		} else if count >= 1 {
+			nodeClass = "kill-node-hit kill-intensity-low"
+		} else {
+			stageClass += " kill-stage-none"
+			countText = "—"
+		}
+		buf.WriteString(fmt.Sprintf(`  <g class="%s"><title>%s — %d finding(s)</title>`+"\n", stageClass, html.EscapeString(stage.tactic), count))
+		buf.WriteString(fmt.Sprintf(`    <rect class="%s" x="%.0f" y="%.0f" width="%.0f" height="%.0f" rx="9" ry="9"/>`+"\n",
+			nodeClass, x, startY, nodeW, nodeH))
+		buf.WriteString(fmt.Sprintf(`    <text class="kill-count" x="%.0f" y="%.0f" text-anchor="middle">%s</text>`+"\n",
+			x+nodeW/2, startY+21, countText))
+		buf.WriteString(fmt.Sprintf(`    <text class="kill-abbr" x="%.0f" y="%.0f" text-anchor="middle">%s</text>`+"\n",
+			x+nodeW/2, startY+38, stage.label))
+		buf.WriteString("  </g>\n")
+	}
+
+	buf.WriteString(`</svg>`)
+	return buf.String()
+}
+
 // GenerateHTMLReport produces a standalone, air-gapped, zero-remote-resource HTML report.
 func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	nonce, err := GenerateNonce()
@@ -411,6 +497,9 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("      </button>\n")
 	buf.WriteString("      <button id=\"btn-export-json\" class=\"btn\" aria-label=\"Export full findings and coverage telemetry to JSON\" title=\"Export full findings and coverage telemetry to JSON\">\n")
 	buf.WriteString("        <span>Export JSON</span>\n")
+	buf.WriteString("      </button>\n")
+	buf.WriteString("      <button id=\"btn-export-triage\" class=\"btn\" aria-label=\"Export a POSIX shell evidence-gathering triage script for all findings\" title=\"Export a triage shell script that gathers evidence (stat/hashes/listings) for these findings on the target host\">\n")
+	buf.WriteString("        <span>Export Triage Script</span>\n")
 	buf.WriteString("      </button>\n")
 	buf.WriteString("      <button id=\"btn-print\" class=\"btn\" aria-label=\"Print or save report as PDF\" title=\"Print or save report as PDF\">\n")
 	buf.WriteString("        <span>Print Report</span>\n")
@@ -556,6 +645,10 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	}
 
 	// 4. Metric / Counter Cards & Donut Chart
+	// MITRE aggregation runs once over the capped findings list so the
+	// metric cards, the kill-chain strip (4a) and the heat-map matrix (4b)
+	// always quote identical tactic coverage.
+	mitreGroups := aggregateMITRE(cappedFindings)
 	buf.WriteString("    <section class=\"executive-metrics-grid\" aria-label=\"Severity Breakdown\">\n")
 	buf.WriteString("      <div class=\"card donut-card\" aria-label=\"Visual Severity Gauge\">\n")
 	buf.WriteString("        <div class=\"donut-chart-wrap\">\n")
@@ -578,8 +671,16 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("      </div>\n")
 	buf.WriteString("    </section>\n\n")
 
+	// 4a. Adversary Kill-Chain Coverage Strip
+	buf.WriteString("    <section class=\"card section-card killchain-section\" aria-label=\"Adversary Kill-Chain Coverage\">\n")
+	buf.WriteString("      <h2 class=\"section-title\">Adversary Kill-Chain Coverage</h2>\n")
+	buf.WriteString("      <span class=\"subtitle\">Stage nodes highlight wherever observations map onto each kill-chain tactic; hollow nodes had no findings.</span>\n")
+	buf.WriteString("      <div class=\"killchain-wrap\">\n" + renderKillchainSVG(mitreGroups) + "\n      </div>\n")
+	buf.WriteString("    </section>\n\n")
+
 	// 4b. MITRE ATT&CK Matrix Heat-Map Section
-	mitreGroups := aggregateMITRE(cappedFindings)
+	// (mitreGroups was computed above from the capped findings list so the
+	// kill-chain strip and the heat-map matrix always agree.)
 	buf.WriteString("    <section class=\"card section-card\" id=\"mitre-matrix-section\" aria-label=\"MITRE ATT&CK Matrix\">\n")
 	buf.WriteString("      <div class=\"mitre-matrix-header\">\n")
 	buf.WriteString("        <div class=\"mitre-titles\">\n")
@@ -817,16 +918,26 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("      </div>\n")
 
 	// Table Container
+	// Sortable header: data-key selects the JS sort column; the indicator
+	// span is updated via textContent only (no innerHTML).
+	sortableTh := func(label, key, width string) string {
+		w := ""
+		if width != "" {
+			w = fmt.Sprintf(" style=\"%s\"", width)
+		}
+		return fmt.Sprintf("              <th class=\"sortable\" data-key=\"%s\"%s tabindex=\"0\" role=\"columnheader\" aria-sort=\"none\" aria-label=\"Sort findings by %s\"><span class=\"th-label\">%s</span><span class=\"th-sort-ind\" aria-hidden=\"true\">&#8597;</span></th>\n",
+			key, w, html.EscapeString(label), html.EscapeString(label))
+	}
 	buf.WriteString("      <div class=\"table-wrap findings-table-wrap\">\n")
 	buf.WriteString("        <table class=\"data-table findings-table\" id=\"findings-table\">\n")
 	buf.WriteString("          <thead>\n")
 	buf.WriteString("            <tr>\n")
-	buf.WriteString("              <th style=\"width: 90px;\">Severity</th>\n")
-	buf.WriteString("              <th style=\"width: 100px;\">Module</th>\n")
-	buf.WriteString("              <th>Path / Target</th>\n")
-	buf.WriteString("              <th>Rule Name</th>\n")
-	buf.WriteString("              <th>Reason</th>\n")
-	buf.WriteString("              <th style=\"width: 110px;\">Timestamp</th>\n")
+	buf.WriteString(sortableTh("Severity", "severity", "width: 90px;"))
+	buf.WriteString(sortableTh("Module", "module", "width: 110px;"))
+	buf.WriteString(sortableTh("Path / Target", "path", ""))
+	buf.WriteString(sortableTh("Rule Name", "rule_name", ""))
+	buf.WriteString(sortableTh("Reason", "reason", ""))
+	buf.WriteString(sortableTh("Timestamp", "timestamp", "width: 110px;"))
 	buf.WriteString("            </tr>\n")
 	buf.WriteString("          </thead>\n")
 	buf.WriteString("          <tbody id=\"findings-tbody\">\n")
@@ -1256,6 +1367,112 @@ code, pre {
 [data-theme="light"] .donut-center-muted {
   fill: #6b7280;
 }
+
+/* Kill-chain coverage strip: every color resolves through CSS classes so
+   both themes keep contrast (no var() presentation attributes inside SVG). */
+.killchain-section {
+  margin-top: 18px;
+}
+.killchain-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+.killchain-svg {
+  min-width: 760px;
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.kill-stage:hover .kill-node-hit {
+  stroke-width: 2;
+}
+.kill-node-hit {
+  fill: rgba(239, 68, 68, 0.16);
+  stroke: #ef4444;
+  stroke-width: 1.5;
+}
+.kill-intensity-low {
+  fill: rgba(56, 189, 248, 0.12);
+  stroke: #38bdf8;
+}
+.kill-intensity-mid {
+  fill: rgba(245, 158, 11, 0.16);
+  stroke: #f59e0b;
+}
+.kill-intensity-hot {
+  fill: rgba(239, 68, 68, 0.2);
+  stroke: #ef4444;
+}
+.kill-node-none {
+  fill: transparent;
+  stroke: #374151;
+  stroke-width: 1.25;
+  stroke-dasharray: 4 3;
+}
+.kill-arrow {
+  stroke: #4b5563;
+  stroke-width: 1.5;
+  fill: none;
+}
+.kill-arrow-head {
+  fill: #4b5563;
+  stroke: none;
+}
+.kill-count {
+  fill: #f3f4f6;
+  font-size: 17px;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+}
+.kill-abbr {
+  fill: #9ca3af;
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.kill-stage-none .kill-count {
+  fill: #4b5563;
+}
+.kill-stage-none .kill-abbr {
+  fill: #4b5563;
+}
+[data-theme="light"] .kill-node-hit {
+  stroke: #b91c1c;
+  fill: rgba(185, 28, 28, 0.1);
+}
+[data-theme="light"] .kill-intensity-low {
+  fill: rgba(2, 132, 199, 0.12);
+  stroke: #0284c7;
+}
+[data-theme="light"] .kill-intensity-mid {
+  fill: rgba(180, 83, 9, 0.14);
+  stroke: #b45309;
+}
+[data-theme="light"] .kill-intensity-hot {
+  fill: rgba(185, 28, 28, 0.16);
+  stroke: #b91c1c;
+}
+[data-theme="light"] .kill-node-none {
+  stroke: #9ca3af;
+}
+[data-theme="light"] .kill-arrow,
+[data-theme="light"] .kill-arrow-head {
+  stroke: #6b7280;
+  fill: #6b7280;
+}
+[data-theme="light"] .kill-arrow-head {
+  stroke: none;
+}
+[data-theme="light"] .kill-count {
+  fill: #111827;
+}
+[data-theme="light"] .kill-abbr {
+  fill: #4b5563;
+}
+[data-theme="light"] .kill-stage-none .kill-count,
+[data-theme="light"] .kill-stage-none .kill-abbr {
+  fill: #9ca3af;
+}
 .search-highlight {
   background-color: rgba(245, 158, 11, 0.35);
   color: #fcd34d;
@@ -1481,6 +1698,31 @@ code, pre {
 
 .data-table tbody tr:last-child td { border-bottom: none; }
 .data-table tbody tr:hover { background-color: var(--bg-hover); }
+
+/* Sortable findings-table headers: keyboard-focusable, arrow indicator
+   toggled via JS textContent (self-contained, no icon fonts). */
+.data-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.data-table th.sortable:hover {
+  color: var(--text-strong, inherit);
+}
+.data-table th.sortable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.th-sort-ind {
+  margin-left: 5px;
+  font-size: 10px;
+  opacity: 0.5;
+}
+.data-table th.sorted-asc .th-sort-ind,
+.data-table th.sorted-desc .th-sort-ind {
+  opacity: 1;
+  color: var(--accent);
+}
 
 .badge {
   display: inline-block;
@@ -1874,7 +2116,7 @@ code, pre {
   body { background: #ffffff !important; color: #000000 !important; padding: 0 !important; }
   .card { border: 1px solid #cccccc !important; box-shadow: none !important; break-inside: avoid; }
   .header-container { position: static !important; background: transparent !important; margin: 0 0 20px 0 !important; padding: 0 !important; border-bottom: 2px solid #000 !important; }
-  .header-right, .filter-bar, .capping-banner, .btn, #theme-toggle, #btn-export-csv, #btn-print { display: none !important; }
+  .header-right, .filter-bar, .capping-banner, .btn, #theme-toggle, #btn-export-csv, #btn-export-triage, #btn-print { display: none !important; }
   .drawer-overlay { display: none !important; }
   .data-table th { background: #eeeeee !important; color: #000000 !important; }
   .data-table td, .data-table th { border-bottom: 1px solid #dddddd !important; }
@@ -2008,6 +2250,7 @@ const htmlReportJS = `
   var drawerNext = document.getElementById('drawer-next');
   var btnExportCSV = document.getElementById('btn-export-csv');
   var btnExportJSON = document.getElementById('btn-export-json');
+  var btnExportTriage = document.getElementById('btn-export-triage');
   var btnPrint = document.getElementById('btn-print');
   var activeRow = null;
 
@@ -2219,6 +2462,104 @@ const htmlReportJS = `
     btnExportJSON.addEventListener('click', exportJSON);
   }
 
+  // 4b. Triage Script Export
+  // Builds a self-contained POSIX shell script that gathers read-only
+  // evidence for every finding on the target host (existence, metadata,
+  // hashes). Remediation guidance is embedded as comments: the script never
+  // deletes, kills or mutates anything on its own.
+  function shQuote(s) {
+    return "'" + String(s).replace(/'/g, "'\\''") + "'";
+  }
+
+  function shellCommentLines(prefix, text) {
+    var out = [];
+    String(text || '').split('\n').forEach(function(line) {
+      out.push(prefix + line);
+    });
+    return out;
+  }
+
+  function exportTriage() {
+    var hostStr = (reportData.hostname || 'hunt').replace(/[^a-zA-Z0-9_-]/g, '_');
+    var lines = [];
+    lines.push('#!/bin/sh');
+    lines.push('# -----------------------------------------------------------------');
+    lines.push('# aether-triage-' + hostStr + '.sh — evidence-gathering triage script');
+    lines.push('# Generated by Aether offline HTML report at ' + new Date().toISOString());
+    lines.push('# Host: ' + (reportData.hostname || 'unknown'));
+    lines.push('# Findings covered: ' + allFindings.length);
+    lines.push('#');
+    lines.push('# Scope (IMPORTANT):');
+    lines.push('#   * Read-only evidence collection only: file existence checks,');
+    lines.push('#     metadata listings, and cryptographic hashes.');
+    lines.push('#   * Remediation guidance appears as comments for an analyst to');
+    lines.push('#     review — the script NEVER deletes, kills or modifies anything.');
+    lines.push('# Run on the scanned host (or an image of it): sh ./this-script.sh');
+    lines.push('# -----------------------------------------------------------------');
+    lines.push('set -u');
+    lines.push('');
+    lines.push('echo "[aether-triage] evidence collection started at $(date -u 2>/dev/null)"');
+    lines.push('');
+
+    allFindings.forEach(function(f, i) {
+      var num = f.index || (i + 1);
+      var p = f.path || '';
+      lines.push('# -----------------------------------------------------------------');
+      lines.push('# Finding ' + num + '  [' + (f.severity || '') + ']  ' + (f.rule_name || ''));
+      lines.push('# Target: ' + p);
+      lines.push('# Reason: ' + (f.reason || ''));
+      if (f.why) {
+        Array.prototype.push.apply(lines, shellCommentLines('# Why: ', f.why));
+      }
+      var mitreStr = (f.mitre || []).map(function(m) {
+        return (m.technique || '') + ' ' + (m.technique_name || '');
+      }).join('; ');
+      if (mitreStr) {
+        lines.push('# MITRE: ' + mitreStr);
+      }
+      var sha256 = (f.hashes && f.hashes.SHA256) ? f.hashes.SHA256 : '';
+      if (sha256) {
+        lines.push('# Expected SHA256: ' + sha256);
+      }
+      lines.push('');
+
+      if (p) {
+        lines.push('TARGET=' + shQuote(p));
+        lines.push('if [ -e "$TARGET" ]; then');
+        lines.push('    echo "--- Finding ' + num + ': $TARGET ---"');
+        lines.push('    file "$TARGET" 2>/dev/null');
+        lines.push('    ls -la "$TARGET" 2>/dev/null');
+        lines.push('    sha256sum "$TARGET" 2>/dev/null');
+        lines.push('else');
+        lines.push('    echo "--- Finding ' + num + ': target MISSING (deleted after scan?) - $TARGET"');
+        lines.push('fi');
+        lines.push('');
+      }
+
+      (f.remediation || []).forEach(function(step) {
+        Array.prototype.push.apply(lines, shellCommentLines('# Remediation: ', step));
+      });
+      lines.push('');
+    });
+
+    lines.push('echo "[aether-triage] evidence collection finished."');
+    lines.push('');
+
+    var blob = new Blob([lines.join('\n')], { type: 'application/x-shellscript;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.setAttribute('href', url);
+    a.setAttribute('download', 'aether-triage-' + hostStr + '.sh');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  if (btnExportTriage) {
+    btnExportTriage.addEventListener('click', exportTriage);
+  }
+
   if (btnPrint) {
     btnPrint.addEventListener('click', function() {
       window.print();
@@ -2226,6 +2567,109 @@ const htmlReportJS = `
   }
 
   // 5. Render Findings Table
+
+  // Sortable findings table state. Severity first-click sorts worst-first
+  // (descending), every other column first-click sorts ascending.
+  var currentSortKey = null;
+  var currentSortDir = 1;
+
+  var SEVERITY_RANK = {
+    CRITICAL: 8,
+    ALERT: 7,
+    HIGH: 6,
+    WARNING: 5,
+    MEDIUM: 4,
+    NOTICE: 3,
+    LOW: 2,
+    INFO: 1
+  };
+
+  function severityRank(sev) {
+    return SEVERITY_RANK[(sev || '').toUpperCase()] || 0;
+  }
+
+  function timestampValue(ts) {
+    var t = Date.parse(ts || '');
+    return isNaN(t) ? 0 : t;
+  }
+
+  // sortFindingsList returns a stable sorted copy per the active sort state.
+  function sortFindingsList(list) {
+    if (!currentSortKey) return list.slice(0);
+    var key = currentSortKey;
+    var dir = currentSortDir;
+    var copy = list.slice(0);
+    copy.sort(function(a, b) {
+      var va, vb;
+      if (key === 'severity') {
+        va = severityRank(a.severity);
+        vb = severityRank(b.severity);
+      } else if (key === 'timestamp') {
+        va = timestampValue(a.timestamp);
+        vb = timestampValue(b.timestamp);
+      } else {
+        va = String((a[key] || '').toLowerCase());
+        vb = String((b[key] || '').toLowerCase());
+      }
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      // Stable fallback keeps severity-equal rows in report order.
+      return (a.index || 0) - (b.index || 0);
+    });
+    return copy;
+  }
+
+  function updateSortIndicators() {
+    var ths = document.querySelectorAll('#findings-table th.sortable');
+    for (var i = 0; i < ths.length; i++) {
+      var th = ths[i];
+      var ind = th.querySelector('.th-sort-ind');
+      var isActive = th.getAttribute('data-key') === currentSortKey;
+      th.classList.toggle('sorted-asc', isActive && currentSortDir > 0);
+      th.classList.toggle('sorted-desc', isActive && currentSortDir < 0);
+      if (ind) {
+        if (!isActive) {
+          ind.textContent = '\u2195';
+          th.setAttribute('aria-sort', 'none');
+        } else {
+          ind.textContent = currentSortDir > 0 ? '\u2191' : '\u2193';
+          th.setAttribute('aria-sort', currentSortDir > 0 ? 'ascending' : 'descending');
+        }
+      }
+    }
+  }
+
+  function onSortHeaderClick(th) {
+    var key = th.getAttribute('data-key');
+    if (!key) return;
+    if (currentSortKey === key) {
+      currentSortDir = -currentSortDir;
+    } else {
+      currentSortKey = key;
+      currentSortDir = (key === 'severity') ? -1 : 1;
+    }
+    updateSortIndicators();
+    renderTable();
+  }
+
+  function bindSortableHeaders() {
+    var ths = document.querySelectorAll('#findings-table th.sortable');
+    for (var i = 0; i < ths.length; i++) {
+      (function(th) {
+        th.addEventListener('click', function() {
+          onSortHeaderClick(th);
+        });
+        th.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
+            e.preventDefault();
+            onSortHeaderClick(th);
+          }
+        });
+      })(ths[i]);
+    }
+    updateSortIndicators();
+  }
+
   function renderTable() {
     clearChildren(tbody);
 
@@ -2255,20 +2699,23 @@ const htmlReportJS = `
       return true;
     });
 
-    currentFilteredFindings = filtered;
+    var ordered = sortFindingsList(filtered);
+
+    // Drawer prev/next navigation walks the displayed (sorted) order.
+    currentFilteredFindings = ordered;
 
     if (countSummary) {
       countSummary.textContent = 'Showing ' + filtered.length + ' of ' + allFindings.length + ' items';
     }
 
-    if (filtered.length === 0) {
+    if (ordered.length === 0) {
       if (emptyState) emptyState.style.display = 'block';
       return;
     } else {
       if (emptyState) emptyState.style.display = 'none';
     }
 
-    filtered.forEach(function(f, idx) {
+    ordered.forEach(function(f, idx) {
       var tr = document.createElement('tr');
       tr.setAttribute('tabindex', '0');
       tr.setAttribute('role', 'button');
@@ -2655,6 +3102,7 @@ const htmlReportJS = `
   });
 
   // Initial table render
+  bindSortableHeaders();
   renderTable();
 })();
 `

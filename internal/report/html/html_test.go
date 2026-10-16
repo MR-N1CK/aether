@@ -827,3 +827,148 @@ func TestHTMLReport_Donut_ThemeClasses(t *testing.T) {
 		t.Errorf("light theme override for donut track missing")
 	}
 }
+
+// 16. Kill-Chain Coverage Strip: the strip must render every stage, honor
+// detection counts per tactic, and resolve colors through theme CSS classes.
+func TestHTMLReport_KillchainStrip(t *testing.T) {
+	data := sampleReportData()
+	startTime := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	data.Findings = []report.Finding{
+		{
+			Timestamp: startTime,
+			Module:    "persistence",
+			Severity:  report.SeverityAlert,
+			Path:      "/etc/ld.so.preload",
+			Reason:    "Rogue preload entry",
+			RuleName:  "Persistence_Linker_Audit_Hijack",
+			Count:     1,
+			MITRE: []report.MITREMapping{
+				{Tactic: "Persistence", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"},
+			},
+		},
+		{
+			Timestamp: startTime.Add(50 * time.Millisecond),
+			Module:    "persistence",
+			Severity:  report.SeverityWarning,
+			Path:      "/etc/systemd/system/rogue.service",
+			Reason:    "Suspicious unit executes from volatile dir",
+			RuleName:  "Persistence_Systemd_Suspicious",
+			Count:     1,
+			MITRE: []report.MITREMapping{
+				{Tactic: "Persistence", Technique: "T1543.002", TechniqueName: "Systemd Service"},
+			},
+		},
+	}
+
+	rep, err := htmlreport.GenerateHTMLReport(data)
+	if err != nil {
+		t.Fatalf("report generation failed: %v", err)
+	}
+	out := string(rep)
+
+	if !strings.Contains(out, `class="killchain-svg"`) {
+		t.Error("kill-chain SVG missing from report")
+	}
+	if !strings.Contains(out, "Adversary Kill-Chain Coverage") {
+		t.Error("kill-chain section heading missing")
+	}
+	// Hooks with 2 mapped detections must show the mid-intensity node.
+	if !strings.Contains(out, `<title>Persistence — 2 finding(s)</title>`) {
+		t.Error("kill-chain node must surface the tactic detection count")
+	}
+	if !strings.Contains(out, "kill-intensity-mid") {
+		t.Error("expected mid-intensity node class for a hooked stage")
+	}
+	for _, want := range []string{"INITIAL ACCESS", "EXECUTION", "PERSISTENCE", "CMD AND CTRL", "IMPACT"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("kill-chain stage label %q missing", want)
+		}
+	}
+	if strings.Count(out, `class="kill-stage kill-stage-none"`) != 11 {
+		t.Errorf("expected exactly 11 empty stages (only Persistence hooked), got %d", strings.Count(out, `class="kill-stage kill-stage-none"`))
+	}
+	// Narrative order: Initial Access must precede Execution and Persistence.
+	idxInitial := strings.Index(out, "INITIAL ACCESS")
+	idxExec := strings.Index(out, "EXECUTION")
+	idxPersist := strings.Index(out, "PERSISTENCE")
+	if !(idxInitial < idxExec && idxExec < idxPersist) {
+		t.Errorf("kill-chain stages out of narrative order (initial=%d exec=%d persist=%d)", idxInitial, idxExec, idxPersist)
+	}
+	// Theme classes, not hard-coded presentation colors.
+	if !strings.Contains(out, `[data-theme="light"] .kill-node-hit`) {
+		t.Error("light theme override for kill-chain nodes missing")
+	}
+}
+
+// 17. Sortable Findings Table: header cells expose data-key sort columns and
+// the JS implements CSP-safe sorting with indicator updates.
+func TestHTMLReport_SortableFindingsTable(t *testing.T) {
+	rep, err := htmlreport.GenerateHTMLReport(sampleReportData())
+	if err != nil {
+		t.Fatalf("report generation failed: %v", err)
+	}
+	out := string(rep)
+
+	if !strings.Contains(out, `th class="sortable" data-key="severity"`) {
+		t.Error("sortable severity header missing")
+	}
+	for _, key := range []string{"module", "path", "rule_name", "reason", "timestamp"} {
+		if !strings.Contains(out, fmt.Sprintf(`data-key="%s"`, key)) {
+			t.Errorf("sortable header for %q missing", key)
+		}
+	}
+	if !strings.Contains(out, "const SEVERITY_RANK") == false && !strings.Contains(out, "var SEVERITY_RANK") {
+		t.Error("JS severity rank map missing")
+	}
+	if !strings.Contains(out, "function sortFindingsList") {
+		t.Error("JS sort implementation missing")
+	}
+	if !strings.Contains(out, "function bindSortableHeaders") {
+		t.Error("JS sortable header binding missing")
+	}
+	if !strings.Contains(out, `aria-sort="none"`) {
+		t.Error("accessible aria-sort state missing on headers")
+	}
+	if !strings.Contains(out, `data-table th.sorted-desc .th-sort-ind`) {
+		t.Error("sorted-column indicator CSS missing")
+	}
+}
+
+// 18. Triage Script Export: the export produces a downloadable POSIX shell
+// script that is strictly read-only (evidence gathering, no destructive ops).
+func TestHTMLReport_TriageExportScript(t *testing.T) {
+	rep, err := htmlreport.GenerateHTMLReport(sampleReportData())
+	if err != nil {
+		t.Fatalf("report generation failed: %v", err)
+	}
+	out := string(rep)
+
+	if !strings.Contains(out, `id="btn-export-triage"`) {
+		t.Error("triage export button missing from report toolbar")
+	}
+	if !strings.Contains(out, "function exportTriage") {
+		t.Error("JS triage export implementation missing")
+	}
+	if !strings.Contains(out, "application/x-shellscript") {
+		t.Error("triage script Blob MIME type missing")
+	}
+	if !strings.Contains(out, "'aether-triage-' + hostStr + '.sh'") {
+		t.Error("triage script download filename pattern missing")
+	}
+	// Evidence-gathering commands must be present...
+	for _, want := range []string{"sha256sum", `ls -la "$TARGET"`, "file \"$TARGET\""} {
+		if !strings.Contains(out, want) {
+			t.Errorf("triage script evidence command %q missing", want)
+		}
+	}
+	// ...while destructive operations must be entirely absent.
+	for _, forbidden := range []string{"rm -rf", "kill -9", "deluser", "iptables -F"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("triage export must not contain destructive command %q", forbidden)
+		}
+	}
+	// Paths must be shell-quoted to stay injection-safe.
+	if !strings.Contains(out, "function shQuote") {
+		t.Error("JS shell-quoting helper missing")
+	}
+}

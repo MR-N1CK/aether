@@ -140,6 +140,11 @@ aether scan --quick --tui
 
 # 6. Acknowledge a known benign finding (pins file/line hash to suppress alerts)
 aether ack /path/to/file --reason "Approved internal administration script"
+
+# 7. Refresh YARA ruleset and (optionally) a remote intel feed
+sudo aether update                                # re-download YARA-Forge Core ruleset
+sudo aether update --intel-url https://example.com/feeds/hashlist.txt   # HTTPS feeds only
+aether intel import /path/to/local-feed.txt       # offline import path
 ```
 
 ---

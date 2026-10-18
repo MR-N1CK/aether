@@ -329,6 +329,16 @@ rule Linux_Persistence_Linker_Audit_Hijack {
         filesize < 2MB and (any of them)
 }
 
+// NOTE: Persistence_ELF_RPATH_Hijack (internal/scanner/elf_analysis.go) has
+// no YARA counterpart BY DESIGN. The YARA-X elf module surfaces DT_RPATH /
+// DT_RUNPATH as raw integer tags (elf.dynamic[].type) with un-resolved
+// string-table offsets (elf.dynamic[].val), so the vulnerability decision —
+// whether the referenced directory is volatile, world-writable, or relative —
+// cannot be evaluated statically here. A presence-only rule would alert on
+// every legitimately-built $ORIGIN binary in developer trees and diverge
+// from the heuristic's tiered semantics, so the check lives exclusively in
+// the scanner engine.
+
 rule Linux_Persistence_PAM_Exec_Suspicious {
     meta:
         description = "Detects PAM authentication hooks executing scripts or binaries with elevated privileges in volatile paths"

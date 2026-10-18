@@ -581,8 +581,7 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 	if isDoc && !isInTemp {
 		if !reProcHiding.Match(data) && !reOpenSSLRevShell.Match(data) &&
 			!reRevShellInteractive.Match(data) && !reNetcatRevShell.Match(data) && !reSocatRevShell.Match(data) &&
-			!reRansomwareScript.Match(data) && !rePowerShellEncoded.Match(data) && !rePamExecHook.Match(data) &&
-			!linkerHookMatch(data) {
+			!reRansomwareScript.Match(data) && !rePowerShellEncoded.Match(data) && !rePamExecHook.Match(data) {
 			return nil
 		}
 	}

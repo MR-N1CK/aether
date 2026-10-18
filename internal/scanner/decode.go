@@ -363,11 +363,19 @@ func DecodeAndRescanWithYARA(
 
 			// 1. Evaluate decoded stream with script heuristics
 			if h := CheckSuspiciousScriptContent(path, c.data, pkgDB, cfg); h != nil {
+				score := h.Score + 5
+				if score > 100 {
+					score = 100
+				}
+				sev := h.Severity
+				if sev == report.SeverityAlert && score < 90 {
+					score = 90
+				}
 				return &HeuristicMatch{
 					Name:     "Script_Obfuscated_Payload",
 					Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches %s: %s", strings.Join(newLayers, " -> "), h.Name, h.Reason),
-					Score:    85,
-					Severity: report.SeverityAlert,
+					Score:    score,
+					Severity: sev,
 				}, newLayers, nil
 			}
 
@@ -376,8 +384,8 @@ func DecodeAndRescanWithYARA(
 				return &HeuristicMatch{
 					Name:     "Script_Obfuscated_Payload",
 					Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches %s: %s", strings.Join(newLayers, " -> "), k.Name, k.Reason),
-					Score:    85,
-					Severity: report.SeverityAlert,
+					Score:    70,
+					Severity: report.SeverityWarning,
 				}, newLayers, nil
 			}
 
@@ -390,11 +398,16 @@ func DecodeAndRescanWithYARA(
 					Data:      c.data,
 				}
 				if yMatches, err := yScanner.Scan(target); err == nil && len(yMatches) > 0 {
+					sev := yMatches[0].Severity
+					score := yMatches[0].Score
+					if sev == report.SeverityAlert && score < 85 {
+						score = 85
+					}
 					return &HeuristicMatch{
 						Name:     "Script_Obfuscated_Payload",
 						Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches YARA rule %s", strings.Join(newLayers, " -> "), yMatches[0].RuleName),
-						Score:    90,
-						Severity: report.SeverityAlert,
+						Score:    score,
+						Severity: sev,
 					}, newLayers, yMatches
 				}
 			}

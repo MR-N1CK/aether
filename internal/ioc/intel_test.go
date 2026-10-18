@@ -22,7 +22,7 @@ func TestLoadBuiltin_CISA(t *testing.T) {
 	}
 
 	// Verify BPFDoor sample hash is present
-	bpfDoorHash := "3b624a991da93380ae0db0fbba13271427142aa784cc37fbe4f69989f5bc36ba"
+	bpfDoorHash := "a918a2d7f9dc6e88c751270dc582496a796695fb42d6cc51e58288cf2f440bf5"
 	res := eng.CheckHash(bpfDoorHash)
 	if res == nil {
 		t.Fatalf("expected BPFDoor hash %s to match, got nil", bpfDoorHash)
@@ -204,3 +204,51 @@ e33e46c75cf707470fcf147230aa7cc7dc22d86f7ef5ebba230ef1d48d4fb9f8 # Brand new mal
 		t.Errorf("expected NewImported 2 with overwrite, got %d", sum3.NewImported)
 	}
 }
+
+func TestCISAIntel_AuthenticityAndNoCollisions(t *testing.T) {
+	data, err := embeddedIntelFS.ReadFile("intel/cisa_linux_malware.txt")
+	if err != nil {
+		t.Fatalf("failed to read embedded cisa_linux_malware.txt: %v", err)
+	}
+
+	rules, err := ParseHashFile(strings.NewReader(string(data)), "cisa_linux_malware.txt")
+	if err != nil {
+		t.Fatalf("failed to parse cisa hashes: %v", err)
+	}
+
+	if len(rules) != 22 {
+		t.Fatalf("expected 22 CISA rules, got %d", len(rules))
+	}
+
+	for i := 0; i < len(rules); i++ {
+		h1 := rules[i].Hash
+		if len(h1) != 64 {
+			t.Errorf("rule %s has invalid hash length %d: %s", rules[i].ThreatName, len(h1), h1)
+		}
+		for j := i + 1; j < len(rules); j++ {
+			h2 := rules[j].Hash
+			overlap := longestCommonSubstring(h1, h2)
+			if overlap >= 12 {
+				t.Errorf("suspicious hash collision: rule %q and %q share %d contiguous hex chars: %s vs %s",
+					rules[i].ThreatName, rules[j].ThreatName, overlap, h1, h2)
+			}
+		}
+	}
+}
+
+func longestCommonSubstring(s1, s2 string) int {
+	maxLen := 0
+	for i := 0; i < len(s1); i++ {
+		for j := 0; j < len(s2); j++ {
+			k := 0
+			for i+k < len(s1) && j+k < len(s2) && s1[i+k] == s2[j+k] {
+				k++
+			}
+			if k > maxLen {
+				maxLen = k
+			}
+		}
+	}
+	return maxLen
+}
+

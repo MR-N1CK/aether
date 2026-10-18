@@ -785,6 +785,24 @@ func (m Model) previewContent(sel *report.Finding, width int) (string, int) {
 		m.theme.ModalFieldKey.Render("Target File: "),
 		m.theme.FindingPath.Render(sel.Path),
 	))
+
+	var metaTokens []string
+	if score := findingScore(*sel); score > 0 {
+		metaTokens = append(metaTokens, fmt.Sprintf("Score: %d/100", score))
+	}
+	if len(sel.MITRE) > 0 {
+		metaTokens = append(metaTokens, fmt.Sprintf("MITRE: %s", sel.MITRE[0].Technique))
+	}
+	if sel.ConfidenceRationale != "" {
+		metaTokens = append(metaTokens, sel.ConfidenceRationale)
+	}
+	if len(metaTokens) > 0 {
+		p.WriteString(fmt.Sprintf("  %s %s\n",
+			m.theme.ModalFieldKey.Render("Attributes:  "),
+			m.theme.KeyHint.Render(runewidth.Truncate(strings.Join(metaTokens, "  │  "), textWidth, "…")),
+		))
+	}
+
 	if sel.Why != "" {
 		whyText := runewidth.Truncate(sel.Why, textWidth, "…")
 		p.WriteString(fmt.Sprintf("  %s %s\n",
@@ -800,10 +818,11 @@ func (m Model) previewContent(sel *report.Finding, width int) (string, int) {
 		))
 	}
 	p.WriteString("  " + m.theme.ModalFieldKey.Render("Actions:     ") +
-		m.theme.KeyHint.Render("[Enter]") + m.theme.FindingReason.Render(" Open Dossier  •  ") +
-		m.theme.KeyHint.Render("[y]") + m.theme.FindingReason.Render(" Yank Path  •  ") +
-		m.theme.KeyHint.Render("[h]") + m.theme.FindingReason.Render(" Yank Hash  •  ") +
-		m.theme.KeyHint.Render("[c]") + m.theme.FindingReason.Render(" Yank Cmd  •  ") +
+		m.theme.KeyHint.Render("[Enter]") + m.theme.FindingReason.Render(" Dossier  •  ") +
+		m.theme.KeyHint.Render("[y]") + m.theme.FindingReason.Render(" Path  •  ") +
+		m.theme.KeyHint.Render("[h]") + m.theme.FindingReason.Render(" Hash  •  ") +
+		m.theme.KeyHint.Render("[r]") + m.theme.FindingReason.Render(" Runbook  •  ") +
+		m.theme.KeyHint.Render("[n/N]") + m.theme.FindingReason.Render(" Alert  •  ") +
 		m.theme.KeyHint.Render("[?]") + m.theme.FindingReason.Render(" Shortcuts"))
 
 	return p.String(), strings.Count(p.String(), "\n")
@@ -992,15 +1011,17 @@ func (m Model) renderCommandPalette() string {
 		desc string
 	}{
 		{"j / k / ↑ / ↓", "Navigate findings list / scroll forensic dossier"},
+		{"n / N", "Jump to next / previous ALERT (critical threats)"},
 		{"g / G", "Jump to top / bottom of findings list or dossier"},
 		{"PgUp / PgDn", "Scroll 5 findings or dossier lines up / down"},
 		{"Enter", "Open Forensic Threat Dossier for selected finding"},
 		{"/", "Live fuzzy search / filter findings feed"},
 		{"s", "Toggle feed sort: severity (worst first) / arrival"},
 		{"Esc", "Clear active search filter / close modal"},
-		{"c", "Copy actionable remediation command to clipboard"},
-		{"y", "Copy selected finding path to clipboard"},
+		{"r / c", "Copy containment runbook command to clipboard"},
+		{"y", "Copy selected finding target path to clipboard"},
 		{"h", "Copy selected finding cryptographic hash (SHA256/MD5)"},
+		{"o", "Open standalone HTML report in default browser"},
 		{"Tab / 1-4", "Switch dossier tabs (Assessment, Artifact, MITRE, Remediation)"},
 		{"?", "Toggle this Keyboard Shortcuts Command Palette"},
 		{"q", "Quit (asks to confirm abort while scan runs) / Close modal"},
@@ -1008,7 +1029,8 @@ func (m Model) renderCommandPalette() string {
 	}
 
 	for _, it := range items {
-		b.WriteString(fmt.Sprintf("  %-16s %s\n", m.theme.KeyHint.Render(it.key), m.theme.FindingRowNormal.Render(it.desc)))
+		paddedKey := runewidth.FillRight(it.key, 16)
+		b.WriteString(fmt.Sprintf("  %s %s\n", m.theme.KeyHint.Render(paddedKey), m.theme.FindingRowNormal.Render(it.desc)))
 	}
 
 	b.WriteString("\n" + m.theme.KeyHint.Render("Press [Esc], [?], or [Enter] to return"))
@@ -1205,29 +1227,36 @@ func (m Model) renderProgressBar(width int) string {
 	if trackWidth < 5 {
 		trackWidth = 5
 	}
-	filled := int(progressRatio * float64(trackWidth))
-	if filled > trackWidth {
-		filled = trackWidth
+
+	subBlocks := []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
+	exactFilled := progressRatio * float64(trackWidth)
+	wholeBlocks := int(exactFilled)
+	if wholeBlocks > trackWidth {
+		wholeBlocks = trackWidth
 	}
-	if filled < 0 {
-		filled = 0
+	if wholeBlocks < 0 {
+		wholeBlocks = 0
 	}
 
-	pulseFrames := []rune{'█', '▓', '▒', '░'}
-	pulseIdx := int(m.elapsed.Milliseconds()/150) % len(pulseFrames)
+	frac := int((exactFilled - float64(wholeBlocks)) * 8)
 
 	var b strings.Builder
-	for i := 0; i < trackWidth; i++ {
-		if i < filled {
-			b.WriteRune('█')
-		} else if i == filled && !m.scanFinished && filled < trackWidth {
-			b.WriteRune(pulseFrames[pulseIdx])
-		} else {
+	for i := 0; i < wholeBlocks; i++ {
+		b.WriteRune('█')
+	}
+	if wholeBlocks < trackWidth && frac > 0 {
+		b.WriteRune(subBlocks[frac-1])
+		for i := wholeBlocks + 1; i < trackWidth; i++ {
+			b.WriteRune('─')
+		}
+	} else {
+		for i := wholeBlocks; i < trackWidth; i++ {
 			b.WriteRune('─')
 		}
 	}
 
-	return fmt.Sprintf("[%s %3.0f%%]", b.String(), progressRatio*100)
+	gaugeStyle := m.theme.StatValueNotice
+	return fmt.Sprintf("[%s %3.0f%%]", gaugeStyle.Render(b.String()), progressRatio*100)
 }
 
 func (m Model) formatDuration(d time.Duration) string {

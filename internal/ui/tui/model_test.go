@@ -276,3 +276,55 @@ func TestSortToggle_KeyS(t *testing.T) {
 		t.Error("expected sort to toggle back to severity mode")
 	}
 }
+
+func TestJumpAlertNavigation(t *testing.T) {
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	findings := []report.Finding{
+		mkF(report.SeverityWarning, 50, "/tmp/warn1.sh", "Process_Warn", base),
+		mkF(report.SeverityAlert, 90, "/tmp/alert1.sh", "Shell_Rev", base.Add(time.Second)),
+		mkF(report.SeverityNotice, 30, "/tmp/note1.sh", "Log_Odd", base.Add(2*time.Second)),
+		mkF(report.SeverityAlert, 95, "/tmp/alert2.sh", "Shell_Rev", base.Add(3*time.Second)),
+		mkF(report.SeverityWarning, 55, "/tmp/warn2.sh", "Process_Warn", base.Add(4*time.Second)),
+	}
+
+	m := newTestModel(findings)
+	m.sortBy = sortByArrival
+	m.recomputeVisible()
+	m.selectedIndex = 0 // start on warn1.sh
+
+	// Jump to next alert -> should land on alert1 (idx 1)
+	nm, _ := m.Update(keyRunes("n"))
+	m = nm.(Model)
+	if m.selectedIndex != 1 || m.visible[m.selectedIndex].Path != "/tmp/alert1.sh" {
+		t.Fatalf("expected jump to alert1 (idx 1), got idx %d (%s)", m.selectedIndex, m.visible[m.selectedIndex].Path)
+	}
+
+	// Jump to next alert -> should land on alert2 (idx 3)
+	nm, _ = m.Update(keyRunes("n"))
+	m = nm.(Model)
+	if m.selectedIndex != 3 || m.visible[m.selectedIndex].Path != "/tmp/alert2.sh" {
+		t.Fatalf("expected jump to alert2 (idx 3), got idx %d (%s)", m.selectedIndex, m.visible[m.selectedIndex].Path)
+	}
+
+	// Jump to next alert -> should wrap around to alert1 (idx 1)
+	nm, _ = m.Update(keyRunes("n"))
+	m = nm.(Model)
+	if m.selectedIndex != 1 || m.visible[m.selectedIndex].Path != "/tmp/alert1.sh" {
+		t.Fatalf("expected wrap around to alert1 (idx 1), got idx %d (%s)", m.selectedIndex, m.visible[m.selectedIndex].Path)
+	}
+
+	// Jump to prev alert (N) -> should wrap backwards to alert2 (idx 3)
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("N")})
+	m = nm.(Model)
+	if m.selectedIndex != 3 || m.visible[m.selectedIndex].Path != "/tmp/alert2.sh" {
+		t.Fatalf("expected backward wrap to alert2 (idx 3), got idx %d (%s)", m.selectedIndex, m.visible[m.selectedIndex].Path)
+	}
+
+	// Jump to prev alert (N) -> should land on alert1 (idx 1)
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("N")})
+	m = nm.(Model)
+	if m.selectedIndex != 1 || m.visible[m.selectedIndex].Path != "/tmp/alert1.sh" {
+		t.Fatalf("expected backward jump to alert1 (idx 1), got idx %d (%s)", m.selectedIndex, m.visible[m.selectedIndex].Path)
+	}
+}
+

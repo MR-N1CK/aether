@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -223,7 +224,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var spCmd tea.Cmd
 		m.spinner, spCmd = m.spinner.Update(msg)
-		cmds = append(cmds, spCmd, m.tick30FPS())
+		if m.scanFinished && (diff <= 0.05 && diff >= -0.05) && time.Now().After(m.toastUntil) {
+			// Scan is finished and display settled: reduce from 30 FPS to 1s idle heartbeat
+			cmds = append(cmds, spCmd, tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
+				return frameTickMsg(t)
+			}))
+		} else {
+			cmds = append(cmds, spCmd, m.tick30FPS())
+		}
 
 	case events.Event:
 		m.handleScanEvent(msg)
@@ -425,7 +433,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		case "h", "hash", "#":
 			m.copySelectedHash()
 			return nil
-		case "c":
+		case "c", "r":
 			m.copySelectedCommand()
 			return nil
 		case "enter":
@@ -475,6 +483,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.showPalette = true
 		return nil
 
+	case "n":
+		m.jumpToNextAlert()
+
+	case "N":
+		m.jumpToPrevAlert()
+
+	case "o":
+		m.openHTMLReport()
+
 	case "up", "k":
 		if m.selectedIndex > 0 {
 			m.selectedIndex--
@@ -516,7 +533,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "h":
 		m.copySelectedHash()
 
-	case "c":
+	case "c", "r":
 		m.copySelectedCommand()
 
 	case "esc":
@@ -722,3 +739,62 @@ func (m *Model) SelectedFinding() *report.Finding {
 	}
 	return &list[m.selectedIndex]
 }
+
+func (m *Model) jumpToNextAlert() {
+	list := m.currentList()
+	if len(list) == 0 {
+		return
+	}
+	for i := m.selectedIndex + 1; i < len(list); i++ {
+		if list[i].Severity == report.SeverityAlert || list[i].Severity == report.SeverityCritical {
+			m.selectedIndex = i
+			m.showToast(fmt.Sprintf("Jumped to alert #%d", i+1))
+			return
+		}
+	}
+	for i := 0; i <= m.selectedIndex; i++ {
+		if list[i].Severity == report.SeverityAlert || list[i].Severity == report.SeverityCritical {
+			m.selectedIndex = i
+			m.showToast(fmt.Sprintf("Wrapped to alert #%d", i+1))
+			return
+		}
+	}
+	m.showToast("No alert findings in current view")
+}
+
+func (m *Model) jumpToPrevAlert() {
+	list := m.currentList()
+	if len(list) == 0 {
+		return
+	}
+	for i := m.selectedIndex - 1; i >= 0; i-- {
+		if list[i].Severity == report.SeverityAlert || list[i].Severity == report.SeverityCritical {
+			m.selectedIndex = i
+			m.showToast(fmt.Sprintf("Jumped to alert #%d", i+1))
+			return
+		}
+	}
+	for i := len(list) - 1; i >= m.selectedIndex; i-- {
+		if list[i].Severity == report.SeverityAlert || list[i].Severity == report.SeverityCritical {
+			m.selectedIndex = i
+			m.showToast(fmt.Sprintf("Wrapped to alert #%d", i+1))
+			return
+		}
+	}
+	m.showToast("No alert findings in current view")
+}
+
+func (m *Model) openHTMLReport() {
+	candidates := []string{"aether-report.html", "report.html"}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			cmd := exec.Command("xdg-open", p)
+			if err := cmd.Start(); err == nil {
+				m.showToast(fmt.Sprintf("Opened %s in browser", p))
+				return
+			}
+		}
+	}
+	m.showToast("No HTML report found in current directory")
+}
+

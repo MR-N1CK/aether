@@ -22,6 +22,7 @@ import (
 	"aether/internal/events"
 	"aether/internal/ioc"
 	"aether/internal/modules"
+	"aether/internal/modules/persistence"
 	"aether/internal/pkgdb"
 	"aether/internal/report"
 	htmlreport "aether/internal/report/html"
@@ -50,6 +51,7 @@ type Scanner struct {
 	accumulator    *findingAccumulator
 	memoryBudget   *MemoryBudget
 	devRpath       bool
+	rootFS         string
 	startupNotices []string
 	version        string
 	commit         string
@@ -561,6 +563,7 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 		accumulator:  newFindingAccumulator(cfg),
 		memoryBudget: NewMemoryBudget(cfg.Scan.MemoryBudgetBytes),
 		devRpath:     false,
+		rootFS:       rootFS,
 	}
 
 	for _, opt := range opts {
@@ -1186,6 +1189,15 @@ func (s *Scanner) Run(ctx context.Context) error {
 	totalDuration := time.Since(startTime)
 	var totalFindings, alerts, warnings, notices, infos, affectedFiles int
 	allEmitted := append(moduleRep.all, fsFindings...)
+
+	// Post-scan systemd correlation: annotate findings whose paths are
+	// launched by boot-enabled units. Annotation-only (metadata); the
+	// cross-domain correlator below remains the sole escalation authority.
+	if len(s.modules) > 0 {
+		if annotated := persistence.AnnotateEnabledUnitRefs(s.rootFS, allEmitted); annotated > 0 {
+			s.logger.Info("correlated findings with boot-enabled systemd units", slog.Int("findings", annotated))
+		}
+	}
 	allEmitted = report.CorrelateFindings(allEmitted)
 
 	var acknowledgedWarnings []report.Finding

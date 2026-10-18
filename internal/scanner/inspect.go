@@ -140,8 +140,9 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 	hEntropyScript := CheckHighEntropyScript(virtPath, inspectData, s.cfg)
 	hDecode, decodeLayers, decodeYaraMatches := DecodeAndRescanWithYARA(ctx, virtPath, inspectData, s.pkgDB, s.cfg, s.memoryBudget, yScanner)
 	hTrojanPkg := CheckTrojanedPackageBinary(virtPath, hashRes.Hashes.MD5, s.pkgDB, s.cfg)
+	hELFRPath := CheckSuspiciousELFRPath(virtPath, inspectData, uint32(mode), s.cfg)
 
-	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil || hKey != nil || hScript != nil || hEntropyELF != nil || hEntropyScript != nil || hDecode != nil || hTrojanPkg != nil || len(decodeYaraMatches) > 0 {
+	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil || hKey != nil || hScript != nil || hEntropyELF != nil || hEntropyScript != nil || hDecode != nil || hTrojanPkg != nil || hELFRPath != nil || len(decodeYaraMatches) > 0 {
 		hasOtherSignal = true
 	}
 
@@ -158,6 +159,7 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		hEntropyScript = nil
 		hDecode = nil
 		hTrojanPkg = nil
+		hELFRPath = nil
 		decodeYaraMatches = nil
 		pathMatch = nil // Suppress path heuristics if known-good hash matches or oversize
 	}
@@ -255,7 +257,7 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		updateSeverity(pathMatch.Severity)
 	}
 
-	for _, hm := range []*HeuristicMatch{hELF, hHidden, hSUID, hWorldWritable, hKey, hScript, hEntropyELF, hEntropyScript, hDecode, hTrojanPkg} {
+	for _, hm := range []*HeuristicMatch{hELF, hHidden, hSUID, hWorldWritable, hKey, hScript, hEntropyELF, hEntropyScript, hDecode, hTrojanPkg, hELFRPath} {
 		if hm != nil {
 			matchedReasons = append(matchedReasons, hm.Reason)
 			matchedRules = append(matchedRules, hm.Name)

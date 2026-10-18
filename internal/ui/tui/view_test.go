@@ -195,9 +195,9 @@ func TestRenderFindingsFeed_HeadersAndColumns(t *testing.T) {
 func TestRenderFindingsFeed_CleanEmpty(t *testing.T) {
 	th := theme.NewTheme(true)
 	m := Model{
-		theme:   th,
+		theme:    th,
 		findings: nil,
-		visible: nil,
+		visible:  nil,
 	}
 
 	rendered := m.renderFindingsFeed(100)

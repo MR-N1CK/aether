@@ -554,14 +554,16 @@ func TestCheckTrojanedPackageBinary(t *testing.T) {
 
 	mockDB := &mockTestPkgDB{
 		owned: map[string]string{
-			"/usr/bin/ls":  "coreutils",
-			"/bin/cat":     "coreutils",
-			"/usr/sbin/ip": "iproute2",
+			"/usr/bin/ls":         "coreutils",
+			"/bin/cat":            "coreutils",
+			"/usr/sbin/ip":        "iproute2",
+			"/boot/vmlinuz-6.8.0": "linux-image-6.8.0",
 		},
 		digests: map[string]string{
-			"/usr/bin/ls":  "d41d8cd98f00b204e9800998ecf8427e",
-			"/bin/cat":     "0123456789abcdef0123456789abcdef",
-			"/usr/sbin/ip": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"/usr/bin/ls":         "d41d8cd98f00b204e9800998ecf8427e",
+			"/bin/cat":            "0123456789abcdef0123456789abcdef",
+			"/usr/sbin/ip":        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"/boot/vmlinuz-6.8.0": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		},
 	}
 
@@ -596,5 +598,19 @@ func TestCheckTrojanedPackageBinary(t *testing.T) {
 	mNilDB := scanner.CheckTrojanedPackageBinary("/usr/bin/ls", "ffffffffffffffffffffffffffffffff", nil, cfg)
 	if mNilDB != nil {
 		t.Errorf("expected nil for nil pkgDB, got: %+v", mNilDB)
+	}
+
+	// 6. Kernel/initramfs trees under /boot are now in scope: a mismatched
+	// digest must alert, a matching one must stay silent.
+	mBootMismatch := scanner.CheckTrojanedPackageBinary("/boot/vmlinuz-6.8.0", "ffffffffffffffffffffffffffffffff", mockDB, cfg)
+	if mBootMismatch == nil {
+		t.Fatal("expected detection for trojaned kernel image under /boot")
+	}
+	if mBootMismatch.Severity != report.SeverityAlert {
+		t.Errorf("expected ALERT for /boot kernel mismatch, got %s", mBootMismatch.Severity)
+	}
+	mBootMatch := scanner.CheckTrojanedPackageBinary("/boot/vmlinuz-6.8.0", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", mockDB, cfg)
+	if mBootMatch != nil {
+		t.Errorf("expected nil for matching kernel image, got: %+v", mBootMatch)
 	}
 }

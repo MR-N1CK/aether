@@ -140,12 +140,12 @@ func TestRenderExecutiveVerdict_NoColor_BoxIntegrity(t *testing.T) {
 func TestRenderExecutiveAssessmentCard_NoColor_BoxIntegrity(t *testing.T) {
 	th := theme.NewTheme(true)
 	ass := realworld.ComprehensiveSystemAssessment{
-		Posture:         realworld.PostureHighRisk,
+		Posture:          realworld.PostureHighRisk,
 		SummaryRationale: strings.Repeat("Persistence across five stages was identified across the endpoint. ", 5),
-		AlertsCount:     3,
-		WarningsCount:   5,
-		NoticesCount:    7,
-		InfosCount:      11,
+		AlertsCount:      3,
+		WarningsCount:    5,
+		NoticesCount:     7,
+		InfosCount:       11,
 		NextActions: []realworld.PrioritizedAction{
 			{Priority: 1, Title: strings.Repeat("Isolate the endpoint from the production network segment ", 3), Command: strings.Repeat("aether ack /tmp/payload ", 4)},
 		},

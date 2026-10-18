@@ -584,17 +584,59 @@ the latest verified YARA-Forge Core ruleset.`,
 	setupCmd.Flags().BoolVar(&setupForce, "force", false, "Force overwrite existing rules")
 
 	// Update command
+	var updateRulesDir string
+	var updateIntelURL string
 	updateCmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update threat indicators, IOC signatures, and YARA rules",
-		Long:  `Downloads latest threat definitions and rules from configured remote feeds.`,
+		Long: `Downloads latest threat definitions and rules from configured remote feeds.
+
+Refreshes the YARA-Forge Core ruleset into the active rules directory and,
+when --intel-url is provided, ingests a remote threat-intelligence feed
+(hash list or STIX bundle) through the same validated forensic import
+pipeline as 'aether intel import'.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			logger := report.SetupLogger("info", false)
-			logger.Info("checking for threat intelligence updates...")
-			logger.Info("no remote signature feeds configured (update stub)")
+
+			// 1. YARA ruleset refresh.
+			rulesDir := updateRulesDir
+			if rulesDir == "" {
+				if os.Geteuid() == 0 {
+					rulesDir = filepath.Join("/etc", config.ToolName, "rules")
+				} else if home, homeErr := os.UserHomeDir(); homeErr == nil && home != "" {
+					rulesDir = filepath.Join(home, ".config", config.ToolName, "rules")
+				} else {
+					rulesDir = config.DefaultRulesDirs()[0]
+				}
+			}
+			logger.Info("refreshing YARA rule packages", slog.String("rules_dir", rulesDir))
+			ruleCount, err := setup.RefreshRuleset(rulesDir)
+			if err != nil {
+				logger.Warn("rules refresh failed; embedded core rules remain active", slog.Any("error", err))
+			} else {
+				logger.Info("YARA rules refreshed", slog.Int("rule_files", ruleCount))
+			}
+
+			// 2. Remote IOC feed ingestion (opt-in per invocation).
+			if updateIntelURL != "" {
+				logger.Info("refreshing threat intelligence feed", slog.String("url", updateIntelURL))
+				summary, err := ioc.RefreshIntelFeed(updateIntelURL, ioc.DefaultImportDir(), false)
+				if err != nil {
+					return err
+				}
+				logger.Info("threat intelligence ingested",
+					slog.Int("parsed", summary.TotalParsed),
+					slog.Int("new", summary.NewImported),
+					slog.Int("duplicates", summary.DuplicatesSkipped),
+					slog.String("dest", summary.DestFile))
+			} else {
+				logger.Info("no remote IOC feed requested (pass --intel-url to refresh threat intelligence)")
+			}
 			return nil
 		},
 	}
+	updateCmd.Flags().StringVar(&updateRulesDir, "rules-dir", "", "Rules directory to refresh (default: first configured rules directory)")
+	updateCmd.Flags().StringVar(&updateIntelURL, "intel-url", "", "HTTPS URL of a threat-intelligence feed (hash list or STIX bundle)")
 
 	// Version command
 	var versionJSON bool

@@ -8,8 +8,8 @@ func TestFuzzyScore_SubsequenceMatch(t *testing.T) {
 		query string
 		want  bool
 	}{
-		{"rvsh", true},      // subsequence of "revshell"
-		{"revshell", true},  // exact substring
+		{"rvsh", true},     // subsequence of "revshell"
+		{"revshell", true}, // exact substring
 		{"shell", true},
 		{"TMP", true}, // case-insensitive
 		{"zqx", false},

@@ -945,6 +945,13 @@ func registerScannerRules() {
 		[]string{"Immediately quarantine the compromised binary.", "Reinstall the package using trusted repositories (`apt-get install --reinstall <package>`).", "Initiate incident response to investigate how root-level filesystem modification occurred."},
 		ConfidenceHigh)
 
+	m("Persistence_ELF_RPATH_Hijack",
+		"ELF Library Search Path Hijack (DT_RPATH / DT_RUNPATH)",
+		"The inspected ELF binary embeds an RPATH or RUNPATH entry that references a volatile execution directory (/tmp, /var/tmp, /dev/shm, /run/user), a world-writable directory, or a relative search root. The dynamic linker resolves dependencies from these entries before any trust check runs, so a hostile binary or library planted there is executed inside every process the ELF starts.",
+		[]MITREMapping{{Tactic: "Persistence", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}, {Tactic: "Defense Evasion", Technique: "T1574.007", TechniqueName: "PATH Environment Variable Hijacking"}},
+		[]string{"Relocate the binary, or rebuild it without embedding dangerous search paths (`patchelf --remove-rpath <binary>`, or `-Wl,--enable-new-dtags` hygiene at build time).", "Check for planted or attacker-updated shared objects inside every referenced directory, and remove-or-restore entries that are not package-owned.", "Compute the binary's SHA256, compare it against vendor or package signatures, and quarantine any binary whose search paths cannot be explained by a legitimate build or packaging tool."},
+		ConfidenceHigh)
+
 	m("Container_Socket_World_Writable",
 		"Container Runtime Socket is World-Writable",
 		"A container runtime control socket (Docker, Containerd, or Podman) has world-writable permissions (0666 or other-write), allowing unprivileged local users to control the container daemon and obtain root-equivalent host access.",

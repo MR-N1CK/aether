@@ -30,6 +30,10 @@ const (
 	DefaultScoreSuspiciousPrivateKey  = 70 // WARNING
 	DefaultScoreTrojanedPackageBinary = 95 // ALERT
 
+	// ELF dynamic-section hijack thresholds
+	DefaultScoreELFRPATHSystem = 90 // ALERT (RPATH/RUNPATH to volatile or world-writable dir on a system binary)
+	DefaultScoreELFRPATHUser   = 65 // WARNING (same hijack pattern on a non-system binary)
+
 	// Default process hunting score thresholds
 	DefaultScoreProcDeletedExePkg    = 25 // NOTICE (package upgrade restart needed)
 	DefaultScoreProcDeletedExeSusp   = 85 // ALERT (deleted from /tmp, /dev/shm, /home, etc.)
@@ -212,6 +216,10 @@ type ScanConfig struct {
 	ScoreWorldWritableEtc      int `yaml:"score_world_writable_etc"`
 	ScoreTrojanedPackageBinary int `yaml:"score_trojaned_package_binary"`
 
+	// ELF dynamic-section hijack scores
+	ScoreELFRPATHSystem int `yaml:"score_elf_rpath_system"`
+	ScoreELFRPATHUser   int `yaml:"score_elf_rpath_user"`
+
 	// Process hunting detection scores
 	ScoreProcDeletedExePkg    int `yaml:"score_proc_deleted_exe_pkg"`
 	ScoreProcDeletedExeSusp   int `yaml:"score_proc_deleted_exe_susp"`
@@ -351,6 +359,8 @@ func NewDefaultConfig() *Config {
 			ScoreSuspiciousSUID:           DefaultScoreSuspiciousSUID,
 			ScoreWorldWritableEtc:         DefaultScoreWorldWritableEtc,
 			ScoreTrojanedPackageBinary:    DefaultScoreTrojanedPackageBinary,
+			ScoreELFRPATHSystem:           DefaultScoreELFRPATHSystem,
+			ScoreELFRPATHUser:             DefaultScoreELFRPATHUser,
 			ScoreProcDeletedExePkg:        DefaultScoreProcDeletedExePkg,
 			ScoreProcDeletedExeSusp:       DefaultScoreProcDeletedExeSusp,
 			ScoreProcDeletedExeOther:      DefaultScoreProcDeletedExeOther,

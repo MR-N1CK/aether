@@ -713,9 +713,10 @@ func hookValueSeen(v string) bool {
 
 // classifyLinkerHook inspects a dynamic linker hook value (LD_PRELOAD / LD_AUDIT) and
 // returns a suspicion tier with a plain-English reason:
-//   2 — verifiably anomalous (volatile directory, non-absolute path, or missing library).
-//   1 — unverified (absolute path outside standard linker directories, or unreadable).
-//   0 — trusted (absolute path inside standard linker directories verified on disk).
+//
+//	2 — verifiably anomalous (volatile directory, non-absolute path, or missing library).
+//	1 — unverified (absolute path outside standard linker directories, or unreadable).
+//	0 — trusted (absolute path inside standard linker directories verified on disk).
 func classifyLinkerHook(value string) (int, string) {
 	clean := strings.TrimSpace(value)
 	if clean == "" {

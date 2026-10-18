@@ -509,6 +509,7 @@ func linkerValueTokens(value string) []string {
 //   - the referenced target is volatile, relative/non-absolute, or missing from disk
 //     (LD_PRELOAD/LD_AUDIT libraries deleted after staging), or
 //   - an LD_PRELOAD/LD_AUDIT library exists outside the standard linker directories.
+//
 // LD_LIBRARY_PATH values are held to volatile/referential checks only, matching the
 // lower runtime expectation for development paths.
 func linkerHookMatch(data []byte) bool {
@@ -770,6 +771,8 @@ func CheckTrojanedPackageBinary(path string, actualMD5 string, pkgDB pkgdb.Packa
 		"/usr/libexec",
 		"/lib",
 		"/lib64",
+		"/lib32",
+		"/boot",
 	}
 	inSystemDir := false
 	for _, sysDir := range systemDirs {

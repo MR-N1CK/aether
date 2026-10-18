@@ -14,6 +14,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"aether/internal/config"
 	"aether/internal/ui/theme"
 	"aether/internal/yara"
 )
@@ -170,6 +171,42 @@ func RunSetup(opts SetupOptions, th *theme.Theme) (*SetupResult, error) {
 	fmt.Println()
 
 	return result, nil
+}
+
+// RefreshRuleset re-downloads the YARA-Forge Core ruleset into rulesDir,
+// creating the directory when it does not exist yet. It is the engine behind
+// `aether update`: existing rule files with the same names are replaced, so
+// scanning picks up the refreshed packages on the next run.
+func RefreshRuleset(rulesDir string) (int, error) {
+	if strings.TrimSpace(rulesDir) == "" {
+		rulesDir = filepath.Join("/etc", config.ToolName)
+		rulesDir = filepath.Join(rulesDir, "rules")
+	}
+	if err := ensureRulesDir(rulesDir); err != nil {
+		return 0, err
+	}
+	return downloadAndExtractRules(DefaultYARAForgeURL, rulesDir)
+}
+
+// ensureRulesDir validates that rulesDir is a directory, creating it with a
+// safe mode when missing. It rejects paths that exist as non-directories.
+func ensureRulesDir(rulesDir string) error {
+	if fi, statErr := os.Lstat(rulesDir); statErr == nil {
+		if !fi.IsDir() {
+			return fmt.Errorf("rules path exists and is not a directory: %s", rulesDir)
+		}
+		return nil
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("cannot inspect rules directory %s: %w", rulesDir, statErr)
+	}
+	dirPerm := os.FileMode(0o700)
+	if os.Geteuid() == 0 {
+		dirPerm = 0o755
+	}
+	if err := os.MkdirAll(rulesDir, dirPerm); err != nil {
+		return fmt.Errorf("cannot create rules directory %s: %w", rulesDir, err)
+	}
+	return nil
 }
 
 func downloadAndExtractRules(urlStr, destDir string) (int, error) {

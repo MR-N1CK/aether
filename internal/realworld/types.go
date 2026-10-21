@@ -102,6 +102,7 @@ type DurationBreakdown struct {
 	Correlation    time.Duration `json:"correlation"`
 	Reporting      time.Duration `json:"reporting"`
 	Total          time.Duration `json:"total"`
+	Estimated      bool          `json:"estimated,omitempty"`
 }
 
 type durationBreakdownJSON struct {
@@ -117,6 +118,7 @@ type durationBreakdownJSON struct {
 	Correlation    string `json:"correlation,omitempty"`
 	Reporting      string `json:"reporting,omitempty"`
 	Total          string `json:"total"`
+	Estimated      bool   `json:"estimated,omitempty"`
 }
 
 func (d DurationBreakdown) MarshalJSON() ([]byte, error) {
@@ -140,6 +142,7 @@ func (d DurationBreakdown) MarshalJSON() ([]byte, error) {
 		Correlation:    formatDur(d.Correlation),
 		Reporting:      formatDur(d.Reporting),
 		Total:          formatDur(d.Total),
+		Estimated:      d.Estimated,
 	}
 	return json.Marshal(raw)
 }
@@ -194,6 +197,7 @@ func (d *DurationBreakdown) UnmarshalJSON(b []byte) error {
 	if d.Total, err = parseDur(raw.Total); err != nil {
 		return fmt.Errorf("invalid total duration: %w", err)
 	}
+	d.Estimated = raw.Estimated
 	return nil
 }
 

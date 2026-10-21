@@ -123,11 +123,12 @@ func (c *SubsystemMetricsCollector) CalculateBreakdown(total time.Duration) Dura
 
 	fsTotal := c.durations[SubsystemFilesystem]
 	if fsTotal > 0 && bd.FilesystemWalk == 0 && bd.Hashing == 0 && bd.Heuristics == 0 {
-		// Apportion aggregate filesystem module duration across realistic phases:
+		// Sub-phases were not measured individually; flag as estimated breakdown:
 		// 30% directory traversal & safeopen stat
 		// 45% cryptographic hashing (SHA-256 / MD5)
 		// 15% pure-Go AST / regex heuristics
 		// 10% YARA compiled rule evaluation
+		bd.Estimated = true
 		bd.FilesystemWalk = time.Duration(float64(fsTotal) * 0.30)
 		bd.Hashing = time.Duration(float64(fsTotal) * 0.45)
 		bd.Heuristics = time.Duration(float64(fsTotal) * 0.15)

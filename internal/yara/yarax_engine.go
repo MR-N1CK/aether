@@ -265,6 +265,19 @@ func (e *YaraXEngine) Enabled() bool {
 	return e.rulesLoaded > 0 && e.notRunReason == ""
 }
 
+// StatusString returns a description of active YARA-X rules or inactive reason.
+func (e *YaraXEngine) StatusString() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.rules != nil && e.rulesLoaded > 0 {
+		return fmt.Sprintf("ACTIVE (%d rules compiled)", e.rulesLoaded)
+	}
+	if e.notRunReason != "" {
+		return "INACTIVE: " + e.notRunReason
+	}
+	return "INACTIVE (no rules loaded)"
+}
+
 // Close releases compiled rule resources.
 func (e *YaraXEngine) Close() error {
 	e.mu.Lock()

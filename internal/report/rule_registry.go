@@ -7,11 +7,12 @@ import (
 // RuleMeta is the enrichment knowledge base for a detector rule: human-readable
 // title, plain-English rationale, MITRE ATT&CK mapping, and remediation steps.
 type RuleMeta struct {
-	Title       string
-	Why         string
-	MITRE       []MITREMapping
-	Remediation []string
-	Confidence  Confidence
+	Title            string
+	Why              string
+	MITRE            []MITREMapping
+	Remediation      []string
+	Confidence       Confidence
+	EvidenceStrength EvidenceStrength
 }
 
 var (

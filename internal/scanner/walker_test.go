@@ -461,6 +461,7 @@ func (m *mockYaraEngine) Close() error        { return nil }
 func (m *mockYaraEngine) RecordRuleFileSeen() { m.ruleFilesSeen++ }
 func (m *mockYaraEngine) RecordSkipOversize() { m.skippedOversize++ }
 func (m *mockYaraEngine) Enabled() bool       { return m.notRunReason == "" }
+func (m *mockYaraEngine) StatusString() string { return "mock" }
 
 type mockYaraScanner struct {
 	engine *mockYaraEngine
@@ -2682,8 +2683,9 @@ func (m *mockYaraEngineImpl) NewScanner() yara.Scanner       { return m.scanner 
 func (m *mockYaraEngineImpl) Coverage() events.YARACoverageStats {
 	return events.YARACoverageStats{RulesLoaded: 1}
 }
-func (m *mockYaraEngineImpl) Enabled() bool { return m.enabled }
-func (m *mockYaraEngineImpl) Close() error  { return nil }
+func (m *mockYaraEngineImpl) Enabled() bool       { return m.enabled }
+func (m *mockYaraEngineImpl) StatusString() string { return "mock" }
+func (m *mockYaraEngineImpl) Close() error        { return nil }
 
 func TestScanner_HeuristicSafety_GhostKeyNotDowngraded(t *testing.T) {
 	tmpDir := t.TempDir()

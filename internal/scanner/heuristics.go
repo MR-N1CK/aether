@@ -588,19 +588,11 @@ func isScriptOrTextCandidate(path string, data []byte) bool {
 // CheckAllSuspiciousScriptContent evaluates file bytes for all matching malicious script patterns,
 // including interactive/encrypted reverse shells, netcat/socat listeners, procfs manipulation,
 // webshells, droppers, ransomware encryptors, and data exfiltration routines.
+// Files larger than 2MB are evaluated in sliding overlapping chunks (1MB window, 64KB overlap)
+// to prevent middle-of-file evasion attacks while maintaining strictly bounded memory usage.
 func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageDB, cfg *config.Config) []*HeuristicMatch {
 	if !isScriptOrTextCandidate(path, data) {
 		return nil
-	}
-	var wasTruncated bool
-	if len(data) > 2*1024*1024 {
-		wasTruncated = true
-		const windowSize = 1024 * 1024
-		combined := make([]byte, 0, 2*windowSize+1)
-		combined = append(combined, data[:windowSize]...)
-		combined = append(combined, '\n')
-		combined = append(combined, data[len(data)-windowSize:]...)
-		data = combined
 	}
 
 	cleaned := filepath.Clean(path)
@@ -624,6 +616,71 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 			}
 		}
 	}
+
+	if len(data) <= 2*1024*1024 {
+		return evaluateScriptChunk(cleaned, data, isDoc, isTest, isInTemp, cfg)
+	}
+
+	// Sliding overlapping chunk analysis for large files (>2MB) to prevent middle-of-file evasion
+	const chunkSize = 1024 * 1024
+	const overlap = 64 * 1024
+	const step = chunkSize - overlap
+	const maxScanBytes = 16 * 1024 * 1024
+
+	wasTruncated := true
+	var chunks [][]byte
+
+	if len(data) <= maxScanBytes {
+		for start := 0; start < len(data); start += step {
+			end := start + chunkSize
+			if end > len(data) {
+				end = len(data)
+			}
+			chunks = append(chunks, data[start:end])
+			if end == len(data) {
+				break
+			}
+		}
+	} else {
+		wasTruncated = true
+		for start := 0; start < maxScanBytes; start += step {
+			end := start + chunkSize
+			if end > len(data) {
+				end = len(data)
+			}
+			chunks = append(chunks, data[start:end])
+			if end >= maxScanBytes {
+				break
+			}
+		}
+		// Also inspect the final 1MB tail
+		tailStart := len(data) - chunkSize
+		if tailStart < 0 {
+			tailStart = 0
+		}
+		chunks = append(chunks, data[tailStart:])
+	}
+
+	var allMatches []*HeuristicMatch
+	seen := make(map[string]bool)
+
+	for _, chunk := range chunks {
+		cMatches := evaluateScriptChunk(cleaned, chunk, isDoc, isTest, isInTemp, cfg)
+		for _, m := range cMatches {
+			if !seen[m.Name] {
+				seen[m.Name] = true
+				if wasTruncated {
+					m.Truncated = true
+				}
+				allMatches = append(allMatches, m)
+			}
+		}
+	}
+
+	return allMatches
+}
+
+func evaluateScriptChunk(cleaned string, data []byte, isDoc, isTest, isInTemp bool, cfg *config.Config) []*HeuristicMatch {
 
 	// If documentation metadata outside volatile temp directories, suppress non-critical dropper/server/exfil text examples
 	if isDoc && !isInTemp {
@@ -810,12 +867,6 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 			Score:    80,
 			Severity: report.SeverityWarning,
 		})
-	}
-
-	if wasTruncated {
-		for _, m := range matches {
-			m.Truncated = true
-		}
 	}
 
 	return matches

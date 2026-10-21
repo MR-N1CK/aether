@@ -167,4 +167,34 @@ func TestComputeVerdict(t *testing.T) {
 	if v, reason := events.ComputeVerdict([]report.Finding{hcFinding}, 1, 0, 0, 0); v != events.VerdictCompromised {
 		t.Errorf("expected COMPROMISED for high-confidence alert, got %s (reason: %s)", v, reason)
 	}
+
+	// Alert with structured EvidenceStrength = StrengthDirect but arbitrary rule name
+	structuredFinding := report.NewFinding("test", report.SeverityAlert, "/path", "arbitrary threat", "Arbitrary_Threat_XYZ")
+	structuredFinding.EvidenceStrength = report.StrengthDirect
+	if v, reason := events.ComputeVerdict([]report.Finding{structuredFinding}, 1, 0, 0, 0); v != events.VerdictCompromised {
+		t.Errorf("expected COMPROMISED for structured StrengthDirect alert regardless of rule name, got %s (reason: %s)", v, reason)
+	}
+}
+
+func TestCoverageStats_DenominatorAndPercentage(t *testing.T) {
+	cov := events.CoverageStats{
+		FilesScanned:      4000,
+		SkippedPermission: 500,
+		SkippedOversize:   500,
+	}
+
+	if cov.TotalSkipped() != 1000 {
+		t.Fatalf("expected TotalSkipped 1000, got %d", cov.TotalSkipped())
+	}
+	if cov.TotalEligible() != 5000 {
+		t.Fatalf("expected TotalEligible 5000, got %d", cov.TotalEligible())
+	}
+	if pct := cov.CoveragePercentage(); pct != 80.0 {
+		t.Fatalf("expected CoveragePercentage 80.0%%, got %.2f%%", pct)
+	}
+
+	emptyCov := events.CoverageStats{}
+	if pct := emptyCov.CoveragePercentage(); pct != 100.0 {
+		t.Fatalf("expected 100.0%% for zero-file empty coverage, got %.2f%%", pct)
+	}
 }

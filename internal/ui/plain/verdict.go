@@ -112,9 +112,13 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 		}
 		row("Findings", fmt.Sprintf("%d Alerts, %d Warnings, %d Notices, %d Infos", ev.Alerts, ev.Warnings, ev.Notices, ev.Infos))
 		row("Risk Meter", fmt.Sprintf("[%s%s] %d/100", barFilled, barEmpty, threatScore))
-		row("Duration", fmt.Sprintf("%s  Inspected: %d files", ev.TotalDuration.Round(time.Millisecond), ev.Coverage.FilesScanned))
+		row("Duration", fmt.Sprintf("%s  Coverage: %d/%d (%.1f%%)", ev.TotalDuration.Round(time.Millisecond), ev.Coverage.FilesScanned, ev.Coverage.TotalEligible(), ev.Coverage.CoveragePercentage()))
 		fmt.Fprintf(w, "+%s+\n", hrFine)
-		fmt.Fprintf(w, "|%-*s|\n", cardWidth-2, " Subsystem Timing Breakdown ")
+		timingTitle := " Subsystem Timing Breakdown "
+		if bd.Estimated {
+			timingTitle = " Subsystem Timing Breakdown [ESTIMATED] "
+		}
+		fmt.Fprintf(w, "|%-*s|\n", cardWidth-2, timingTitle)
 		row("Walk / Hash", fmt.Sprintf("%s / %s", bd.FilesystemWalk.Round(time.Millisecond), bd.Hashing.Round(time.Millisecond)))
 		row("Heuristics", fmt.Sprintf("%s (YARA: %s)", bd.Heuristics.Round(time.Millisecond), bd.YARA.Round(time.Millisecond)))
 		row("Proc/Net", fmt.Sprintf("%s / %s", bd.Process.Round(time.Millisecond), bd.Network.Round(time.Millisecond)))
@@ -200,8 +204,12 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 	))
 
 	// Duration Breakdown
+	durLabel := "Durations:"
+	if bd.Estimated {
+		durLabel = "Durations (Est):"
+	}
 	timingRow := fmt.Sprintf("%s Walk: %s │ Hash: %s │ Heur: %s │ YARA: %s │ Proc: %s",
-		keyStyle.Render("Durations:"),
+		keyStyle.Render(durLabel),
 		valStyle.Render(bd.FilesystemWalk.Round(time.Millisecond).String()),
 		valStyle.Render(bd.Hashing.Round(time.Millisecond).String()),
 		valStyle.Render(bd.Heuristics.Round(time.Millisecond).String()),

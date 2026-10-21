@@ -634,6 +634,11 @@ func (s *Scanner) ResolveTargets() []string {
 			if err == nil {
 				for _, m := range matches {
 					cleaned := filepath.Clean(m)
+					if realPath, rErr := filepath.EvalSymlinks(cleaned); rErr == nil {
+						if !isOffline || strings.HasPrefix(realPath, cleanRoot) {
+							cleaned = realPath
+						}
+					}
 					if !seen[cleaned] {
 						seen[cleaned] = true
 						resolved = append(resolved, cleaned)
@@ -642,9 +647,16 @@ func (s *Scanner) ResolveTargets() []string {
 			}
 		} else {
 			cleaned := filepath.Clean(hostTarget)
-			if _, err := os.Stat(cleaned); err == nil && !seen[cleaned] {
-				seen[cleaned] = true
-				resolved = append(resolved, cleaned)
+			if _, err := os.Stat(cleaned); err == nil {
+				if realPath, rErr := filepath.EvalSymlinks(cleaned); rErr == nil {
+					if !isOffline || strings.HasPrefix(realPath, cleanRoot) {
+						cleaned = realPath
+					}
+				}
+				if !seen[cleaned] {
+					seen[cleaned] = true
+					resolved = append(resolved, cleaned)
+				}
 			}
 		}
 	}
@@ -1032,16 +1044,24 @@ func (s *Scanner) Run(ctx context.Context) error {
 				continue
 			}
 
+			// Resolve root symlinks in case rootPath was passed directly without ResolveTargets
+			realRoot := rootPath
+			if evaluated, err := filepath.EvalSymlinks(rootPath); err == nil {
+				if !isOffline || strings.HasPrefix(evaluated, cleanRoot) {
+					realRoot = evaluated
+				}
+			}
+
 			// Determine root filesystem device ID if one-filesystem mode is active
 			var rootDev uint64
 			if oneFS {
 				var rootStat unix.Stat_t
-				if err := unix.Stat(rootPath, &rootStat); err == nil {
+				if err := unix.Stat(realRoot, &rootStat); err == nil {
 					rootDev = uint64(rootStat.Dev)
 				}
 			}
 
-			err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
+			err := filepath.WalkDir(realRoot, func(path string, d fs.DirEntry, err error) error {
 				if err != nil {
 					if os.IsPermission(err) {
 						skippedPermission.Add(1)
@@ -1053,8 +1073,8 @@ func (s *Scanner) Run(ctx context.Context) error {
 					return nil
 				}
 
-				// Do NOT follow symlinks!
-				if d.Type()&os.ModeSymlink != 0 {
+				// Do NOT follow child symlinks within the tree!
+				if path != realRoot && d.Type()&os.ModeSymlink != 0 {
 					return nil
 				}
 
@@ -1397,6 +1417,8 @@ func (s *Scanner) Run(ctx context.Context) error {
 		NetworkCoverage:      netCov,
 		KernelCoverage:       kernelCov,
 		YARACoverage:         &yCov,
+		YARAActive:           s.yaraEngine != nil && s.yaraEngine.Enabled(),
+		YARAStatus:           s.yaraEngine.StatusString(),
 		AcknowledgedWarnings: acknowledgedWarnings,
 	})
 
@@ -1428,6 +1450,8 @@ func (s *Scanner) Run(ctx context.Context) error {
 				NetworkCoverage:      netCov,
 				KernelCoverage:       kernelCov,
 				YARACoverage:         &yCov,
+				YARAActive:           s.yaraEngine != nil && s.yaraEngine.Enabled(),
+				YARAStatus:           s.yaraEngine.StatusString(),
 				AcknowledgedWarnings: acknowledgedWarnings,
 			})
 		}
@@ -1467,6 +1491,8 @@ func (s *Scanner) Run(ctx context.Context) error {
 			NetworkCoverage:      netCov,
 			KernelCoverage:       kernelCov,
 			YARACoverage:         &yCov,
+			YARAActive:           s.yaraEngine != nil && s.yaraEngine.Enabled(),
+			YARAStatus:           s.yaraEngine.StatusString(),
 			TopRules:             topRules,
 			Findings:             allEmitted,
 			AcknowledgedWarnings: acknowledgedWarnings,

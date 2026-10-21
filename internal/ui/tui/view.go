@@ -12,6 +12,7 @@ import (
 	"aether/internal/events"
 	"aether/internal/report"
 	"aether/internal/ui/theme"
+	"aether/internal/yara"
 )
 
 var asciiLogo = []string{
@@ -169,7 +170,11 @@ func (m Model) renderDashboard() string {
 	var modRow strings.Builder
 	modRow.WriteString(m.theme.SectionHeader.Render("Active Modules: ") + " ")
 	if len(m.moduleOrder) == 0 {
-		modRow.WriteString(m.spinner.View() + " Initializing detection modules & YARA-X rules...")
+		if yara.IsCompiledIn() {
+			modRow.WriteString(m.spinner.View() + " Initializing detection modules & YARA-X rules...")
+		} else {
+			modRow.WriteString(m.spinner.View() + " Initializing detection modules (native heuristics only)...")
+		}
 	} else {
 		for i, name := range m.moduleOrder {
 			mod := m.activeModules[name]
@@ -256,8 +261,13 @@ func (m Model) renderBrandHeader(width int, statusText string) string {
 		}
 	}
 
-	infoRow := fmt.Sprintf("Host: %s  │  Target: %s  │  Elapsed: %s  │  Workers: %d  │  %s",
-		m.hostname, targetPath, m.formatDuration(m.elapsed), m.threads, statusText)
+	yaraBadge := "[YARA: OFF]"
+	if yara.IsCompiledIn() {
+		yaraBadge = "[YARA: ON]"
+	}
+
+	infoRow := fmt.Sprintf("Host: %s  │  Target: %s  │  Elapsed: %s  │  Workers: %d  │  %s  │  %s",
+		m.hostname, targetPath, m.formatDuration(m.elapsed), m.threads, yaraBadge, statusText)
 
 	content := fmt.Sprintf("%s\n%s", title, m.theme.FindingTimestamp.Render(infoRow))
 	return m.theme.BrandBannerBox.Width(width).Render(content)
@@ -1039,7 +1049,21 @@ func (m Model) renderFinished() string {
 
 	coverageSuffix := ""
 	if partial {
-		coverageSuffix = " (PARTIAL COVERAGE)"
+		if cov.TotalEligible() > 0 {
+			coverageSuffix = fmt.Sprintf(" [PARTIAL AUDIT: %.1f%% (%s / %s files)]",
+				cov.CoveragePercentage(),
+				m.formatNumber(cov.FilesScanned),
+				m.formatNumber(cov.TotalEligible()),
+			)
+		} else {
+			coverageSuffix = " (PARTIAL COVERAGE)"
+		}
+	} else if cov.TotalEligible() > 0 {
+		coverageSuffix = fmt.Sprintf(" [COVERAGE: %.1f%% (%s / %s files)]",
+			cov.CoveragePercentage(),
+			m.formatNumber(cov.FilesScanned),
+			m.formatNumber(cov.TotalEligible()),
+		)
 	}
 
 	var verdictBanner string
@@ -1071,8 +1095,16 @@ func (m Model) renderFinished() string {
 	stats.WriteString(m.theme.SectionHeader.Render("📊 FORENSIC TELEMETRY & AUDIT METRICS") + "\n\n")
 
 	// Row 1: Primary Metrics Badges with spacious breathing room
+	covText := fmt.Sprintf(" 📁 %s Inspected ", m.formatNumber(m.filesScanned))
+	if cov.TotalEligible() > 0 {
+		covText = fmt.Sprintf(" 📁 Coverage: %.1f%% (%s / %s) ",
+			cov.CoveragePercentage(),
+			m.formatNumber(cov.FilesScanned),
+			m.formatNumber(cov.TotalEligible()),
+		)
+	}
 	metricsRow := fmt.Sprintf("  %s   %s   %s   %s   %s   %s",
-		m.theme.PillNeutral.Render(fmt.Sprintf(" 📁 %s Inspected ", m.formatNumber(m.filesScanned))),
+		m.theme.PillNeutral.Render(covText),
 		m.theme.PillNeutral.Render(fmt.Sprintf(" ⏱ %s Elapsed ", m.formatDuration(m.elapsed))),
 		m.theme.PillAlert.Render(fmt.Sprintf(" 🚨 %d Alerts ", alerts)),
 		m.theme.PillWarn.Render(fmt.Sprintf(" ⚠️ %d Warnings ", warnings)),
@@ -1106,15 +1138,24 @@ func (m Model) renderFinished() string {
 		))
 	}
 
-	// Optional YARA stats if active
-	if m.finishEvent != nil && m.finishEvent.YARACoverage != nil {
+	// YARA Engine Status
+	if m.finishEvent != nil && m.finishEvent.YARAActive {
 		yCov := m.finishEvent.YARACoverage
-		if yCov.RulesLoaded > 0 {
-			stats.WriteString(fmt.Sprintf("  %s %s\n",
-				m.theme.FindingTimestamp.Render("⚡"),
-				m.theme.FindingTimestamp.Render(fmt.Sprintf("YARA-X Engine: %d Rules Active  •  %d Files Evaluated", yCov.RulesLoaded, yCov.FilesScanned)),
-			))
+		rulesCount := 0
+		filesCount := int64(0)
+		if yCov != nil {
+			rulesCount = yCov.RulesLoaded
+			filesCount = yCov.FilesScanned
 		}
+		stats.WriteString(fmt.Sprintf("\n  %s %s\n",
+			m.theme.FindingTimestamp.Render("⚡"),
+			m.theme.FindingTimestamp.Render(fmt.Sprintf("Detection Engine: YARA-X ACTIVE (%d Rules Loaded  •  %d Files Evaluated)", rulesCount, filesCount)),
+		))
+	} else {
+		stats.WriteString(fmt.Sprintf("\n  %s %s\n",
+			m.theme.FindingTimestamp.Render("⚡"),
+			m.theme.FindingTimestamp.Render("Detection Engine: Pure-Go Native Heuristics Only (YARA-X Disabled / CGO-Free)"),
+		))
 	}
 
 	// Row 3: Curated Top Triggered Rules (top 4-5 chips instead of 20-rule wall)

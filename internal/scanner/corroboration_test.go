@@ -19,6 +19,7 @@ type mockCorroborationYaraEngine struct {
 
 func (m *mockCorroborationYaraEngine) LoadRules(rulePaths []string) error { return nil }
 func (m *mockCorroborationYaraEngine) Enabled() bool                      { return true }
+func (m *mockCorroborationYaraEngine) StatusString() string                 { return "mock" }
 func (m *mockCorroborationYaraEngine) Close() error                       { return nil }
 func (m *mockCorroborationYaraEngine) NewScanner() yara.Scanner {
 	return &mockCorroborationYaraScanner{engine: m}

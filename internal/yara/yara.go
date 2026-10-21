@@ -67,6 +67,8 @@ type Engine interface {
 	Coverage() events.YARACoverageStats
 	// Enabled returns true if YARA is compiled in, rules were successfully loaded, and no fatal trust errors occurred.
 	Enabled() bool
+	// StatusString returns a human-readable description of engine status (e.g., active rules count or disabled reason).
+	StatusString() string
 	// Close releases any allocated resources.
 	Close() error
 }
@@ -195,6 +197,10 @@ func (e *NoopEngine) Coverage() events.YARACoverageStats {
 
 func (e *NoopEngine) Enabled() bool {
 	return false
+}
+
+func (e *NoopEngine) StatusString() string {
+	return "DISABLED (native heuristics only)"
 }
 
 func (e *NoopEngine) Close() error {

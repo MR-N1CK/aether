@@ -18,6 +18,11 @@ func VersionInfo() string {
 	return YaraXVersionInfo()
 }
 
+// IsCompiledIn reports whether the YARA-X compiled engine is built into this binary.
+func IsCompiledIn() bool {
+	return true
+}
+
 // ValidateRulesDir compiles all *.yar and *.yara files in dir and returns validation results.
 func ValidateRulesDir(dir string) (*ValidationResult, error) {
 	return YaraXValidateRulesDir(dir)

@@ -972,3 +972,47 @@ func TestHTMLReport_TriageExportScript(t *testing.T) {
 		t.Error("JS shell-quoting helper missing")
 	}
 }
+
+func TestHTMLReport_YARAStatusAndCoverageMetrics(t *testing.T) {
+	// Test 1: YARA Disabled
+	dataDisabled := sampleReportData()
+	dataDisabled.YARAActive = false
+	dataDisabled.YARAStatus = "DISABLED (Native Heuristics Only)"
+	dataDisabled.Coverage.FilesScanned = 100
+	dataDisabled.Coverage.SkippedPermission = 5
+	dataDisabled.FilesScanned = 100
+
+	htmlDisabled, err := htmlreport.GenerateHTMLReport(dataDisabled)
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+	htmlStrDisabled := string(htmlDisabled)
+	if !strings.Contains(htmlStrDisabled, "badge-yara-disabled") {
+		t.Errorf("expected badge-yara-disabled in report")
+	}
+	if !strings.Contains(htmlStrDisabled, "DISABLED (Native Heuristics Only)") {
+		t.Errorf("expected YARA disabled text in report")
+	}
+	if !strings.Contains(htmlStrDisabled, "Audit Coverage:") {
+		t.Errorf("expected Audit Coverage summary in report")
+	}
+
+	// Test 2: YARA Active
+	dataActive := sampleReportData()
+	dataActive.YARAActive = true
+	dataActive.YARAStatus = "Active (32 rules)"
+	dataActive.Coverage.FilesScanned = 1000
+	dataActive.FilesScanned = 1000
+
+	htmlActive, err := htmlreport.GenerateHTMLReport(dataActive)
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+	htmlStrActive := string(htmlActive)
+	if !strings.Contains(htmlStrActive, "badge-yara-active") {
+		t.Errorf("expected badge-yara-active in report")
+	}
+	if !strings.Contains(htmlStrActive, "ACTIVE (Active (32 rules))") {
+		t.Errorf("expected YARA active status in report")
+	}
+}

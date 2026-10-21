@@ -55,6 +55,8 @@ type HTMLReportData struct {
 	NetworkCoverage     *events.NetworkCoverageStats
 	KernelCoverage      *events.KernelCoverageStats
 	YARACoverage        *events.YARACoverageStats
+	YARAActive          bool
+	YARAStatus          string
 
 	TopRules             []report.RuleSummary
 	Findings             []report.Finding
@@ -525,6 +527,15 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	}
 	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Aether Version:</span> <span class=\"meta-val\">" + html.EscapeString(verStr) + "</span></div>\n")
 	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Threads / Max Size:</span> <span class=\"meta-val\">" + fmt.Sprintf("%d threads / %d MB", data.Threads, data.MaxFileSize/(1024*1024)) + "</span></div>\n")
+	yaraBadgeClass := "badge-yara-disabled"
+	yaraBadgeText := "DISABLED (Native Heuristics Only)"
+	if data.YARAActive {
+		yaraBadgeClass = "badge-yara-active"
+		yaraBadgeText = "ACTIVE (" + data.YARAStatus + ")"
+	} else if data.YARAStatus != "" {
+		yaraBadgeText = data.YARAStatus
+	}
+	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">YARA Engine:</span> <span class=\"meta-val\"><span class=\"" + yaraBadgeClass + "\">" + html.EscapeString(yaraBadgeText) + "</span></span></div>\n")
 	buf.WriteString("      </div>\n")
 	if len(data.TargetPaths) > 0 {
 		buf.WriteString("      <div class=\"meta-paths\"><span class=\"meta-label\">Target Paths:</span> <code>" + html.EscapeString(strings.Join(data.TargetPaths, ", ")) + "</code></div>\n")
@@ -667,7 +678,12 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card sev-warning\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Warnings</span></div>\n", data.Warnings))
 	buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card sev-notice\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Notices</span></div>\n", data.Notices))
 	buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card sev-info\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Infos</span></div>\n", data.Infos))
-	buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Files Scanned</span></div>\n", data.FilesScanned))
+	covEligible := data.Coverage.TotalEligible()
+	if covEligible > 0 {
+		buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Files Scanned (%.1f%% of %d)</span></div>\n", data.FilesScanned, data.Coverage.CoveragePercentage(), covEligible))
+	} else {
+		buf.WriteString(fmt.Sprintf("        <div class=\"card counter-card\"><span class=\"counter-num\">%d</span><span class=\"counter-lbl\">Files Scanned</span></div>\n", data.FilesScanned))
+	}
 	buf.WriteString("      </div>\n")
 	buf.WriteString("    </section>\n\n")
 
@@ -770,6 +786,20 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	}
 
 	// Skipped & Coverage Stats
+	covEligible = data.Coverage.TotalEligible()
+	covInspected := data.Coverage.FilesScanned
+	if covInspected == 0 && data.FilesScanned > 0 {
+		covInspected = data.FilesScanned
+	}
+	if covEligible > 0 {
+		buf.WriteString("      <div class=\"skipped-summary\" style=\"margin-bottom: 8px;\">\n")
+		buf.WriteString(fmt.Sprintf("        <span>Audit Coverage: <strong>%.1f%%</strong> (%d of %d eligible files inspected)</span>\n",
+			data.Coverage.CoveragePercentage(),
+			covInspected,
+			covEligible,
+		))
+		buf.WriteString("      </div>\n")
+	}
 	if data.Coverage.TotalSkipped() > 0 {
 		buf.WriteString("      <div class=\"skipped-summary\">\n")
 		buf.WriteString(fmt.Sprintf("        <span>Files Skipped: <strong>%d</strong> (Oversize: %d, Perm Denied: %d, Vanished: %d, Non-Regular: %d, Excluded: %d)</span>\n",
@@ -1273,6 +1303,27 @@ code, pre {
   display: inline-block;
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.badge-yara-active {
+  display: inline-block;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: var(--verdict-clean-text);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badge-yara-disabled {
+  display: inline-block;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 11px;

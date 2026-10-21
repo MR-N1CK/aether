@@ -158,6 +158,7 @@ type Finding struct {
 	Hashes              map[string]string      `json:"hashes,omitempty"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 	EvidenceRecord      *EvidenceRecord        `json:"evidence_record,omitempty"`
+	EvidenceStrength    EvidenceStrength       `json:"evidence_strength,omitempty"`
 	ConfidenceRationale string                 `json:"confidence_rationale,omitempty"`
 }
 
@@ -198,6 +199,9 @@ func PopulateFindingDetails(f *Finding) {
 		}
 		if meta.Confidence != "" {
 			f.Confidence = meta.Confidence
+		}
+		if meta.EvidenceStrength != "" {
+			f.EvidenceStrength = meta.EvidenceStrength
 		}
 		// Only override Why/MITRE/Remediation when the finding does not
 		// already carry detector-supplied values that are more specific.
@@ -656,6 +660,10 @@ func applyFindingDefaults(f *Finding) {
 		}
 	}
 
+	if f.EvidenceStrength == "" {
+		f.EvidenceStrength = EvaluateEvidenceStrength(f.RuleName, f.Reason, false, nil)
+	}
+
 	if f.EvidenceRecord == nil {
 		detType := f.Module
 		if detType == "" {
@@ -664,7 +672,7 @@ func applyFindingDefaults(f *Finding) {
 		f.EvidenceRecord = &EvidenceRecord{
 			DetectorType:        detType,
 			RuleName:            f.RuleName,
-			EvidenceStrength:    EvaluateEvidenceStrength(f.RuleName, f.Reason, false, nil),
+			EvidenceStrength:    f.EvidenceStrength,
 			MatchedCondition:    f.Reason,
 			TargetPath:          f.Path,
 			LineNumber:          f.LineNumber,
@@ -672,5 +680,7 @@ func applyFindingDefaults(f *Finding) {
 			ContextProfile:      "standard",
 			ConfidenceRationale: f.ConfidenceRationale,
 		}
+	} else if f.EvidenceRecord.EvidenceStrength == "" {
+		f.EvidenceRecord.EvidenceStrength = f.EvidenceStrength
 	}
 }

@@ -456,14 +456,17 @@ func printEngineDiagnostics(th *theme.Theme) error {
 		fmt.Printf("  %s %s\n", titleStyle.Render("Privileges:    "), lipgloss.NewStyle().Foreground(theme.ColorWarning).Render("NON-ROOT (Unprivileged mode - some kernel metrics restricted)"))
 	}
 
-	yInfo := yara.VersionInfo()
-	if yInfo != "not compiled in" {
-		fmt.Printf("  %s %s\n", titleStyle.Render("YARA Engine:   "), lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true).Render(yInfo+" (Active with Embedded Core Rules)"))
+	if yara.IsCompiledIn() {
+		fmt.Printf("  %s %s\n", titleStyle.Render("YARA Engine:   "), lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true).Render(yara.VersionInfo()+" (Active)"))
 	} else {
-		fmt.Printf("  %s %s\n", titleStyle.Render("YARA Engine:   "), lipgloss.NewStyle().Foreground(theme.ColorWarning).Render("Pure-Go Heuristics (YARA not compiled in)"))
+		fmt.Printf("  %s %s\n", titleStyle.Render("YARA Engine:   "), lipgloss.NewStyle().Foreground(theme.ColorWarning).Bold(true).Render("DISABLED (Pure-Go Native Heuristics Only)"))
 	}
 
 	fmt.Printf("\n  %s\n", titleStyle.Render("Active Security Modules:"))
+	yaraModuleDesc := "yara        (multi-pattern signature matching against malware families)"
+	if !yara.IsCompiledIn() {
+		yaraModuleDesc = "yara        [DISABLED - pure-go heuristics only; compile with -tags yara]"
+	}
 	modules := []string{
 		"filesystem  (single-pass header inspection, IOC hashes, script heuristics)",
 		"persistence (systemd services, cron jobs, shell profiles, ld.so.preload, ssh)",
@@ -471,7 +474,7 @@ func printEngineDiagnostics(th *theme.Theme) error {
 		"kernel      (loaded module verification, kernel taint flags)",
 		"network     (suspicious raw socket listeners, proc_net telemetry)",
 		"users       (rogue UID 0 accounts, shadow integrity, PAM backdoors)",
-		"yara        (multi-pattern signature matching against malware families)",
+		yaraModuleDesc,
 	}
 	for _, m := range modules {
 		fmt.Printf("    • %s\n", subStyle.Render(m))

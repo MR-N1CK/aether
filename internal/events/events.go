@@ -249,6 +249,24 @@ func (s CoverageStats) TotalSkipped() int64 {
 	return s.SkippedOversize + s.SkippedPermission + s.SkippedVanished + s.SkippedNotRegular + s.SkippedExcluded + s.SkippedTimeout
 }
 
+// TotalEligible returns the total count of eligible files encountered (scanned + skipped).
+func (s CoverageStats) TotalEligible() int64 {
+	return s.FilesScanned + s.TotalSkipped()
+}
+
+// CoveragePercentage calculates the percentage of eligible host files inspected [0.0, 100.0].
+func (s CoverageStats) CoveragePercentage() float64 {
+	total := s.TotalEligible()
+	if total <= 0 {
+		return 100.0
+	}
+	pct := (float64(s.FilesScanned) / float64(total)) * 100.0
+	if pct > 100.0 {
+		return 100.0
+	}
+	return pct
+}
+
 // HasPartialCoverage returns true if any files were skipped during scanning.
 func (s CoverageStats) HasPartialCoverage() bool {
 	return s.TotalSkipped() > 0
@@ -278,6 +296,8 @@ type ScanFinished struct {
 	NetworkCoverage      *NetworkCoverageStats     `json:"network_coverage,omitempty"`
 	KernelCoverage       *KernelCoverageStats      `json:"kernel_coverage,omitempty"`
 	YARACoverage         *YARACoverageStats        `json:"yara_coverage,omitempty"`
+	YARAActive           bool                      `json:"yara_active"`
+	YARAStatus           string                    `json:"yara_status,omitempty"`
 	AcknowledgedWarnings []report.Finding          `json:"acknowledged_warnings,omitempty"`
 }
 
@@ -353,7 +373,9 @@ func ComputeVerdict(findings []report.Finding, alerts, warnings, notices, notice
 	for _, f := range findings {
 		if f.Severity == report.SeverityAlert {
 			isHC := false
-			if hc, ok := f.Metadata["high_confidence"].(bool); ok && hc {
+			if f.EvidenceStrength == report.StrengthDirect || (f.EvidenceRecord != nil && f.EvidenceRecord.EvidenceStrength == report.StrengthDirect) {
+				isHC = true
+			} else if hc, ok := f.Metadata["high_confidence"].(bool); ok && hc {
 				isHC = true
 			} else if conf, ok := f.Metadata["confidence"].(string); ok && strings.EqualFold(conf, "high") {
 				isHC = true

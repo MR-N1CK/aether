@@ -52,7 +52,7 @@ type AckFile struct {
 
 // CountAckEntries reads an acknowledgment file and returns the count of valid entries.
 func CountAckEntries(path string) (int, error) {
-	data, err := os.ReadFile(path)
+	data, err := safeopen.ReadFileReadOnly(path, 10*1024*1024)
 	if err != nil {
 		return 0, err
 	}
@@ -174,7 +174,7 @@ func (eng *Engine) loadFile(path, rootFS string, isSystem bool) error {
 		}
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := safeopen.ReadFileReadOnly(path, 10*1024*1024)
 	if err != nil {
 		return err
 	}
@@ -330,7 +330,7 @@ func (eng *Engine) Evaluate(f *report.Finding, rootFS string) bool {
 		}
 		if !lineMatched {
 			// Check file lines for the hash
-			fLines, rErr := os.ReadFile(hostPath)
+			fLines, rErr := safeopen.ReadFileReadOnly(hostPath, 50*1024*1024)
 			if rErr == nil {
 				sc := bufio.NewScanner(bytes.NewReader(fLines))
 				for sc.Scan() {
@@ -384,7 +384,7 @@ func WriteAckEntry(destPath string, entry AckEntry) error {
 
 	// Load existing entries if any
 	var af AckFile
-	if data, err := os.ReadFile(destPath); err == nil {
+	if data, err := safeopen.ReadFileReadOnly(destPath, 10*1024*1024); err == nil {
 		_ = yaml.Unmarshal(data, &af)
 	}
 

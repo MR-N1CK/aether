@@ -138,11 +138,11 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 	hScripts := CheckAllSuspiciousScriptContent(virtPath, inspectData, s.pkgDB, s.cfg)
 	hEntropyELF := CheckHighEntropyELF(virtPath, inspectData, s.cfg)
 	hEntropyScript := CheckHighEntropyScript(virtPath, inspectData, s.cfg)
-	hDecode, decodeLayers, decodeYaraMatches := DecodeAndRescanWithYARA(ctx, virtPath, inspectData, s.pkgDB, s.cfg, s.memoryBudget, yScanner)
+	hDecodes, decodeLayers, decodeYaraMatches := DecodeAndRescanWithYARA(ctx, virtPath, inspectData, s.pkgDB, s.cfg, s.memoryBudget, yScanner)
 	hTrojanPkg := CheckTrojanedPackageBinary(virtPath, hashRes.Hashes.MD5, s.pkgDB, s.cfg)
 	hELFRPath := CheckSuspiciousELFRPath(virtPath, inspectData, uint32(mode), s.cfg)
 
-	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil || hKey != nil || len(hScripts) > 0 || hEntropyELF != nil || hEntropyScript != nil || hDecode != nil || hTrojanPkg != nil || hELFRPath != nil || len(decodeYaraMatches) > 0 {
+	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil || hKey != nil || len(hScripts) > 0 || hEntropyELF != nil || hEntropyScript != nil || len(hDecodes) > 0 || hTrojanPkg != nil || hELFRPath != nil || len(decodeYaraMatches) > 0 {
 		hasOtherSignal = true
 	}
 
@@ -157,7 +157,7 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		hScripts = nil
 		hEntropyELF = nil
 		hEntropyScript = nil
-		hDecode = nil
+		hDecodes = nil
 		hTrojanPkg = nil
 		hELFRPath = nil
 		decodeYaraMatches = nil
@@ -257,6 +257,7 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		updateSeverity(pathMatch.Severity)
 	}
 
+	var hasTruncatedScript bool
 	for _, hs := range hScripts {
 		if hs != nil {
 			matchedReasons = append(matchedReasons, hs.Reason)
@@ -264,10 +265,23 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 			ruleSeverities[hs.Name] = hs.Severity.String()
 			totalScore += hs.Score
 			updateSeverity(hs.Severity)
+			if hs.Truncated {
+				hasTruncatedScript = true
+			}
+		}
+	}
+ 
+	for _, hd := range hDecodes {
+		if hd != nil {
+			matchedReasons = append(matchedReasons, hd.Reason)
+			matchedRules = append(matchedRules, hd.Name)
+			ruleSeverities[hd.Name] = hd.Severity.String()
+			totalScore += hd.Score
+			updateSeverity(hd.Severity)
 		}
 	}
 
-	for _, hm := range []*HeuristicMatch{hELF, hHidden, hSUID, hWorldWritable, hKey, hEntropyELF, hEntropyScript, hDecode, hTrojanPkg, hELFRPath} {
+	for _, hm := range []*HeuristicMatch{hELF, hHidden, hSUID, hWorldWritable, hKey, hEntropyELF, hEntropyScript, hTrojanPkg, hELFRPath} {
 		if hm != nil {
 			matchedReasons = append(matchedReasons, hm.Reason)
 			matchedRules = append(matchedRules, hm.Name)
@@ -416,6 +430,9 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		f.Metadata["rule_severities"] = ruleSeverities
 		if len(decodeLayers) > 0 {
 			f.Metadata["decode_layers"] = decodeLayers
+		}
+		if hasTruncatedScript {
+			f.Metadata["script_scan_truncated"] = true
 		}
 		if len(inspectData) >= 512 && highestSeverity >= report.SeverityWarning {
 			if ent := ShannonEntropy(inspectData); ent > 7.2 {

@@ -96,9 +96,11 @@ type Model struct {
 	smoothFilesScanned float64
 	velocitySamples    []float64
 	activeTab          int
-	modalScrollY       int
-	showPalette        bool
-	confirmQuit        bool
+	modalScrollY         int
+	showPalette          bool
+	paletteQuery         string
+	paletteSelectedIndex int
+	confirmQuit          bool
 	toastMessage       string
 	toastUntil         time.Time
 	findingsDirty      bool
@@ -254,6 +256,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+
+	case tea.MouseMsg:
+		cmd := m.handleMouse(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -321,12 +329,50 @@ func (m *Model) handleScanEvent(e events.Event) {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
-	// Command palette toggle or dismiss
+	// Command palette interactive search & execution
 	if m.showPalette {
 		switch msg.String() {
-		case "?", "esc", "q", "enter", " ":
+		case "esc", "?":
 			m.showPalette = false
+			m.paletteQuery = ""
+			m.paletteSelectedIndex = 0
 			return nil
+		case "up":
+			if m.paletteSelectedIndex > 0 {
+				m.paletteSelectedIndex--
+			}
+			return nil
+		case "down":
+			actions := m.getFilteredPaletteActions()
+			if m.paletteSelectedIndex < len(actions)-1 {
+				m.paletteSelectedIndex++
+			}
+			return nil
+		case "enter":
+			actions := m.getFilteredPaletteActions()
+			if len(actions) > 0 && m.paletteSelectedIndex < len(actions) {
+				act := actions[m.paletteSelectedIndex]
+				m.showPalette = false
+				m.paletteQuery = ""
+				m.paletteSelectedIndex = 0
+				return m.executePaletteAction(act.ActionID)
+			}
+			m.showPalette = false
+			m.paletteQuery = ""
+			m.paletteSelectedIndex = 0
+			return nil
+		case "backspace":
+			if len(m.paletteQuery) > 0 {
+				m.paletteQuery = m.paletteQuery[:len(m.paletteQuery)-1]
+				m.paletteSelectedIndex = 0
+			}
+			return nil
+		default:
+			if msg.Type == tea.KeyRunes {
+				m.paletteQuery += string(msg.Runes)
+				m.paletteSelectedIndex = 0
+				return nil
+			}
 		}
 		return nil
 	}
@@ -387,6 +433,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		switch msg.String() {
 		case "?":
 			m.showPalette = true
+			m.paletteQuery = ""
+			m.paletteSelectedIndex = 0
 			return nil
 		case "esc", "q":
 			m.modalScrollY = 0
@@ -497,6 +545,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case "?":
 		m.showPalette = true
+		m.paletteQuery = ""
+		m.paletteSelectedIndex = 0
 		return nil
 
 	case "n":
@@ -817,5 +867,140 @@ func (m *Model) openHTMLReport() {
 		}
 	}
 	m.showToast("No HTML report found to open")
+}
+
+// PaletteAction defines an executable action within the command palette.
+type PaletteAction struct {
+	Key         string
+	Title       string
+	Description string
+	ActionID    string
+}
+
+func getPaletteActions() []PaletteAction {
+	return []PaletteAction{
+		{"Enter", "Inspect Finding", "Open forensic threat dossier for selected item", "inspect"},
+		{"n", "Next Alert", "Jump directly to the next critical threat finding", "next_alert"},
+		{"N", "Previous Alert", "Jump to the previous critical threat finding", "prev_alert"},
+		{"/", "Filter Findings", "Filter findings feed with live fuzzy / grammar query", "filter"},
+		{"s", "Toggle Sort", "Toggle sorting order between severity and arrival", "sort"},
+		{"r / c", "Containment Runbook", "Copy remediation command to system clipboard", "copy_runbook"},
+		{"y", "Copy Path", "Copy inspected target path to clipboard", "copy_path"},
+		{"h", "Copy Hash", "Copy SHA256 / MD5 digest to clipboard", "copy_hash"},
+		{"o", "Open HTML Report", "Launch forensic HTML report in system browser", "open_html"},
+		{"Tab", "Next Dossier Tab", "Cycle through Assessment, Artifact, MITRE, Remediation tabs", "next_tab"},
+		{"q", "Quit Scanner", "Safely exit Aether threat hunter", "quit"},
+	}
+}
+
+func (m Model) getFilteredPaletteActions() []PaletteAction {
+	all := getPaletteActions()
+	if strings.TrimSpace(m.paletteQuery) == "" {
+		return all
+	}
+	q := strings.ToLower(strings.TrimSpace(m.paletteQuery))
+	var filtered []PaletteAction
+	for _, a := range all {
+		if strings.Contains(strings.ToLower(a.Title), q) ||
+			strings.Contains(strings.ToLower(a.Description), q) ||
+			strings.Contains(strings.ToLower(a.Key), q) {
+			filtered = append(filtered, a)
+		}
+	}
+	return filtered
+}
+
+func (m *Model) executePaletteAction(actionID string) tea.Cmd {
+	switch actionID {
+	case "inspect":
+		if len(m.currentList()) > 0 {
+			m.state = stateDetail
+			m.activeTab = 0
+			m.modalScrollY = 0
+		}
+	case "next_alert":
+		m.jumpToNextAlert()
+	case "prev_alert":
+		m.jumpToPrevAlert()
+	case "filter":
+		m.isFiltering = true
+	case "sort":
+		if m.sortBy == sortBySeverity {
+			m.sortBy = sortByArrival
+			m.showToast("Feed sorted by arrival time")
+		} else {
+			m.sortBy = sortBySeverity
+			m.showToast("Feed sorted by severity (worst first)")
+		}
+		m.recomputeVisible()
+	case "copy_runbook":
+		m.copySelectedCommand()
+	case "copy_path":
+		m.copySelectedPath()
+	case "copy_hash":
+		m.copySelectedHash()
+	case "open_html":
+		m.openHTMLReport()
+	case "next_tab":
+		if m.state == stateDetail {
+			m.activeTab = (m.activeTab + 1) % 4
+			m.modalScrollY = 0
+		}
+	case "quit":
+		if m.scanFinished {
+			return tea.Quit
+		}
+		m.confirmQuit = true
+	}
+	return nil
+}
+
+func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
+	if m.showPalette {
+		actions := m.getFilteredPaletteActions()
+		switch msg.Type {
+		case tea.MouseWheelUp:
+			if m.paletteSelectedIndex > 0 {
+				m.paletteSelectedIndex--
+			}
+		case tea.MouseWheelDown:
+			if m.paletteSelectedIndex < len(actions)-1 {
+				m.paletteSelectedIndex++
+			}
+		}
+		return nil
+	}
+
+	if m.state == stateDetail {
+		switch msg.Type {
+		case tea.MouseWheelUp:
+			if m.modalScrollY > 0 {
+				m.modalScrollY--
+			}
+		case tea.MouseWheelDown:
+			m.modalScrollY++
+		case tea.MouseRight:
+			m.modalScrollY = 0
+			if m.scanFinished {
+				m.state = stateFinished
+			} else {
+				m.state = stateDashboard
+			}
+		}
+		return nil
+	}
+
+	switch msg.Type {
+	case tea.MouseWheelUp:
+		if m.selectedIndex > 0 {
+			m.selectedIndex--
+		}
+	case tea.MouseWheelDown:
+		list := m.currentList()
+		if m.selectedIndex < len(list)-1 {
+			m.selectedIndex++
+		}
+	}
+	return nil
 }
 

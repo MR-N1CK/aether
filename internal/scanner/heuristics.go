@@ -18,10 +18,11 @@ import (
 
 // HeuristicMatch represents an anomaly detected by structural/heuristic analysis.
 type HeuristicMatch struct {
-	Name     string
-	Reason   string
-	Score    int
-	Severity report.Severity
+	Name      string
+	Reason    string
+	Score     int
+	Severity  report.Severity
+	Truncated bool
 }
 
 // IsELF returns true if the buffer starts with the 4-byte ELF magic: \x7fELF.
@@ -591,8 +592,15 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	if !isScriptOrTextCandidate(path, data) {
 		return nil
 	}
+	var wasTruncated bool
 	if len(data) > 2*1024*1024 {
-		data = data[:2*1024*1024]
+		wasTruncated = true
+		const windowSize = 1024 * 1024
+		combined := make([]byte, 0, 2*windowSize+1)
+		combined = append(combined, data[:windowSize]...)
+		combined = append(combined, '\n')
+		combined = append(combined, data[len(data)-windowSize:]...)
+		data = combined
 	}
 
 	cleaned := filepath.Clean(path)
@@ -802,6 +810,12 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 			Score:    80,
 			Severity: report.SeverityWarning,
 		})
+	}
+
+	if wasTruncated {
+		for _, m := range matches {
+			m.Truncated = true
+		}
 	}
 
 	return matches

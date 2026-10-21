@@ -273,63 +273,36 @@ func (m Model) renderRiskGauge(width int, alerts, warnings int) string {
 	}
 
 	percent := 0
-	label := "0% (SECURE / CLEAN)"
+	label := "[CLEAN & SECURE]"
 	var fillStyle lipgloss.Style
 
 	if alerts > 0 {
-		baseScore := 80
-		alertCount := 0
+		percent = 100
+		hasDirect := false
 		for _, f := range m.findings {
 			if f.Severity == report.SeverityAlert || f.Severity == report.SeverityCritical {
-				alertCount++
-				score := 80
-				if f.Confidence == report.ConfidenceHigh || f.Verdict == report.VerdictMalicious {
-					score = 90
-				} else if f.Confidence == report.ConfidenceMedium {
-					score = 85
-				}
-				if f.EvidenceRecord != nil && f.EvidenceRecord.EvidenceStrength == report.StrengthDirect {
-					score = 95
-				}
-				if score > baseScore {
-					baseScore = score
+				if (f.EvidenceRecord != nil && f.EvidenceRecord.EvidenceStrength == report.StrengthDirect) ||
+					f.Verdict == report.VerdictMalicious ||
+					f.Confidence == report.ConfidenceHigh {
+					hasDirect = true
+					break
 				}
 			}
 		}
-		if alertCount == 0 {
-			alertCount = alerts
+		if hasDirect {
+			label = "[DIRECT COMPROMISE]"
+		} else {
+			label = "[CORROBORATED ANOMALY]"
 		}
-		percent = baseScore + (alertCount-1)*4
-		if percent > 100 {
-			percent = 100
-		}
-		label = fmt.Sprintf("%d%% CRITICAL COMPROMISE RISK", percent)
 		fillStyle = m.theme.StatValueAlert
 	} else if warnings > 0 {
-		baseScore := 35
-		warnCount := 0
-		for _, f := range m.findings {
-			if f.Severity == report.SeverityWarning || f.Severity == report.SeverityHigh || f.Severity == report.SeverityMedium {
-				warnCount++
-				score := 35
-				if f.Confidence == report.ConfidenceHigh {
-					score = 55
-				} else if f.Confidence == report.ConfidenceMedium {
-					score = 45
-				}
-				if score > baseScore {
-					baseScore = score
-				}
-			}
+		if warnings > 2 {
+			percent = 75
+			label = "[CORROBORATED ANOMALY]"
+		} else {
+			percent = 50
+			label = "[CONTEXTUAL SUSPICION]"
 		}
-		if warnCount == 0 {
-			warnCount = warnings
-		}
-		percent = baseScore + (warnCount-1)*3
-		if percent > 85 {
-			percent = 85
-		}
-		label = fmt.Sprintf("%d%% ELEVATED ANOMALY RISK", percent)
 		fillStyle = m.theme.StatValueWarn
 	} else {
 		noticeCount := 0
@@ -339,14 +312,12 @@ func (m Model) renderRiskGauge(width int, alerts, warnings int) string {
 			}
 		}
 		if noticeCount > 0 {
-			percent = 10 + noticeCount*2
-			if percent > 20 {
-				percent = 20
-			}
-			label = fmt.Sprintf("%d%% LOW AUDIT NOTICE", percent)
+			percent = 25
+			label = "[AUDIT NOTICE]"
 			fillStyle = m.theme.StatValueNotice
 		} else {
-			label = "0% (CLEAN & SECURE)"
+			percent = 0
+			label = "[CLEAN & SECURE]"
 			fillStyle = m.theme.StatValueSafe
 		}
 	}
@@ -995,45 +966,45 @@ func (m Model) renderQuitConfirm() string {
 }
 
 func (m Model) renderCommandPalette() string {
-	w := 72
-	if m.width > 80 {
-		w = m.width - 10
+	w := 78
+	if m.width > 86 {
+		w = m.width - 8
 	}
-	if w > 86 {
-		w = 86
+	if w > 94 {
+		w = 94
 	}
 
 	var b strings.Builder
-	b.WriteString(m.theme.ModalHeader.Render("⌨  AETHER COMMAND CENTER & KEYBOARD SHORTCUTS") + "\n\n")
+	b.WriteString(m.theme.ModalHeader.Render("⌨  AETHER FORENSIC COMMAND CENTER") + "\n\n")
 
-	items := []struct {
-		key  string
-		desc string
-	}{
-		{"j / k / ↑ / ↓", "Navigate findings list / scroll forensic dossier"},
-		{"n / N", "Jump to next / previous ALERT (critical threats)"},
-		{"g / G", "Jump to top / bottom of findings list or dossier"},
-		{"PgUp / PgDn", "Scroll 5 findings or dossier lines up / down"},
-		{"Enter", "Open Forensic Threat Dossier for selected finding"},
-		{"/", "Live fuzzy search / filter findings feed"},
-		{"s", "Toggle feed sort: severity (worst first) / arrival"},
-		{"Esc", "Clear active search filter / close modal"},
-		{"r / c", "Copy containment runbook command to clipboard"},
-		{"y", "Copy selected finding target path to clipboard"},
-		{"h", "Copy selected finding cryptographic hash (SHA256/MD5)"},
-		{"o", "Open standalone HTML report in default browser"},
-		{"Tab / 1-4", "Switch dossier tabs (Assessment, Artifact, MITRE, Remediation)"},
-		{"?", "Toggle this Keyboard Shortcuts Command Palette"},
-		{"q", "Quit (asks to confirm abort while scan runs) / Close modal"},
-		{"Ctrl+C", "Quit immediately (no confirmation) / Close modal"},
+	// Search Input Box
+	searchPrompt := fmt.Sprintf("  🔍 Filter Actions: %s█", m.paletteQuery)
+	b.WriteString(m.theme.SubSectionHeader.Render(searchPrompt) + "\n\n")
+
+	actions := m.getFilteredPaletteActions()
+	if len(actions) == 0 {
+		b.WriteString(m.theme.FindingRowNormal.Render("  No matching actions found. Use backspace to widen search query.") + "\n")
+	} else {
+		maxItems := 10
+		if len(actions) < maxItems {
+			maxItems = len(actions)
+		}
+		for i := 0; i < maxItems; i++ {
+			act := actions[i]
+			paddedKey := runewidth.FillRight(act.Key, 14)
+			line := fmt.Sprintf("  %s %s — %s", m.theme.KeyHint.Render(paddedKey), act.Title, act.Description)
+			if i == m.paletteSelectedIndex {
+				b.WriteString(m.theme.FindingRowSelected.Render("▶ " + line) + "\n")
+			} else {
+				b.WriteString("  " + line + "\n")
+			}
+		}
+		if len(actions) > maxItems {
+			b.WriteString(m.theme.FindingTimestamp.Render(fmt.Sprintf("  ... and %d more actions (use ↓ to scroll)", len(actions)-maxItems)) + "\n")
+		}
 	}
 
-	for _, it := range items {
-		paddedKey := runewidth.FillRight(it.key, 16)
-		b.WriteString(fmt.Sprintf("  %s %s\n", m.theme.KeyHint.Render(paddedKey), m.theme.FindingRowNormal.Render(it.desc)))
-	}
-
-	b.WriteString("\n" + m.theme.KeyHint.Render("Press [Esc], [?], or [Enter] to return"))
+	b.WriteString("\n" + m.theme.KeyHint.Render("[Enter] Execute  [↑/↓] Navigate  [Type] Filter  [Esc/?] Dismiss"))
 
 	box := m.theme.CommandPalette.Width(w).Render(b.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)

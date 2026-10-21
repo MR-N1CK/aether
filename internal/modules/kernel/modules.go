@@ -13,6 +13,7 @@ import (
 
 	"aether/internal/pkgdb"
 	"aether/internal/report"
+	"aether/internal/safeopen"
 )
 
 // readProcModules parses /proc/modules and returns a set of active module names.
@@ -123,7 +124,7 @@ func loadModulesDep(rootFS string) map[string]bool {
 	}
 
 	for _, dp := range depPaths {
-		data, err := os.ReadFile(dp)
+		data, err := safeopen.ReadFileReadOnly(dp, 50*1024*1024)
 		if err != nil {
 			continue
 		}

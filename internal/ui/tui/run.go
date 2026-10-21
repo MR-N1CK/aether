@@ -24,7 +24,7 @@ func Run(ctx context.Context, cancel context.CancelFunc, sub *events.Subscriptio
 	}()
 
 	m := NewModel(ctx, cancel, sub, th, noAnim, mode, threads, paths, reportPath...)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	// Handle parent context cancellation (e.g. SIGTERM)
 	go func() {

@@ -153,7 +153,7 @@ func (d *DB) loadDpkg(dpkgInfoDir string) {
 			}
 
 			filePath := filepath.Join(dpkgInfoDir, entry.Name())
-			f, oErr := os.Open(filePath)
+			f, oErr := safeopen.OpenReadOnly(filePath)
 			if oErr != nil {
 				continue
 			}
@@ -174,7 +174,7 @@ func (d *DB) loadDpkg(dpkgInfoDir string) {
 			f.Close()
 		} else if strings.HasSuffix(entry.Name(), ".md5sums") {
 			filePath := filepath.Join(dpkgInfoDir, entry.Name())
-			f, oErr := os.Open(filePath)
+			f, oErr := safeopen.OpenReadOnly(filePath)
 			if oErr != nil {
 				continue
 			}
@@ -223,7 +223,7 @@ func (d *DB) loadDpkg(dpkgInfoDir string) {
 // Line 2: diverted file
 // Line 3: diverting package (or ":" for local diversion)
 func (d *DB) parseDpkgDiversions(path string) {
-	f, err := os.Open(path)
+	f, err := safeopen.OpenReadOnly(path)
 	if err != nil {
 		return
 	}
@@ -285,7 +285,7 @@ func (d *DB) loadPacman(pacmanDir string) {
 		pkgName := dirName[:secondLastHyphen]
 
 		filesPath := filepath.Join(pacmanDir, dirName, "files")
-		f, oErr := os.Open(filesPath)
+		f, oErr := safeopen.OpenReadOnly(filesPath)
 		if oErr != nil {
 			continue
 		}

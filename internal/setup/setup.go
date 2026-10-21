@@ -243,7 +243,7 @@ func downloadAndExtractRules(urlStr, destDir string) (int, error) {
 	if err != nil {
 		if strings.HasSuffix(urlStr, ".yar") || strings.HasSuffix(urlStr, ".yara") {
 			destFile := filepath.Join(destDir, "yara-rules.yar")
-			if err := os.WriteFile(destFile, bodyBytes, 0644); err != nil {
+			if err := os.WriteFile(destFile, bodyBytes, 0600); err != nil {
 				return 0, err
 			}
 			return 1, nil
@@ -251,32 +251,72 @@ func downloadAndExtractRules(urlStr, destDir string) (int, error) {
 		return 0, fmt.Errorf("response is not a valid zip archive: %w", err)
 	}
 
+	return ExtractRulesFromZip(zipReader, destDir)
+}
+
+const (
+	// MaxEntryUncompressedSize limits any single rule file extraction to 20MB.
+	MaxEntryUncompressedSize = 20 * 1024 * 1024
+	// MaxTotalUncompressedSize limits cumulative rule extraction to 100MB.
+	MaxTotalUncompressedSize = 100 * 1024 * 1024
+)
+
+// ExtractRulesFromZip unpacks .yar and .yara rule files into destDir with strict
+// ZipSlip traversal guards, decompression bomb size limits, and 0600 permissions.
+func ExtractRulesFromZip(zipReader *zip.Reader, destDir string) (int, error) {
+	cleanDestDir := filepath.Clean(destDir)
 	count := 0
+	var totalUncompressed int64
+
 	for _, f := range zipReader.File {
 		ext := strings.ToLower(filepath.Ext(f.Name))
 		if ext != ".yar" && ext != ".yara" {
 			continue
 		}
 
+		// ZipSlip defense: prevent directory traversal via deceptive filenames
+		baseName := filepath.Base(filepath.Clean(f.Name))
+		if baseName == "." || baseName == "/" || strings.Contains(baseName, "..") {
+			return count, fmt.Errorf("zip entry path traversal attempt: %s", f.Name)
+		}
+		destPath := filepath.Clean(filepath.Join(cleanDestDir, baseName))
+		if !strings.HasPrefix(destPath, cleanDestDir+string(filepath.Separator)) {
+			return count, fmt.Errorf("zip entry path escapes destination: %s", f.Name)
+		}
+
 		rc, err := f.Open()
 		if err != nil {
-			continue
+			return count, fmt.Errorf("failed opening zip entry %s: %w", f.Name, err)
 		}
 
-		destPath := filepath.Join(destDir, filepath.Base(f.Name))
-		outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 		if err != nil {
 			rc.Close()
-			continue
+			return count, fmt.Errorf("failed creating target rule file %s: %w", destPath, err)
 		}
 
-		_, copyErr := io.Copy(outFile, rc)
+		// Decompression bomb defense: cap reading per entry and across total archive
+		limitedReader := io.LimitReader(rc, MaxEntryUncompressedSize+1)
+		written, copyErr := io.Copy(outFile, limitedReader)
 		outFile.Close()
 		rc.Close()
 
-		if copyErr == nil {
-			count++
+		if copyErr != nil {
+			_ = os.Remove(destPath)
+			return count, fmt.Errorf("error extracting %s: %w", f.Name, copyErr)
 		}
+		if written > MaxEntryUncompressedSize {
+			_ = os.Remove(destPath)
+			return count, fmt.Errorf("decompression bomb rejected: entry %s exceeds 20MB limit", f.Name)
+		}
+
+		totalUncompressed += written
+		if totalUncompressed > MaxTotalUncompressedSize {
+			_ = os.Remove(destPath)
+			return count, fmt.Errorf("decompression bomb rejected: total uncompressed rules exceed 100MB limit")
+		}
+
+		count++
 	}
 
 	return count, nil

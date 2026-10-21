@@ -311,12 +311,15 @@ func DecodeAndRescan(
 	cfg *config.Config,
 	budget *MemoryBudget,
 ) (*HeuristicMatch, []string) {
-	h, layers, _ := DecodeAndRescanWithYARA(ctx, path, data, pkgDB, cfg, budget, nil)
-	return h, layers
+	matches, layers, _ := DecodeAndRescanWithYARA(ctx, path, data, pkgDB, cfg, budget, nil)
+	if len(matches) > 0 {
+		return matches[0], layers
+	}
+	return nil, nil
 }
 
 // DecodeAndRescanWithYARA evaluates both native heuristics and compiled YARA rules across
-// progressively decoded candidates in memory up to 3 layers deep.
+// progressively decoded candidates in memory up to 3 layers deep, collecting ALL matching threats.
 func DecodeAndRescanWithYARA(
 	ctx context.Context,
 	path string,
@@ -325,7 +328,7 @@ func DecodeAndRescanWithYARA(
 	cfg *config.Config,
 	budget *MemoryBudget,
 	yScanner yara.Scanner,
-) (*HeuristicMatch, []string, []yara.RuleMatch) {
+) ([]*HeuristicMatch, []string, []yara.RuleMatch) {
 	if len(data) < minCandidateLen || IsELF(data) {
 		return nil, nil, nil
 	}
@@ -342,11 +345,19 @@ func DecodeAndRescanWithYARA(
 	}
 
 	queue := []queueItem{{current: data, layers: nil, depth: 0}}
+	var allMatches []*HeuristicMatch
+	var allLayers []string
+	var allYaraMatches []yara.RuleMatch
+	seenMatches := make(map[string]bool)
 
-	for len(queue) > 0 {
+	totalCandidatesEvaluated := 0
+	const maxCandidatesLimit = 50
+	const maxMatchesLimit = 20
+
+	for len(queue) > 0 && totalCandidatesEvaluated < maxCandidatesLimit && len(allMatches) < maxMatchesLimit {
 		select {
 		case <-ctx.Done():
-			return nil, nil, nil
+			return allMatches, allLayers, allYaraMatches
 		default:
 		}
 
@@ -359,10 +370,21 @@ func DecodeAndRescanWithYARA(
 
 		candidates := extractDecodedCandidates(item.current, maxCap)
 		for _, c := range candidates {
+			totalCandidatesEvaluated++
 			newLayers := append(append([]string(nil), item.layers...), c.layer)
 
-			// 1. Evaluate decoded stream with script heuristics
-			if h := CheckSuspiciousScriptContent(path, c.data, pkgDB, cfg); h != nil {
+			// 1. Evaluate decoded stream with multi-signal script heuristics
+			scriptMatches := CheckAllSuspiciousScriptContent(path, c.data, pkgDB, cfg)
+			for _, h := range scriptMatches {
+				key := fmt.Sprintf("%s:%s", h.Name, h.Reason)
+				if seenMatches[key] {
+					continue
+				}
+				seenMatches[key] = true
+				if len(allLayers) == 0 {
+					allLayers = newLayers
+				}
+
 				score := h.Score + 5
 				if score > 100 {
 					score = 100
@@ -371,22 +393,29 @@ func DecodeAndRescanWithYARA(
 				if sev == report.SeverityAlert && score < 90 {
 					score = 90
 				}
-				return &HeuristicMatch{
+				allMatches = append(allMatches, &HeuristicMatch{
 					Name:     "Script_Obfuscated_Payload",
 					Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches %s: %s", strings.Join(newLayers, " -> "), h.Name, h.Reason),
 					Score:    score,
 					Severity: sev,
-				}, newLayers, nil
+				})
 			}
 
 			// 2. Evaluate decoded stream for hidden private keys
 			if k := CheckSuspiciousPrivateKeyMaterial(path, c.data, pkgDB, cfg); k != nil {
-				return &HeuristicMatch{
-					Name:     "Script_Obfuscated_Payload",
-					Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches %s: %s", strings.Join(newLayers, " -> "), k.Name, k.Reason),
-					Score:    70,
-					Severity: report.SeverityWarning,
-				}, newLayers, nil
+				key := fmt.Sprintf("%s:%s", k.Name, k.Reason)
+				if !seenMatches[key] {
+					seenMatches[key] = true
+					if len(allLayers) == 0 {
+						allLayers = newLayers
+					}
+					allMatches = append(allMatches, &HeuristicMatch{
+						Name:     "Script_Obfuscated_Payload",
+						Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches %s: %s", strings.Join(newLayers, " -> "), k.Name, k.Reason),
+						Score:    70,
+						Severity: report.SeverityWarning,
+					})
+				}
 			}
 
 			// 3. Evaluate decoded stream with compiled YARA rules (if engine active)
@@ -398,17 +427,28 @@ func DecodeAndRescanWithYARA(
 					Data:      c.data,
 				}
 				if yMatches, err := yScanner.Scan(target); err == nil && len(yMatches) > 0 {
-					sev := yMatches[0].Severity
-					score := yMatches[0].Score
-					if sev == report.SeverityAlert && score < 85 {
-						score = 85
+					for _, ym := range yMatches {
+						key := fmt.Sprintf("yara:%s", ym.RuleName)
+						if !seenMatches[key] {
+							seenMatches[key] = true
+							if len(allLayers) == 0 {
+								allLayers = newLayers
+							}
+							allYaraMatches = append(allYaraMatches, ym)
+
+							score := ym.Score
+							sev := ym.Severity
+							if sev == report.SeverityAlert && score < 85 {
+								score = 85
+							}
+							allMatches = append(allMatches, &HeuristicMatch{
+								Name:     "Script_Obfuscated_Payload",
+								Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches YARA rule %s", strings.Join(newLayers, " -> "), ym.RuleName),
+								Score:    score,
+								Severity: sev,
+							})
+						}
 					}
-					return &HeuristicMatch{
-						Name:     "Script_Obfuscated_Payload",
-						Reason:   fmt.Sprintf("Obfuscated payload (%s decoded) matches YARA rule %s", strings.Join(newLayers, " -> "), yMatches[0].RuleName),
-						Score:    score,
-						Severity: sev,
-					}, newLayers, yMatches
 				}
 			}
 
@@ -423,5 +463,5 @@ func DecodeAndRescanWithYARA(
 		}
 	}
 
-	return nil, nil, nil
+	return allMatches, allLayers, allYaraMatches
 }

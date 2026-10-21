@@ -1066,33 +1066,6 @@ func (s *Scanner) Run(ctx context.Context) error {
 					return nil
 				}
 
-				// Default --full scan exclusions (when --path is not explicitly provided)
-				if !s.cfg.Scan.ExplicitPaths && d.IsDir() {
-					dirBase := d.Name()
-					if dirBase == "testdata" {
-						return filepath.SkipDir
-					}
-					cleanPath := filepath.Clean(path)
-					if strings.HasSuffix(cleanPath, "/Downloads/Aether") || strings.Contains(cleanPath, "/Downloads/Aether/") {
-						return filepath.SkipDir
-					}
-					goModPath := filepath.Join(path, "go.mod")
-					if isOffline {
-						goModPath = filepath.Join(cleanRoot, strings.TrimPrefix(path, "/"), "go.mod")
-					}
-					if fi, gErr := os.Stat(goModPath); gErr == nil && !fi.IsDir() {
-						// Anti-evasion guard: Never skip go.mod if planted in critical system/volatile directories
-						isCritSystem := cleanPath == "/etc" || strings.HasPrefix(cleanPath, "/etc/") ||
-							cleanPath == "/boot" || strings.HasPrefix(cleanPath, "/boot/") ||
-							cleanPath == "/var/log" || strings.HasPrefix(cleanPath, "/var/log/") ||
-							cleanPath == "/dev/shm" || strings.HasPrefix(cleanPath, "/dev/shm/") ||
-							cleanPath == "/run" || strings.HasPrefix(cleanPath, "/run/")
-						if !isCritSystem {
-							return filepath.SkipDir
-						}
-					}
-				}
-
 				// One filesystem boundary check
 				if oneFS && d.IsDir() && rootDev != 0 {
 					var dirStat unix.Stat_t

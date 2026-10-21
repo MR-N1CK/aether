@@ -14,6 +14,7 @@ import (
 
 	"aether/internal/config"
 	"aether/internal/report"
+	"aether/internal/safeopen"
 )
 
 // IOCType indicates the category of indicator of compromise.
@@ -111,7 +112,7 @@ func NewEngine(cfg *config.Config, logger *slog.Logger) (*RealEngine, error) {
 		filepath.Join(os.Getenv("HOME"), ".config", config.ToolName, "known_benign.yaml"),
 		filepath.Join("/etc", config.ToolName, "known_benign.yaml"),
 	} {
-		if data, err := os.ReadFile(p); err == nil {
+		if data, err := safeopen.ReadFileReadOnly(p, 10*1024*1024); err == nil {
 			if bRules, bErr := ParseBenignFile(data, p, logger); bErr == nil {
 				eng.mu.Lock()
 				eng.benignRules = append(eng.benignRules, bRules...)
@@ -213,7 +214,7 @@ func (e *RealEngine) loadFileLocked(path string) error {
 
 	// Check for known_benign.yaml / known_benign.yml
 	if (ext == ".yaml" || ext == ".yml") && strings.Contains(base, "known_benign") {
-		data, err := os.ReadFile(path)
+		data, err := safeopen.ReadFileReadOnly(path, 10*1024*1024)
 		if err != nil {
 			e.logger.Warn("cannot read known_benign file", slog.String("path", path), slog.Any("error", err))
 			return err
@@ -231,7 +232,7 @@ func (e *RealEngine) loadFileLocked(path string) error {
 
 	switch ext {
 	case ".ips":
-		f, err := os.Open(path)
+		f, err := safeopen.OpenReadOnly(path)
 		if err != nil {
 			e.logger.Warn("cannot read IP IOC file", slog.String("path", path), slog.Any("error", err))
 			return err
@@ -249,7 +250,7 @@ func (e *RealEngine) loadFileLocked(path string) error {
 		return nil
 
 	case ".yaml", ".yml":
-		data, err := os.ReadFile(path)
+		data, err := safeopen.ReadFileReadOnly(path, 10*1024*1024)
 		if err != nil {
 			e.logger.Warn("cannot read pattern IOC file", slog.String("path", path), slog.Any("error", err))
 			return err
@@ -266,7 +267,7 @@ func (e *RealEngine) loadFileLocked(path string) error {
 		return nil
 
 	default: // .txt, .hashes, .ioc, or other line-delimited indicators
-		f, err := os.Open(path)
+		f, err := safeopen.OpenReadOnly(path)
 		if err != nil {
 			e.logger.Warn("cannot read hash/IP IOC file", slog.String("path", path), slog.Any("error", err))
 			return err

@@ -2549,7 +2549,7 @@ func TestScanner_YARA_PentestTool_DowngradeToInfo(t *testing.T) {
 	}
 }
 
-func TestScanner_FullScan_WorkspaceExclusions(t *testing.T) {
+func TestScanner_FullScan_AntiEvasion_NoContentPruning(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// 1. Regular directory
@@ -2557,7 +2557,7 @@ func TestScanner_FullScan_WorkspaceExclusions(t *testing.T) {
 	_ = os.MkdirAll(normalDir, 0755)
 	_ = os.WriteFile(filepath.Join(normalDir, "test.conf"), []byte("data"), 0644)
 
-	// 2. testdata directory
+	// 2. testdata directory (must NOT be skipped — prevents adversary evasion via /tmp/testdata)
 	testdataDir := filepath.Join(tmpDir, "testdata")
 	_ = os.MkdirAll(testdataDir, 0755)
 	_ = os.WriteFile(filepath.Join(testdataDir, "sample.txt"), []byte("testdata"), 0644)
@@ -2567,7 +2567,7 @@ func TestScanner_FullScan_WorkspaceExclusions(t *testing.T) {
 	_ = os.MkdirAll(downloadsDir, 0755)
 	_ = os.WriteFile(filepath.Join(downloadsDir, "binary"), []byte("bin"), 0644)
 
-	// 4. Directory containing go.mod
+	// 4. Directory containing go.mod (must NOT be skipped by walker; build trees are triaged post-inspection)
 	goModDir := filepath.Join(tmpDir, "dev_project")
 	_ = os.MkdirAll(goModDir, 0755)
 	_ = os.WriteFile(filepath.Join(goModDir, "go.mod"), []byte("module mymod\n"), 0644)
@@ -2606,9 +2606,10 @@ func TestScanner_FullScan_WorkspaceExclusions(t *testing.T) {
 		t.Fatalf("expected ScanFinished event")
 	}
 
-	// Only test.conf in etc/ should be inspected (1 file). testdata, Downloads/Aether, and dev_project (go.mod) are skipped!
-	if finishedEv.FilesScanned != 1 {
-		t.Errorf("expected 1 file inspected (test.conf), got %d (skipped: testdata, Downloads/Aether, go.mod dir)", finishedEv.FilesScanned)
+	// Forensic integrity: All 5 files must be inspected. The walker must not skip directories
+	// based on adversary-controlled names (testdata) or files (go.mod).
+	if finishedEv.FilesScanned != 5 {
+		t.Errorf("expected 5 files inspected without directory pruning, got %d", finishedEv.FilesScanned)
 	}
 }
 

@@ -12,7 +12,12 @@ This document defines strict operational rules, forensic constraints, and archit
 
 2. **No Forensic Contamination**:
    - Never write to or mutate inspected files, permissions, ownership, or timestamps (`mtime`/`ctime`).
-   - File opens for inspection must use `safeopen.OpenRegularReadOnly` with `O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK | O_NOATIME` to prevent symlink traversal attacks, FIFO blocking, and access-time updates where supported by kernel capabilities (`CAP_FOWNER`).
+   - File opens for inspection must use `safeopen.OpenRegularReadOnly`, `safeopen.OpenReadOnly`, or `safeopen.ReadFileReadOnly` with `O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK | O_NOATIME` to prevent symlink traversal attacks, FIFO blocking, and access-time updates where supported by kernel capabilities (`CAP_FOWNER`).
+
+3. **Synthetic Kernel Pseudofs Boundary (`/proc` & `/sys`)**:
+   - Kernel pseudofilesystems (`/proc/*`, `/sys/*`) are generated dynamically in-memory by kernel drivers rather than stored on persistent block devices.
+   - Because pseudofiles report `stat.Size == 0` and do not support POSIX `O_NOATIME`, live triage modules reading runtime kernel structures (`/proc/modules`, `/proc/net/*`, `/proc/<pid>/*`, `/sys/module/*`) read via bounded buffers (`io.LimitReader` or `os.ReadFile`).
+   - All persistent host files (including `/etc`, `/usr`, `/lib`, `/tmp`, `/var`, `/home`, user configs, package manager databases, and custom rules) MUST strictly use `safeopen` primitives.
 
 ---
 

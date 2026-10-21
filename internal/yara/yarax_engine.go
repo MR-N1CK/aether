@@ -19,6 +19,7 @@ import (
 
 	"aether/internal/config"
 	"aether/internal/events"
+	"aether/internal/safeopen"
 )
 
 var defaultGlobals = map[string]any{
@@ -94,7 +95,7 @@ func (e *YaraXEngine) LoadRules(rulePaths []string) error {
 
 	// 1. Process provided rule paths
 	for _, path := range rulePaths {
-		content, err := os.ReadFile(path)
+		content, err := safeopen.ReadFileReadOnly(path, 10*1024*1024)
 		if err != nil {
 			msg := fmt.Sprintf("failed to read rule file %s: %v", path, err)
 			if e.logger != nil {
@@ -453,7 +454,7 @@ func YaraXValidateRulesDir(dir string) (*ValidationResult, error) {
 	defer mainCompiler.Destroy()
 
 	for _, path := range ruleFiles {
-		content, err := os.ReadFile(path)
+		content, err := safeopen.ReadFileReadOnly(path, 10*1024*1024)
 		if err != nil {
 			res.FilesFailed++
 			res.Failures = append(res.Failures, RuleFailure{

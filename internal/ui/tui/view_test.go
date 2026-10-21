@@ -17,7 +17,7 @@ func TestRenderRiskGauge_CleanState(t *testing.T) {
 	}
 
 	gauge := m.renderRiskGauge(80, 0, 0)
-	if !strings.Contains(gauge, "0% (CLEAN & SECURE)") {
+	if !strings.Contains(gauge, "[CLEAN & SECURE]") {
 		t.Errorf("expected clean label in risk gauge, got: %s", gauge)
 	}
 }
@@ -39,18 +39,15 @@ func TestRenderRiskGauge_NoticesOnly(t *testing.T) {
 	}
 
 	gauge := m.renderRiskGauge(80, 0, 0)
-	if !strings.Contains(gauge, "LOW AUDIT NOTICE") {
-		t.Errorf("expected LOW AUDIT NOTICE label in risk gauge, got: %s", gauge)
-	}
-	if !strings.Contains(gauge, "14% LOW AUDIT NOTICE") {
-		t.Errorf("expected 14%% score for 2 notices, got: %s", gauge)
+	if !strings.Contains(gauge, "[AUDIT NOTICE]") {
+		t.Errorf("expected [AUDIT NOTICE] label in risk gauge, got: %s", gauge)
 	}
 }
 
 func TestRenderRiskGauge_Warnings(t *testing.T) {
 	th := theme.NewTheme(true)
 
-	// Medium confidence warning -> 45%
+	// Single warning -> [CONTEXTUAL SUSPICION]
 	m1 := Model{
 		theme: th,
 		findings: []report.Finding{
@@ -62,11 +59,11 @@ func TestRenderRiskGauge_Warnings(t *testing.T) {
 		},
 	}
 	g1 := m1.renderRiskGauge(80, 0, 1)
-	if !strings.Contains(g1, "45% ELEVATED ANOMALY RISK") {
-		t.Errorf("expected 45%% risk for single medium-confidence warning, got: %s", g1)
+	if !strings.Contains(g1, "[CONTEXTUAL SUSPICION]") {
+		t.Errorf("expected [CONTEXTUAL SUSPICION] for single warning, got: %s", g1)
 	}
 
-	// High confidence warning with multiple warnings -> Base 55 + 2*3 = 61%
+	// Multiple warnings (> 2) -> [CORROBORATED ANOMALY]
 	m2 := Model{
 		theme: th,
 		findings: []report.Finding{
@@ -88,15 +85,15 @@ func TestRenderRiskGauge_Warnings(t *testing.T) {
 		},
 	}
 	g2 := m2.renderRiskGauge(80, 0, 3)
-	if !strings.Contains(g2, "61% ELEVATED ANOMALY RISK") {
-		t.Errorf("expected 61%% risk for multiple warnings, got: %s", g2)
+	if !strings.Contains(g2, "[CORROBORATED ANOMALY]") {
+		t.Errorf("expected [CORROBORATED ANOMALY] for multiple warnings, got: %s", g2)
 	}
 }
 
 func TestRenderRiskGauge_Alerts(t *testing.T) {
 	th := theme.NewTheme(true)
 
-	// Single alert with Direct Evidence -> Base score 95%
+	// Single alert with Direct Evidence -> [DIRECT COMPROMISE]
 	m1 := Model{
 		theme: th,
 		findings: []report.Finding{
@@ -112,11 +109,11 @@ func TestRenderRiskGauge_Alerts(t *testing.T) {
 		},
 	}
 	g1 := m1.renderRiskGauge(80, 1, 0)
-	if !strings.Contains(g1, "95% CRITICAL COMPROMISE RISK") {
-		t.Errorf("expected 95%% risk for single direct alert, got: %s", g1)
+	if !strings.Contains(g1, "[DIRECT COMPROMISE]") {
+		t.Errorf("expected [DIRECT COMPROMISE] for single direct alert, got: %s", g1)
 	}
 
-	// 3 Alerts -> Base 95 + 2*4 = 100% (capped at 100)
+	// 3 Alerts -> [DIRECT COMPROMISE]
 	m2 := Model{
 		theme: th,
 		findings: []report.Finding{
@@ -144,8 +141,8 @@ func TestRenderRiskGauge_Alerts(t *testing.T) {
 		},
 	}
 	g2 := m2.renderRiskGauge(80, 3, 0)
-	if !strings.Contains(g2, "100% CRITICAL COMPROMISE RISK") {
-		t.Errorf("expected 100%% risk for 3 critical alerts, got: %s", g2)
+	if !strings.Contains(g2, "[DIRECT COMPROMISE]") {
+		t.Errorf("expected [DIRECT COMPROMISE] for 3 critical alerts, got: %s", g2)
 	}
 }
 

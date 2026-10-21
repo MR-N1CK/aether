@@ -2612,6 +2612,56 @@ func TestScanner_FullScan_WorkspaceExclusions(t *testing.T) {
 	}
 }
 
+func TestScanner_FullScan_AntiEvasion_GoModInSystemDir(t *testing.T) {
+	fakeRoot := t.TempDir()
+
+	// Plant an implant inside /etc/sub accompanied by a deceptive go.mod
+	etcSub := filepath.Join(fakeRoot, "etc", "sub")
+	_ = os.MkdirAll(etcSub, 0755)
+	_ = os.WriteFile(filepath.Join(etcSub, "go.mod"), []byte("module deceptive\n"), 0644)
+	_ = os.WriteFile(filepath.Join(etcSub, "implant.sh"), []byte("echo evil"), 0644)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Scan.Paths = []string{"/"}
+	cfg.Scan.Root = fakeRoot
+	cfg.Scan.Full = true
+	cfg.Scan.ExplicitPaths = false
+
+	bus := events.NewEventBus()
+	defer bus.Close()
+	sub := bus.Subscribe()
+	defer sub.Close()
+
+	var finishedEv *events.ScanFinished
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range sub.Events() {
+			if sf, ok := ev.(events.ScanFinished); ok {
+				finishedEv = &sf
+				return
+			}
+		}
+	}()
+
+	s := scanner.NewScanner(cfg, bus, nil, nil, scanner.WithModules(nil))
+	err := s.Run(context.Background())
+	if err != nil {
+		t.Fatalf("scanner Run failed: %v", err)
+	}
+	<-done
+
+	if finishedEv == nil {
+		t.Fatalf("expected ScanFinished event")
+	}
+
+	// In offline scan of fakeRoot, /etc/sub must NOT be skipped despite go.mod presence
+	if finishedEv.FilesScanned < 2 {
+		t.Errorf("expected files in /etc/sub to be inspected (anti-evasion), got %d files scanned", finishedEv.FilesScanned)
+	}
+}
+
+
 type mockYaraScannerImpl struct {
 	matches []yara.RuleMatch
 }

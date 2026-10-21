@@ -1081,7 +1081,15 @@ func (s *Scanner) Run(ctx context.Context) error {
 						goModPath = filepath.Join(cleanRoot, strings.TrimPrefix(path, "/"), "go.mod")
 					}
 					if fi, gErr := os.Stat(goModPath); gErr == nil && !fi.IsDir() {
-						return filepath.SkipDir
+						// Anti-evasion guard: Never skip go.mod if planted in critical system/volatile directories
+						isCritSystem := cleanPath == "/etc" || strings.HasPrefix(cleanPath, "/etc/") ||
+							cleanPath == "/boot" || strings.HasPrefix(cleanPath, "/boot/") ||
+							cleanPath == "/var/log" || strings.HasPrefix(cleanPath, "/var/log/") ||
+							cleanPath == "/dev/shm" || strings.HasPrefix(cleanPath, "/dev/shm/") ||
+							cleanPath == "/run" || strings.HasPrefix(cleanPath, "/run/")
+						if !isCritSystem {
+							return filepath.SkipDir
+						}
 					}
 				}
 

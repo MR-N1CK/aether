@@ -116,3 +116,26 @@ func TestResolveUnderRoot_ConfinementAndLoops(t *testing.T) {
 		t.Errorf("expected hostPath %q, got: %q", normalFile, hostPath)
 	}
 }
+
+func TestOpenRegularReadOnly_SymlinkRejection(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetFile := filepath.Join(tmpDir, "target.txt")
+	if err := os.WriteFile(targetFile, []byte("target content"), 0644); err != nil {
+		t.Fatalf("failed to write target file: %v", err)
+	}
+
+	symlinkPath := filepath.Join(tmpDir, "symlink.txt")
+	if err := os.Symlink(targetFile, symlinkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	// Direct open on symlink must fail with ErrIsSymlink due to O_NOFOLLOW
+	_, err := safeopen.OpenRegularReadOnly(symlinkPath, 1024)
+	if err == nil {
+		t.Fatal("expected OpenRegularReadOnly to fail on symlink with O_NOFOLLOW, but succeeded")
+	}
+	if !errors.Is(err, safeopen.ErrIsSymlink) {
+		t.Errorf("expected errors.Is(err, ErrIsSymlink), got: %v", err)
+	}
+}
+

@@ -343,7 +343,7 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 		_ = s.Run(scanCtx)
 	}()
 
-	tuiErr := tui.Run(ctx, scanCancel, uiSub, th, gFlags.noAnim, mode, cfg.Scan.Threads, cfg.Scan.Paths)
+	tuiErr := tui.Run(ctx, scanCancel, uiSub, th, gFlags.noAnim, mode, cfg.Scan.Threads, cfg.Scan.Paths, cfg.Scan.HTMLOut)
 	if cfg.Scan.HTMLOut != "" {
 		greenStyle := lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true)
 		boldStyle := lipgloss.NewStyle().Bold(true)

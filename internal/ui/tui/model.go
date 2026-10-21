@@ -101,13 +101,15 @@ type Model struct {
 	confirmQuit        bool
 	toastMessage       string
 	toastUntil         time.Time
+	findingsDirty      bool
+	htmlReportPath     string
 
 	// UI components
 	spinner spinner.Model
 }
 
 // NewModel constructs a new interactive TUI model.
-func NewModel(ctx context.Context, cancel context.CancelFunc, sub *events.Subscription, th *theme.Theme, noAnim bool, mode string, threads int, paths []string) Model {
+func NewModel(ctx context.Context, cancel context.CancelFunc, sub *events.Subscription, th *theme.Theme, noAnim bool, mode string, threads int, paths []string, reportPath ...string) Model {
 	if th == nil {
 		th = theme.NewTheme(theme.DetectNoColor())
 	}
@@ -126,6 +128,11 @@ func NewModel(ctx context.Context, cancel context.CancelFunc, sub *events.Subscr
 		initialState = stateDashboard
 	}
 
+	var repPath string
+	if len(reportPath) > 0 {
+		repPath = reportPath[0]
+	}
+
 	return Model{
 		ctx:             ctx,
 		cancelScan:      cancel,
@@ -140,6 +147,7 @@ func NewModel(ctx context.Context, cancel context.CancelFunc, sub *events.Subscr
 		threads:         threads,
 		hostname:        host,
 		paths:           paths,
+		htmlReportPath:  repPath,
 		activeModules:   make(map[string]*ModuleStatus),
 		findings:        make([]report.Finding, 0),
 		visible:         make([]report.Finding, 0),
@@ -211,6 +219,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case frameTickMsg:
+		if m.findingsDirty {
+			m.recomputeVisible()
+			m.findingsDirty = false
+		}
 		if !m.scanFinished {
 			m.elapsed = time.Since(m.startTime)
 		}
@@ -279,7 +291,7 @@ func (m *Model) handleScanEvent(e events.Event) {
 
 	case events.FindingRaised:
 		m.findings = append(m.findings, ev.Finding)
-		m.recomputeVisible()
+		m.findingsDirty = true
 		if mod, exists := m.activeModules[ev.Finding.Module]; exists {
 			mod.Findings++
 		}
@@ -298,6 +310,10 @@ func (m *Model) handleScanEvent(e events.Event) {
 		m.filesScanned = ev.FilesScanned
 		m.smoothFilesScanned = float64(ev.FilesScanned)
 		m.elapsed = ev.TotalDuration
+		if m.findingsDirty {
+			m.recomputeVisible()
+			m.findingsDirty = false
+		}
 		if m.state != stateDetail && m.state != stateSplash {
 			m.state = stateFinished
 		}
@@ -785,7 +801,11 @@ func (m *Model) jumpToPrevAlert() {
 }
 
 func (m *Model) openHTMLReport() {
-	candidates := []string{"aether-report.html", "report.html"}
+	var candidates []string
+	if m.htmlReportPath != "" {
+		candidates = append(candidates, m.htmlReportPath)
+	}
+	candidates = append(candidates, "aether-report.html", "report.html", "/tmp/aether-report.html")
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
 			cmd := exec.Command("xdg-open", p)
@@ -795,6 +815,6 @@ func (m *Model) openHTMLReport() {
 			}
 		}
 	}
-	m.showToast("No HTML report found in current directory")
+	m.showToast("No HTML report found to open")
 }
 

@@ -19,6 +19,7 @@ var (
 	ErrVanished           = os.ErrNotExist
 	ErrSymlinkEscapesRoot = errors.New("symlink target escapes root filesystem boundary")
 	ErrSymlinkLoop        = errors.New("too many levels of symbolic links (symlink loop)")
+	ErrIsSymlink          = errors.New("file is a symbolic link (O_NOFOLLOW)")
 )
 
 // ErrOversizeFile provides structured metadata when a file exceeds the maximum scan filesize.
@@ -59,19 +60,22 @@ func (fd *FileDescriptor) Close() error {
 }
 
 // OpenRegularReadOnly opens a target file strictly in read-only mode using
-// O_RDONLY|O_NOATIME|O_NONBLOCK|O_CLOEXEC (falling back to O_RDONLY|O_NONBLOCK|O_CLOEXEC
+// O_RDONLY|O_NOFOLLOW|O_NOATIME|O_NONBLOCK|O_CLOEXEC (falling back to O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC
 // if O_NOATIME returns EPERM).
 func OpenRegularReadOnly(path string, maxFileSize int64) (*FileDescriptor, error) {
-	flags := unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK | unix.O_NOATIME
+	flags := unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK | unix.O_NOFOLLOW | unix.O_NOATIME
 	fd, err := unix.Open(path, flags, 0)
 	if errors.Is(err, syscall.EPERM) {
 		// Non-owners or non-root users cannot use O_NOATIME; fallback without it
-		flags = unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK
+		flags = unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NONBLOCK | unix.O_NOFOLLOW
 		fd, err = unix.Open(path, flags, 0)
 	}
 	if err != nil {
 		if errors.Is(err, syscall.ENOENT) {
 			return nil, fmt.Errorf("%w: %q", ErrVanished, path)
+		}
+		if errors.Is(err, syscall.ELOOP) {
+			return nil, fmt.Errorf("%w: %q", ErrIsSymlink, path)
 		}
 		if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
 			return nil, fmt.Errorf("%w: %q", ErrPermission, path)
@@ -108,15 +112,18 @@ func OpenRegularReadOnly(path string, maxFileSize int64) (*FileDescriptor, error
 }
 
 // OpenReadOnly opens a target file strictly in read-only mode, guaranteeing forensic
-// purity with O_NOATIME fallback.
+// purity with O_NOFOLLOW and O_NOATIME fallback.
 func OpenReadOnly(path string) (*os.File, error) {
-	flags := unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOATIME
+	flags := unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NOATIME
 	fd, err := unix.Open(path, flags, 0)
 	if errors.Is(err, syscall.EPERM) {
-		flags = unix.O_RDONLY | unix.O_CLOEXEC
+		flags = unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW
 		fd, err = unix.Open(path, flags, 0)
 	}
 	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			return nil, fmt.Errorf("%w: %q", ErrIsSymlink, path)
+		}
 		return nil, fmt.Errorf("read-only open failed for %q: %w", path, err)
 	}
 	return os.NewFile(uintptr(fd), path), nil

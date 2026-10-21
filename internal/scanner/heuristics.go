@@ -547,10 +547,10 @@ func linkerHookMatch(data []byte) bool {
 	return false
 }
 
-// CheckSuspiciousScriptContent evaluates file bytes for malicious script patterns,
+// CheckAllSuspiciousScriptContent evaluates file bytes for all matching malicious script patterns,
 // including interactive/encrypted reverse shells, netcat/socat listeners, procfs manipulation,
 // webshells, droppers, ransomware encryptors, and data exfiltration routines.
-func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageDB, cfg *config.Config) *HeuristicMatch {
+func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageDB, cfg *config.Config) []*HeuristicMatch {
 	if len(data) == 0 {
 		return nil
 	}
@@ -591,167 +591,185 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 		return nil
 	}
 
+	var matches []*HeuristicMatch
+
 	// 1. Process hiding via procfs mount manipulation
 	if reProcHiding.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Process_Hiding_Procfs",
 			Reason:   fmt.Sprintf("Stealth process hiding via procfs tmpfs/bind mount manipulation in %s", filepath.Base(cleaned)),
 			Score:    90,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 2. Encrypted OpenSSL reverse shell
 	if reOpenSSLRevShell.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_OpenSSL_Reverse_Shell",
 			Reason:   fmt.Sprintf("Encrypted OpenSSL interactive reverse shell payload in %s", filepath.Base(cleaned)),
 			Score:    95,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 3. Interactive bash/sh /dev/tcp or /dev/udp reverse shell
 	if reRevShellInteractive.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Reverse_Shell_Interactive",
 			Reason:   fmt.Sprintf("Interactive reverse shell command payload (/dev/tcp redirection) in script %s", filepath.Base(cleaned)),
 			Score:    90,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 4. Netcat reverse shell
 	if reNetcatRevShell.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Netcat_Reverse_Shell",
 			Reason:   fmt.Sprintf("Netcat interactive reverse shell payload in script %s", filepath.Base(cleaned)),
 			Score:    90,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 5. Socat reverse shell (including openssl-connect)
 	if reSocatRevShell.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Socat_Reverse_Shell",
 			Reason:   fmt.Sprintf("Socat interactive reverse shell payload in script %s", filepath.Base(cleaned)),
 			Score:    90,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 6. Inline interpreter reverse shell (Python, Perl, PHP, Ruby, Lua, Node)
 	if reInlineScriptRev.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Reverse_Shell_Inline",
 			Reason:   fmt.Sprintf("Inline interpreter network reverse shell payload in script %s", filepath.Base(cleaned)),
 			Score:    85,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 7. Generic PHP webshell / backdoor evaluation
 	if reWebshellGeneric.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Webshell_PHP_Generic_Backdoor",
 			Reason:   fmt.Sprintf("Dynamic evaluation webshell backdoor payload in %s", filepath.Base(cleaned)),
 			Score:    90,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 8. Webshell behavioral traits (login hash + eval, upload/file manager execution)
 	if reWebshellTraits.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Webshell_Traits",
 			Reason:   fmt.Sprintf("Webshell behavioral traits and command interface in %s", filepath.Base(cleaned)),
 			Score:    70,
 			Severity: report.SeverityWarning,
-		}
+		})
 	}
 
 	// 9. Download and execute dropper (curl/wget | sh)
 	if reDownloadAndExec.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Download_And_Execute",
 			Reason:   fmt.Sprintf("Remote download-and-pipe execution payload (curl/wget | sh) in script %s", filepath.Base(cleaned)),
 			Score:    65,
 			Severity: report.SeverityWarning,
-		}
+		})
 	}
 
 	// 10. Python / Script Ransomware Encryptor
 	if reRansomwareScript.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Python_Ransomware_Encryptor",
 			Reason:   fmt.Sprintf("Automated file encryption and ransomware locker routine in script %s", filepath.Base(cleaned)),
 			Score:    95,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 11. Data Exfiltration Stealer
 	if reDataExfiltration.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Data_Exfiltration_Stealer",
 			Reason:   fmt.Sprintf("Automated filesystem harvesting and network exfiltration routine in script %s", filepath.Base(cleaned)),
 			Score:    90,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 12. C2 Data Exfiltration Collection Server
 	if reExfilServer.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_C2_Exfiltration_Server",
 			Reason:   fmt.Sprintf("Command-and-control exfiltration listener and data collection server in script %s", filepath.Base(cleaned)),
 			Score:    75,
 			Severity: report.SeverityWarning,
-		}
+		})
 	}
 
 	// 13. Encoded PowerShell command execution
 	if rePowerShellEncoded.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_PowerShell_Encoded_Execution",
 			Reason:   fmt.Sprintf("Encoded PowerShell payload execution (-EncodedCommand) in %s", filepath.Base(cleaned)),
 			Score:    85,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 14. Pluggable Authentication Module (PAM) execution hook
 	if rePamExecHook.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Persistence_PAM_Exec_Suspicious",
 			Reason:   fmt.Sprintf("Pluggable Authentication Module (PAM) execution hook targeting volatile/unprivileged path in %s", filepath.Base(cleaned)),
 			Score:    90,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 15. Dynamic linker hijack — value-inspected (volatile/relative/missing library targets, ld.so preload/audit config)
 	if linkerHookMatch(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Persistence_Linker_Audit_Hijack",
 			Reason:   fmt.Sprintf("Dynamic linker intercept hook referencing a volatile or relative library path, or ld.so preload/audit configuration, in %s", filepath.Base(cleaned)),
 			Score:    85,
 			Severity: report.SeverityAlert,
-		}
+		})
 	}
 
 	// 16. Automated cloud exfiltration tool
 	if reCloudExfilTool.Match(data) {
-		return &HeuristicMatch{
+		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Cloud_Exfiltration_Tool",
 			Reason:   fmt.Sprintf("Automated cloud exfiltration staging/transfer command in %s", filepath.Base(cleaned)),
 			Score:    80,
 			Severity: report.SeverityWarning,
-		}
+		})
 	}
 
-	return nil
+	return matches
+}
+
+// CheckSuspiciousScriptContent evaluates file bytes for malicious script patterns,
+// returning the highest-scoring heuristic match for backward compatibility.
+func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageDB, cfg *config.Config) *HeuristicMatch {
+	matches := CheckAllSuspiciousScriptContent(path, data, pkgDB, cfg)
+	if len(matches) == 0 {
+		return nil
+	}
+	best := matches[0]
+	for _, m := range matches[1:] {
+		if m.Score > best.Score {
+			best = m
+		}
+	}
+	return best
 }
 
 // CheckTrojanedPackageBinary checks whether a file in standard system directories

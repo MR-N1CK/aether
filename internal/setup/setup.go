@@ -230,9 +230,13 @@ func downloadAndExtractRules(urlStr, destDir string) (int, error) {
 		return 0, fmt.Errorf("server returned HTTP %d", resp.StatusCode)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	const maxRuleDownloadSize = 50 * 1024 * 1024 // 50MB safety ceiling
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxRuleDownloadSize+1))
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed reading rules archive: %w", err)
+	}
+	if int64(len(bodyBytes)) > maxRuleDownloadSize {
+		return 0, fmt.Errorf("rules archive exceeds maximum allowed size (%d bytes > 50MB)", len(bodyBytes))
 	}
 
 	zipReader, err := zip.NewReader(bytes.NewReader(bodyBytes), int64(len(bodyBytes)))

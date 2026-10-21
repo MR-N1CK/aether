@@ -309,7 +309,7 @@ func (m LauncherModel) View() string {
 	headerTop := fmt.Sprintf("%s %s %s",
 		azureStyle.Render("AETHER"),
 		indigoStyle.Render("COMMAND CENTER"),
-		subStyle.Render("v0.1.0-dev"),
+		subStyle.Render("v1.0.0"),
 	)
 	headerBadges := fmt.Sprintf("%s  %s", privBadge, yaraBadge)
 

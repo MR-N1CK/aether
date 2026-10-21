@@ -13,7 +13,7 @@ import (
 
 // Run launches the Bubble Tea interactive TUI with robust terminal restoration
 // guarantees across normal exit, scan cancellation, Ctrl+C, and unexpected panic.
-func Run(ctx context.Context, cancel context.CancelFunc, sub *events.Subscription, th *theme.Theme, noAnim bool, mode string, threads int, paths []string) error {
+func Run(ctx context.Context, cancel context.CancelFunc, sub *events.Subscription, th *theme.Theme, noAnim bool, mode string, threads int, paths []string, reportPath ...string) error {
 	// Recover hook to ensure cursor and alternate screen restoration on panic
 	defer func() {
 		if r := recover(); r != nil {
@@ -23,7 +23,7 @@ func Run(ctx context.Context, cancel context.CancelFunc, sub *events.Subscriptio
 		}
 	}()
 
-	m := NewModel(ctx, cancel, sub, th, noAnim, mode, threads, paths)
+	m := NewModel(ctx, cancel, sub, th, noAnim, mode, threads, paths, reportPath...)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	// Handle parent context cancellation (e.g. SIGTERM)

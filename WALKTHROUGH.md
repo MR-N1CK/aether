@@ -127,10 +127,76 @@ This walkthrough documents the comprehensive hardening, anti-evasion engineering
 
 ---
 
-### 8. Verification Summary
+### 8. Cockpit Design System, Responsive Tiers, ASCII Mode & Executive HTML v3 Overhaul
+
+**Implementation**:
+- **ASCII Mode (`--ascii`)**:
+  - Registered `--ascii` persistent flag in `cmd/aether/main.go`.
+  - Built pure 7-bit ASCII borders (`+ - |`), text status badges (`[!]`, `[*]`, `[OK]`, `[YARA]`, `[FILES]`, `[TIME]`), and ASCII progress tracks (`[=====>   ]`) in `internal/ui/theme/theme.go` and `internal/ui/tui/view.go`.
+- **Responsive Terminal Tiers**:
+  - Defined standard tier thresholds (`TierCompact = 80`, `TierStandard = 110`, `TierWide = 140`) in `internal/ui/theme/theme.go`.
+  - Implemented `renderTopRulesBars` in `internal/ui/tui/view.go` with proportional horizontal mini-bars (`████████░░░░ (14)`) colored by threat severity (`ALERT` crimson, `WARN` amber, `NOTICE` emerald), automatically adapting to terminal width and falling back to compact chips below 80 cols.
+- **Executive-First HTML Report v3 Restructure**:
+  - Reorganized `GenerateHTMLReport` in `internal/report/html/html.go` into an executive-first layout:
+    1. Header & Export Actions
+    2. Executive Assessment & Posture Dashboard (Verdict banner, posture card with prioritized remediation, donut chart, and adversary kill-chain coverage strip)
+    3. Forensic Audit Coverage & Subsystem Health (inline SVG Stacked Coverage Bar, coverage percentages, itemized skipped counters, modules run table, subsystem duration breakdown, and curated top rules)
+    4. Adversarial MITRE ATT&CK Matrix (interactive tactic/technique heatmap)
+    5. Scan Execution Metadata & Provenance (host, scan mode, timestamps, version, commit, worker count, target paths)
+    6. Detailed Findings Dossier (search/filter toolbar, sortable findings table, evidence drawers, JSON/Triage script export)
+- **Stacked Coverage Bar Chart (SVG)**:
+  - Implemented `RenderStackedCoverageSVG` in `internal/report/html/html.go` rendering proportional stacked horizontal bars: Inspected (emerald `#10b981`), Permission Denied (amber `#f59e0b`), Oversize (purple `#8b5cf6`), and Excluded/Other (slate `#64748b`) with SVG title tooltips and percentage breakdowns.
+- **Security & Print Hardening**:
+  - Added `<meta name="referrer" content="no-referrer">` to the HTML report `<head>`.
+  - Hardened `@media print` with `@page { margin: 1.5cm; }`, `.print-break-before`, `page-break-inside: avoid`, and monochrome high-contrast borders for clean PDF generation.
+- **Verification**:
+  - `internal/ui/theme/theme_test.go`: `TestTheme_ASCII` validates ASCII border and icon fallbacks.
+  - `internal/ui/tui/view_test.go`: `TestRenderTopRulesBars_ProportionalWidths`, `TestRenderTopRulesBars_CompactTier`, `TestRenderTopRulesBars_ASCIIMode`, `TestRenderProgressBar_ASCII`.
+  - `internal/report/html/html_test.go`: `TestHTMLReport_ReferrerMeta`, `TestHTMLReport_StackedCoverageSVG`, `TestHTMLReport_ExecutiveFirstHierarchy`, `TestHTMLReport_PrintStylesheet`.
+
+---
+
+### 9. Verification Summary
 
 ```bash
-# 100% test pass rate across all packages with zero cache:
-CGO_ENABLED=0 go test -count=1 ./...
+# 100% uncached test pass rate across all 29 packages:
+$ CGO_ENABLED=0 go test -count=1 ./...
+ok  	aether/cmd/aether	0.039s
+ok  	aether/internal/benchmark	0.023s
+ok  	aether/internal/config	0.011s
+ok  	aether/internal/events	1.129s
+ok  	aether/internal/ioc	0.424s
+ok  	aether/internal/modules/container	0.013s
+ok  	aether/internal/modules/kernel	0.026s
+ok  	aether/internal/modules/network	0.038s
+ok  	aether/internal/modules/persistence	0.160s
+ok  	aether/internal/modules/process	7.493s
+ok  	aether/internal/modules/users	0.020s
+ok  	aether/internal/pkgdb	4.484s
+ok  	aether/internal/realworld	0.384s
+ok  	aether/internal/report	0.154s
+ok  	aether/internal/report/html	4.280s
+ok  	aether/internal/safeopen	0.051s
+ok  	aether/internal/scanner	129.089s
+ok  	aether/internal/setup	0.275s
+ok  	aether/internal/triage	0.038s
+ok  	aether/internal/ui/plain	0.034s
+ok  	aether/internal/ui/theme	0.027s
+ok  	aether/internal/ui/tui	0.035s
+ok  	aether/internal/yara	0.022s
+ok  	aether/test/benchmark	8.116s
+ok  	aether/test/packaging	9.379s
+ok  	aether/test/realworld	107.244s
+
+# Pure-Go static compilation:
+$ CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X 'main.version=1.0.0' -X 'main.commit=d6a8d53' -X 'main.buildDate=$(date -u +%Y-%m-%d)'" -o bin/aether ./cmd/aether
+$ ./bin/aether version
+Aether Threat Hunter v1.0.0
+  Commit:     d6a8d53
+  Build Date: 2026-10-21
+  Go Version: go1.26.8
+  OS/Arch:    linux/amd64
+  YARA:       disabled (native heuristics only)
 ```
-All packages pass with pure-Go static compilation contracts.
+All packages pass with pure-Go static compilation contracts and forensic purity invariants preserved.
+

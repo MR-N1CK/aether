@@ -156,47 +156,67 @@ This walkthrough documents the comprehensive hardening, anti-evasion engineering
 
 ---
 
-### 9. Verification Summary
+### 9. Binary/NUL Script Bypass Mitigation, Structured Evidence Metadata & Dynamic Launcher (Wave 8)
+
+**Implementation**:
+- **Binary/NUL Script Bypass Mitigation**:
+  - Implemented `hasScriptAttackToken` in `internal/scanner/heuristics.go`: SIMD byte-level scanner checking core attacker primitives (`/dev/tcp`, `/bin/sh`, `/bin/bash`, `s_client`, `mkfifo`, `socat`, `nc `, `netcat`, `ncat`, `$_POST`, `$_GET`, `eval(`, `base64_decode`, `shell_exec`, `passthru`, `curl `, `wget `, `Fernet`, `pam_exec`, `LD_PRELOAD`, `powershell`, etc.).
+  - Updated `isScriptOrTextCandidate`: Files containing script attack tokens are no longer skipped even if they carry binary extensions (`.bin`, `.dat`, `.so`, `.pyc`) or early NUL bytes, closing the shebang-less evasion vector (e.g. `bash payload.bin`, `perl x.dat`, and PHP includes in `/var/www`). Benign binary assets lacking attack tokens are rejected in nanoseconds, preserving the 13.6x scan speedup.
+- **Structured Verdict Evidence Engine**:
+  - Eliminated all fragile `strings.Contains(f.RuleName, ...)` substring checks from `internal/events/events.go` and `internal/report/verdict.go`.
+  - Added `deriveRuleEvidenceStrength` and updated `mustRegister` in `internal/report/rule_registry.go` to enforce non-empty `meta.EvidenceStrength` (`StrengthDirect`, `StrengthCorroborated`, `StrengthContextual`) across all 50+ registered detector rules.
+  - High-confidence compromise verdicts are now strictly determined by structured `f.EvidenceStrength` or `meta.EvidenceStrength`.
+- **Dynamic Launcher Versioning & Engine Notice**:
+  - Updated `internal/ui/tui/launcher.go` and `cmd/aether/main.go` to pass and display dynamic build versions (`v<version>`) rather than hardcoded strings.
+  - Added explicit `Engine: Pure-Go Native Heuristics Only (YARA-X Disabled / CGO-Free)` notices to both ASCII and rich plain CLI outputs in `internal/ui/plain/verdict.go`.
+- **Verification**:
+  - `internal/scanner/heuristics_test.go`: `TestCheckAllSuspiciousScriptContent_BinaryExtensionEvasion`, `TestCheckAllSuspiciousScriptContent_EarlyNULByteEvasion`, `TestCheckAllSuspiciousScriptContent_BenignBinaryNoFalsePositive`.
+  - `internal/report/registry_test.go`: `TestAllRegisteredRulesHaveEvidenceStrength`.
+  - `internal/events/bus_test.go`: `TestComputeVerdict` validates structured `StrengthDirect` vs `StrengthContextual` rules without keyword substrings.
+  - `internal/scanner/corroboration_test.go`: `TestTopRules_MatchAdjudicatedSeverity`.
+
+---
+
+### 10. Verification Summary
 
 ```bash
 # 100% uncached test pass rate across all 29 packages:
 $ CGO_ENABLED=0 go test -count=1 ./...
-ok  	aether/cmd/aether	0.039s
-ok  	aether/internal/benchmark	0.023s
-ok  	aether/internal/config	0.011s
-ok  	aether/internal/events	1.129s
-ok  	aether/internal/ioc	0.424s
-ok  	aether/internal/modules/container	0.013s
-ok  	aether/internal/modules/kernel	0.026s
-ok  	aether/internal/modules/network	0.038s
-ok  	aether/internal/modules/persistence	0.160s
-ok  	aether/internal/modules/process	7.493s
-ok  	aether/internal/modules/users	0.020s
-ok  	aether/internal/pkgdb	4.484s
-ok  	aether/internal/realworld	0.384s
-ok  	aether/internal/report	0.154s
-ok  	aether/internal/report/html	4.280s
-ok  	aether/internal/safeopen	0.051s
-ok  	aether/internal/scanner	129.089s
-ok  	aether/internal/setup	0.275s
-ok  	aether/internal/triage	0.038s
-ok  	aether/internal/ui/plain	0.034s
-ok  	aether/internal/ui/theme	0.027s
-ok  	aether/internal/ui/tui	0.035s
-ok  	aether/internal/yara	0.022s
-ok  	aether/test/benchmark	8.116s
-ok  	aether/test/packaging	9.379s
-ok  	aether/test/realworld	107.244s
+ok  	aether/cmd/aether	0.028s
+ok  	aether/internal/benchmark	0.027s
+ok  	aether/internal/config	0.029s
+ok  	aether/internal/events	1.459s
+ok  	aether/internal/ioc	0.798s
+ok  	aether/internal/modules/container	0.027s
+ok  	aether/internal/modules/kernel	0.052s
+ok  	aether/internal/modules/network	0.035s
+ok  	aether/internal/modules/persistence	0.258s
+ok  	aether/internal/modules/process	11.829s
+ok  	aether/internal/modules/users	0.030s
+ok  	aether/internal/pkgdb	6.113s
+ok  	aether/internal/realworld	0.255s
+ok  	aether/internal/report	0.142s
+ok  	aether/internal/report/html	7.067s
+ok  	aether/internal/safeopen	0.027s
+ok  	aether/internal/scanner	148.421s
+ok  	aether/internal/setup	1.048s
+ok  	aether/internal/triage	0.054s
+ok  	aether/internal/ui/plain	0.049s
+ok  	aether/internal/ui/theme	0.038s
+ok  	aether/internal/ui/tui	0.056s
+ok  	aether/internal/yara	0.104s
+ok  	aether/test/benchmark	13.347s
+ok  	aether/test/packaging	15.844s
+ok  	aether/test/realworld	127.600s
 
 # Pure-Go static compilation:
-$ CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X 'main.version=1.0.0' -X 'main.commit=d6a8d53' -X 'main.buildDate=$(date -u +%Y-%m-%d)'" -o bin/aether ./cmd/aether
+$ CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X 'main.version=1.0.0' -X 'main.commit=ac212e2' -X 'main.buildDate=$(date -u +%Y-%m-%d)'" -o bin/aether ./cmd/aether
 $ ./bin/aether version
 Aether Threat Hunter v1.0.0
-  Commit:     d6a8d53
-  Build Date: 2026-10-21
+  Commit:     ac212e2
+  Build Date: 2026-10-22
   Go Version: go1.26.8
   OS/Arch:    linux/amd64
   YARA:       disabled (native heuristics only)
 ```
 All packages pass with pure-Go static compilation contracts and forensic purity invariants preserved.
-

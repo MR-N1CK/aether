@@ -1016,3 +1016,121 @@ func TestHTMLReport_YARAStatusAndCoverageMetrics(t *testing.T) {
 		t.Errorf("expected YARA active status in report")
 	}
 }
+
+func TestHTMLReport_ReferrerMeta(t *testing.T) {
+	data := sampleReportData()
+	htmlBytes, err := htmlreport.GenerateHTMLReport(data)
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+	htmlStr := string(htmlBytes)
+	if !strings.Contains(htmlStr, `<meta name="referrer" content="no-referrer">`) {
+		t.Errorf("missing <meta name=\"referrer\" content=\"no-referrer\"> in HTML head")
+	}
+}
+
+func TestHTMLReport_StackedCoverageSVG(t *testing.T) {
+	cov := events.CoverageStats{
+		FilesScanned:      800,
+		SkippedPermission: 100,
+		SkippedOversize:   50,
+		SkippedExcluded:   50,
+	}
+
+	svg := htmlreport.RenderStackedCoverageSVG(cov, 800, 24)
+	if !strings.Contains(svg, `class="coverage-bar-svg"`) {
+		t.Errorf("expected coverage-bar-svg class, got: %s", svg)
+	}
+	if !strings.Contains(svg, `#10b981`) { // Inspected (emerald)
+		t.Errorf("expected emerald fill for inspected files")
+	}
+	if !strings.Contains(svg, `#f59e0b`) { // Perm Denied (amber)
+		t.Errorf("expected amber fill for perm denied")
+	}
+	if !strings.Contains(svg, `#8b5cf6`) { // Oversize (purple)
+		t.Errorf("expected purple fill for oversize files")
+	}
+	if !strings.Contains(svg, `#64748b`) { // Excluded (slate)
+		t.Errorf("expected slate fill for excluded files")
+	}
+	if !strings.Contains(svg, `Inspected: 800 (80.0%)`) {
+		t.Errorf("expected inspected title tooltip with count and percentage")
+	}
+
+	// Zero files edge case
+	covZero := events.CoverageStats{}
+	svgZero := htmlreport.RenderStackedCoverageSVG(covZero, 800, 24)
+	if !strings.Contains(svgZero, "No eligible files encountered") {
+		t.Errorf("expected empty state title in zero coverage SVG")
+	}
+}
+
+func TestHTMLReport_ExecutiveFirstHierarchy(t *testing.T) {
+	data := sampleReportData()
+	data.SystemPosture = "ATTENTION_REQUIRED"
+	data.PostureRationale = "Unverified autostart hooks found."
+
+	htmlBytes, err := htmlreport.GenerateHTMLReport(data)
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+	htmlStr := string(htmlBytes)
+
+	bodyIdx := strings.Index(htmlStr, "<body>")
+	if bodyIdx == -1 {
+		t.Fatalf("missing <body> in HTML")
+	}
+	bodyStr := htmlStr[bodyIdx:]
+
+	idxHeader := strings.Index(bodyStr, "<header class=\"header-container\">")
+	idxVerdict := strings.Index(bodyStr, "class=\"card verdict-card")
+	idxPosture := strings.Index(bodyStr, "class=\"card posture-card")
+	idxMetrics := strings.Index(bodyStr, "class=\"executive-metrics-grid\"")
+	idxKillchain := strings.Index(bodyStr, "class=\"card section-card killchain-section\"")
+	idxCoverage := strings.Index(bodyStr, "aria-label=\"Coverage and Inspection Details\"")
+	idxMitre := strings.Index(bodyStr, "id=\"mitre-matrix-section\"")
+	idxMeta := strings.Index(bodyStr, "class=\"card meta-card\"")
+	idxFindings := strings.Index(bodyStr, "aria-label=\"Scan Findings\"")
+
+	if idxHeader == -1 || idxVerdict == -1 || idxPosture == -1 || idxMetrics == -1 ||
+		idxKillchain == -1 || idxCoverage == -1 || idxMitre == -1 || idxMeta == -1 || idxFindings == -1 {
+		t.Fatalf("one or more expected sections missing in body: header=%d, verdict=%d, posture=%d, metrics=%d, killchain=%d, coverage=%d, mitre=%d, meta=%d, findings=%d",
+			idxHeader, idxVerdict, idxPosture, idxMetrics, idxKillchain, idxCoverage, idxMitre, idxMeta, idxFindings)
+	}
+
+	// Verify Executive-First ordering:
+	// Header -> Verdict -> Posture -> Metrics -> Killchain -> Coverage -> MITRE -> Metadata -> Findings
+	if !(idxHeader < idxVerdict &&
+		idxVerdict < idxPosture &&
+		idxPosture < idxMetrics &&
+		idxMetrics < idxKillchain &&
+		idxKillchain < idxCoverage &&
+		idxCoverage < idxMitre &&
+		idxMitre < idxMeta &&
+		idxMeta < idxFindings) {
+		t.Errorf("DOM hierarchy does not follow Executive-First layout order: header=%d < verdict=%d < posture=%d < metrics=%d < killchain=%d < coverage=%d < mitre=%d < meta=%d < findings=%d",
+			idxHeader, idxVerdict, idxPosture, idxMetrics, idxKillchain, idxCoverage, idxMitre, idxMeta, idxFindings)
+	}
+}
+
+func TestHTMLReport_PrintStylesheet(t *testing.T) {
+	data := sampleReportData()
+	htmlBytes, err := htmlreport.GenerateHTMLReport(data)
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+	htmlStr := string(htmlBytes)
+
+	for _, req := range []string{
+		"@page { margin: 1.5cm; }",
+		"print-break-before",
+		"page-break-inside: avoid",
+		"#theme-toggle",
+		"#btn-export-csv",
+	} {
+		if !strings.Contains(htmlStr, req) {
+			t.Errorf("missing print rule %q in HTML report", req)
+		}
+	}
+}
+

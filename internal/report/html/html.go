@@ -221,6 +221,71 @@ func canonicalSeverity(s report.Severity) report.Severity {
 	}
 }
 
+// RenderStackedCoverageSVG renders a proportional horizontal stacked bar chart
+// visually displaying inspected files vs itemized skip categories (permissions, oversize, excluded, non-regular).
+func RenderStackedCoverageSVG(cov events.CoverageStats, width, height int) string {
+	if width <= 0 {
+		width = 800
+	}
+	if height <= 0 {
+		height = 24
+	}
+
+	total := cov.TotalEligible()
+	if total <= 0 {
+		total = cov.FilesScanned
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString(fmt.Sprintf(`<svg class="coverage-bar-svg" viewBox="0 0 %d %d" width="100%%" height="%d" preserveAspectRatio="none" role="img" aria-label="Audit coverage distribution bar: inspected files vs skipped reasons">`+"\n", width, height, height))
+	buf.WriteString(fmt.Sprintf(`  <defs><clipPath id="coverage-bar-clip"><rect x="0" y="0" width="%d" height="%d" rx="6" ry="6"/></clipPath></defs>`+"\n", width, height))
+
+	if total <= 0 {
+		buf.WriteString(fmt.Sprintf(`  <g clip-path="url(#coverage-bar-clip)"><rect x="0" y="0" width="%d" height="%d" fill="#334155"><title>No eligible files encountered</title></rect></g>`+"\n", width, height))
+		buf.WriteString("</svg>")
+		return buf.String()
+	}
+
+	inspected := cov.FilesScanned
+	if inspected < 0 {
+		inspected = 0
+	}
+	perm := cov.SkippedPermission
+	oversize := cov.SkippedOversize
+	excluded := cov.SkippedExcluded + cov.SkippedNotRegular + cov.SkippedVanished + cov.SkippedTimeout
+
+	segments := []struct {
+		name  string
+		count int64
+		color string
+	}{
+		{"Inspected", inspected, "#10b981"},
+		{"Permission Denied", perm, "#f59e0b"},
+		{"Oversize", oversize, "#8b5cf6"},
+		{"Excluded / Other", excluded, "#64748b"},
+	}
+
+	buf.WriteString(`  <g clip-path="url(#coverage-bar-clip)">` + "\n")
+	currX := 0.0
+	for _, seg := range segments {
+		if seg.count <= 0 {
+			continue
+		}
+		pct := (float64(seg.count) / float64(total)) * 100.0
+		segWidth := (float64(seg.count) / float64(total)) * float64(width)
+		buf.WriteString(fmt.Sprintf(`    <rect x="%.2f" y="0" width="%.2f" height="%d" fill="%s"><title>%s: %d (%.1f%%)</title></rect>`+"\n",
+			currX, segWidth, height, seg.color, html.EscapeString(seg.name), seg.count, pct))
+		currX += segWidth
+	}
+	buf.WriteString("  </g>\n")
+	buf.WriteString("</svg>")
+	return buf.String()
+}
+
+func renderStackedCoverageSVG(cov events.CoverageStats, width, height int) string {
+	return RenderStackedCoverageSVG(cov, width, height)
+}
+
 // renderDonutSVG renders the severity distribution donut for the report header.
 // Track and center-label colors resolve through CSS classes so both color themes
 // keep contrast; the segment strokes are theme-invariant verdict/ severity colors.
@@ -468,6 +533,7 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("<head>\n")
 	buf.WriteString("  <meta charset=\"utf-8\">\n")
 	buf.WriteString("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+	buf.WriteString("  <meta name=\"referrer\" content=\"no-referrer\">\n")
 	buf.WriteString("  <title>Aether Threat Hunting Report - " + html.EscapeString(report.FormatRedactedHostname(data.Hostname, data.RedactHosts)) + "</title>\n")
 
 	// Strict CSP: script-src 'nonce-<NONCE>' only (no 'strict-dynamic'), default-src 'none', style-src 'unsafe-inline', img-src data:, base-uri 'none', form-action 'none'
@@ -479,7 +545,7 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("</head>\n")
 	buf.WriteString("<body>\n")
 
-	// 1. Header
+	// 1. Header & Export Strip
 	buf.WriteString("  <header class=\"header-container\">\n")
 	buf.WriteString("    <div class=\"header-left\">\n")
 	buf.WriteString("      <div class=\"logo-wrap\">\n")
@@ -514,35 +580,11 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 
 	buf.WriteString("  <main class=\"main-container\">\n")
 
-	// 2. Scan Metadata Meta Card
-	buf.WriteString("    <section class=\"card meta-card\" aria-label=\"Scan Execution Metadata\">\n")
-	buf.WriteString("      <div class=\"meta-grid\">\n")
-	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Host:</span> <strong class=\"meta-val\">" + html.EscapeString(report.FormatRedactedHostname(data.Hostname, data.RedactHosts)) + "</strong></div>\n")
-	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Scan Mode:</span> <strong class=\"meta-val badge-mode\">" + html.EscapeString(strings.ToUpper(data.ScanMode)) + "</strong></div>\n")
-	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Started:</span> <span class=\"meta-val\">" + html.EscapeString(data.StartTime.Format(time.RFC3339)) + "</span></div>\n")
-	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Duration:</span> <span class=\"meta-val\">" + html.EscapeString(data.Duration.Round(time.Millisecond).String()) + "</span></div>\n")
-	verStr := "v" + data.Version
-	if data.Commit != "" && data.Commit != "none" {
-		verStr += " (" + data.Commit + ")"
-	}
-	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Aether Version:</span> <span class=\"meta-val\">" + html.EscapeString(verStr) + "</span></div>\n")
-	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Threads / Max Size:</span> <span class=\"meta-val\">" + fmt.Sprintf("%d threads / %d MB", data.Threads, data.MaxFileSize/(1024*1024)) + "</span></div>\n")
-	yaraBadgeClass := "badge-yara-disabled"
-	yaraBadgeText := "DISABLED (Native Heuristics Only)"
-	if data.YARAActive {
-		yaraBadgeClass = "badge-yara-active"
-		yaraBadgeText = "ACTIVE (" + data.YARAStatus + ")"
-	} else if data.YARAStatus != "" {
-		yaraBadgeText = data.YARAStatus
-	}
-	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">YARA Engine:</span> <span class=\"meta-val\"><span class=\"" + yaraBadgeClass + "\">" + html.EscapeString(yaraBadgeText) + "</span></span></div>\n")
-	buf.WriteString("      </div>\n")
-	if len(data.TargetPaths) > 0 {
-		buf.WriteString("      <div class=\"meta-paths\"><span class=\"meta-label\">Target Paths:</span> <code>" + html.EscapeString(strings.Join(data.TargetPaths, ", ")) + "</code></div>\n")
-	}
-	buf.WriteString("    </section>\n\n")
+	// Compute MITRE aggregation once over capped findings for gauge, kill-chain, and matrix
+	mitreGroups := aggregateMITRE(cappedFindings)
 
-	// 3. Verdict Banner
+	// 2. Executive Assessment & Posture Dashboard
+	// 2a. Verdict Banner
 	verdictClass := "verdict-clean"
 	verdictTitle := "CLEAN"
 	switch data.Verdict {
@@ -567,7 +609,7 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("      <div class=\"verdict-reason\">" + html.EscapeString(verdictReason) + "</div>\n")
 	buf.WriteString("    </section>\n\n")
 
-	// 3b. Executive System Assessment & Remediation Card
+	// 2b. Executive System Assessment & Remediation Card
 	if data.SystemPosture != "" {
 		postureClass := "posture-safe"
 		postureDisplay := strings.ToUpper(strings.ReplaceAll(data.SystemPosture, "_", " "))
@@ -612,54 +654,10 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 			buf.WriteString("      </div>\n")
 		}
 
-		if len(data.DurationBreakdown) > 0 {
-			buf.WriteString("      <div class=\"posture-timing\">\n")
-			buf.WriteString("        <h3 class=\"posture-subhead\">Subsystem Duration Breakdown</h3>\n")
-			buf.WriteString("        <div class=\"timing-grid\">\n")
-			knownKeys := []struct {
-				Key   string
-				Label string
-			}{
-				{"filesystem_walk", "Filesystem Walk"},
-				{"hashing", "Hashing"},
-				{"heuristics", "Heuristics"},
-				{"yara", "YARA-X Engine"},
-				{"process", "Process Inspection"},
-				{"network", "Network Sockets"},
-				{"correlation", "Evidence Correlation"},
-				{"total_duration", "Total Duration"},
-			}
-			renderedKeys := make(map[string]bool)
-			for _, item := range knownKeys {
-				if durVal, ok := data.DurationBreakdown[item.Key]; ok {
-					renderedKeys[item.Key] = true
-					buf.WriteString(fmt.Sprintf("          <div class=\"timing-item\"><span class=\"timing-label\">%s</span><strong class=\"timing-val\">%s</strong></div>\n",
-						html.EscapeString(item.Label), html.EscapeString(durVal)))
-				}
-			}
-			var extraKeys []string
-			for k := range data.DurationBreakdown {
-				if !renderedKeys[k] {
-					extraKeys = append(extraKeys, k)
-				}
-			}
-			sort.Strings(extraKeys)
-			for _, k := range extraKeys {
-				buf.WriteString(fmt.Sprintf("          <div class=\"timing-item\"><span class=\"timing-label\">%s</span><strong class=\"timing-val\">%s</strong></div>\n",
-					html.EscapeString(k), html.EscapeString(data.DurationBreakdown[k])))
-			}
-			buf.WriteString("        </div>\n")
-			buf.WriteString("      </div>\n")
-		}
-
 		buf.WriteString("    </section>\n\n")
 	}
 
-	// 4. Metric / Counter Cards & Donut Chart
-	// MITRE aggregation runs once over the capped findings list so the
-	// metric cards, the kill-chain strip (4a) and the heat-map matrix (4b)
-	// always quote identical tactic coverage.
-	mitreGroups := aggregateMITRE(cappedFindings)
+	// 2c. Metric / Counter Cards & Donut Chart
 	buf.WriteString("    <section class=\"executive-metrics-grid\" aria-label=\"Severity Breakdown\">\n")
 	buf.WriteString("      <div class=\"card donut-card\" aria-label=\"Visual Severity Gauge\">\n")
 	buf.WriteString("        <div class=\"donut-chart-wrap\">\n")
@@ -687,103 +685,48 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("      </div>\n")
 	buf.WriteString("    </section>\n\n")
 
-	// 4a. Adversary Kill-Chain Coverage Strip
+	// 2d. Adversary Kill-Chain Coverage Strip
 	buf.WriteString("    <section class=\"card section-card killchain-section\" aria-label=\"Adversary Kill-Chain Coverage\">\n")
 	buf.WriteString("      <h2 class=\"section-title\">Adversary Kill-Chain Coverage</h2>\n")
 	buf.WriteString("      <span class=\"subtitle\">Stage nodes highlight wherever observations map onto each kill-chain tactic; hollow nodes had no findings.</span>\n")
 	buf.WriteString("      <div class=\"killchain-wrap\">\n" + renderKillchainSVG(mitreGroups) + "\n      </div>\n")
 	buf.WriteString("    </section>\n\n")
 
-	// 4b. MITRE ATT&CK Matrix Heat-Map Section
-	// (mitreGroups was computed above from the capped findings list so the
-	// kill-chain strip and the heat-map matrix always agree.)
-	buf.WriteString("    <section class=\"card section-card\" id=\"mitre-matrix-section\" aria-label=\"MITRE ATT&CK Matrix\">\n")
-	buf.WriteString("      <div class=\"mitre-matrix-header\">\n")
-	buf.WriteString("        <div class=\"mitre-titles\">\n")
-	buf.WriteString("          <h2 class=\"section-title\">MITRE ATT&CK&reg; Heat-Map Matrix</h2>\n")
-	buf.WriteString("          <span class=\"subtitle\">Enterprise adversarial tactics observed across inspected subsystems</span>\n")
-	buf.WriteString("        </div>\n")
-	buf.WriteString("      </div>\n")
-
-	if len(mitreGroups) > 0 {
-		buf.WriteString("      <div class=\"mitre-matrix-grid\">\n")
-		for _, grp := range mitreGroups {
-			buf.WriteString("        <div class=\"tactic-col\">\n")
-			buf.WriteString(fmt.Sprintf("          <div class=\"tactic-header\"><span class=\"tactic-name\">%s</span><span class=\"tactic-count\">%d</span></div>\n",
-				html.EscapeString(grp.Tactic), grp.TotalCount))
-			buf.WriteString("          <div class=\"tactic-techniques\">\n")
-			for _, tech := range grp.Techniques {
-				chipTitle := fmt.Sprintf("%s: %s (%d detections)", tech.ID, tech.Name, tech.Count)
-				buf.WriteString(fmt.Sprintf("            <button class=\"btn-tech-chip\" data-tech-id=\"%s\" title=\"%s\"><span class=\"chip-id\">%s</span><span class=\"chip-count\">%d</span></button>\n",
-					html.EscapeString(tech.ID),
-					html.EscapeString(chipTitle),
-					html.EscapeString(tech.ID+" "+tech.Name),
-					tech.Count,
-				))
-			}
-			buf.WriteString("          </div>\n")
-			buf.WriteString("        </div>\n")
-		}
-		buf.WriteString("      </div>\n")
-	} else {
-		buf.WriteString("      <div class=\"mitre-clean-card\">\n")
-		buf.WriteString("        <span class=\"mitre-clean-icon\">🛡️</span>\n")
-		buf.WriteString("        <div class=\"mitre-clean-text\">\n")
-		buf.WriteString("          <strong>Zero Active MITRE ATT&CK&reg; Adversarial Techniques Detected</strong>\n")
-		buf.WriteString("          <p>No malicious persistence, privilege escalation, credential theft, or execution artifacts were observed across inspected subsystems.</p>\n")
-		buf.WriteString("        </div>\n")
-		buf.WriteString("      </div>\n")
-	}
-	buf.WriteString("    </section>\n\n")
-
-	// 5. Coverage & Inspection Health Section
+	// 3. Forensic Audit Coverage & Subsystem Health Section
 	buf.WriteString("    <section class=\"card section-card\" aria-label=\"Coverage and Inspection Details\">\n")
 	buf.WriteString("      <h2 class=\"section-title\">Inspection Coverage & Subsystems</h2>\n")
 
-	// Modules Run Table
-	if len(data.ModulesRun) > 0 {
-		buf.WriteString("      <div class=\"table-wrap\">\n")
-		buf.WriteString("        <table class=\"data-table coverage-table\">\n")
-		buf.WriteString("          <thead>\n")
-		buf.WriteString("            <tr><th>Module</th><th>Duration</th><th>Inspected</th><th>Findings</th><th>Status</th></tr>\n")
-		buf.WriteString("          </thead>\n")
-		buf.WriteString("          <tbody>\n")
-		for _, m := range data.ModulesRun {
-			statusBadge := "<span class=\"status-ok\">OK</span>"
-			if m.Status == "FAILED" || m.Err != nil {
-				statusBadge = "<span class=\"status-failed\">FAILED</span>"
-			} else if m.Status == "NOT IMPLEMENTED" {
-				statusBadge = "<span class=\"status-skip\">SKIPPED</span>"
-			}
-			buf.WriteString(fmt.Sprintf("            <tr><td><strong>%s</strong></td><td>%v</td><td>%d</td><td>%d</td><td>%s</td></tr>\n",
-				html.EscapeString(m.ModuleName),
-				m.Duration.Round(time.Millisecond),
-				m.InspectedCount,
-				m.FindingsCount,
-				statusBadge,
-			))
+	// Proportional Stacked Coverage Bar & Legend
+	buf.WriteString("      <div class=\"coverage-bar-wrap\">\n")
+	buf.WriteString("        " + renderStackedCoverageSVG(data.Coverage, 800, 24) + "\n")
+	covTotal := data.Coverage.TotalEligible()
+	if covTotal <= 0 {
+		covTotal = data.Coverage.FilesScanned
+	}
+	if covTotal > 0 {
+		buf.WriteString("        <div class=\"coverage-bar-legend\">\n")
+		covInspected := data.Coverage.FilesScanned
+		if covInspected == 0 && data.FilesScanned > 0 {
+			covInspected = data.FilesScanned
 		}
-		buf.WriteString("          </tbody>\n")
-		buf.WriteString("        </table>\n")
-		buf.WriteString("      </div>\n")
-	}
-
-	// Modules Not Run
-	if len(data.ModulesNotRun) > 0 {
-		buf.WriteString("      <div class=\"notice-block warn-block\">\n")
-		buf.WriteString("        <strong>Modules Not Run:</strong> " + html.EscapeString(strings.Join(data.ModulesNotRun, "; ")) + "\n")
-		buf.WriteString("      </div>\n")
-	}
-
-	// Startup Notices
-	if len(data.StartupNotices) > 0 {
-		buf.WriteString("      <div class=\"notice-block info-block\">\n")
-		buf.WriteString("        <strong>Startup Notices:</strong>\n        <ul>\n")
-		for _, sn := range data.StartupNotices {
-			buf.WriteString("          <li>" + html.EscapeString(sn) + "</li>\n")
+		inspectedPct := (float64(covInspected) / float64(covTotal)) * 100.0
+		buf.WriteString(fmt.Sprintf("          <div class=\"cov-legend-item\"><span class=\"cov-legend-dot cov-dot-inspected\"></span><span>Inspected: <strong>%d</strong> (%.1f%%)</span></div>\n", covInspected, inspectedPct))
+		if data.Coverage.SkippedPermission > 0 {
+			permPct := (float64(data.Coverage.SkippedPermission) / float64(covTotal)) * 100.0
+			buf.WriteString(fmt.Sprintf("          <div class=\"cov-legend-item\"><span class=\"cov-legend-dot cov-dot-permission\"></span><span>Perm Denied: <strong>%d</strong> (%.1f%%)</span></div>\n", data.Coverage.SkippedPermission, permPct))
 		}
-		buf.WriteString("        </ul>\n      </div>\n")
+		if data.Coverage.SkippedOversize > 0 {
+			overPct := (float64(data.Coverage.SkippedOversize) / float64(covTotal)) * 100.0
+			buf.WriteString(fmt.Sprintf("          <div class=\"cov-legend-item\"><span class=\"cov-legend-dot cov-dot-oversize\"></span><span>Oversize: <strong>%d</strong> (%.1f%%)</span></div>\n", data.Coverage.SkippedOversize, overPct))
+		}
+		excludedCount := data.Coverage.SkippedExcluded + data.Coverage.SkippedNotRegular + data.Coverage.SkippedVanished + data.Coverage.SkippedTimeout
+		if excludedCount > 0 {
+			exclPct := (float64(excludedCount) / float64(covTotal)) * 100.0
+			buf.WriteString(fmt.Sprintf("          <div class=\"cov-legend-item\"><span class=\"cov-legend-dot cov-dot-excluded\"></span><span>Excluded/Other: <strong>%d</strong> (%.1f%%)</span></div>\n", excludedCount, exclPct))
+		}
+		buf.WriteString("        </div>\n")
 	}
+	buf.WriteString("      </div>\n")
 
 	// Skipped & Coverage Stats
 	covEligible = data.Coverage.TotalEligible()
@@ -849,6 +792,92 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 		buf.WriteString("      </details>\n")
 	}
 
+	// Modules Run Table
+	if len(data.ModulesRun) > 0 {
+		buf.WriteString("      <div class=\"table-wrap\">\n")
+		buf.WriteString("        <table class=\"data-table coverage-table\">\n")
+		buf.WriteString("          <thead>\n")
+		buf.WriteString("            <tr><th>Module</th><th>Duration</th><th>Inspected</th><th>Findings</th><th>Status</th></tr>\n")
+		buf.WriteString("          </thead>\n")
+		buf.WriteString("          <tbody>\n")
+		for _, m := range data.ModulesRun {
+			statusBadge := "<span class=\"status-ok\">OK</span>"
+			if m.Status == "FAILED" || m.Err != nil {
+				statusBadge = "<span class=\"status-failed\">FAILED</span>"
+			} else if m.Status == "NOT IMPLEMENTED" {
+				statusBadge = "<span class=\"status-skip\">SKIPPED</span>"
+			}
+			buf.WriteString(fmt.Sprintf("            <tr><td><strong>%s</strong></td><td>%v</td><td>%d</td><td>%d</td><td>%s</td></tr>\n",
+				html.EscapeString(m.ModuleName),
+				m.Duration.Round(time.Millisecond),
+				m.InspectedCount,
+				m.FindingsCount,
+				statusBadge,
+			))
+		}
+		buf.WriteString("          </tbody>\n")
+		buf.WriteString("        </table>\n")
+		buf.WriteString("      </div>\n")
+	}
+
+	// Modules Not Run
+	if len(data.ModulesNotRun) > 0 {
+		buf.WriteString("      <div class=\"notice-block warn-block\">\n")
+		buf.WriteString("        <strong>Modules Not Run:</strong> " + html.EscapeString(strings.Join(data.ModulesNotRun, "; ")) + "\n")
+		buf.WriteString("      </div>\n")
+	}
+
+	// Startup Notices
+	if len(data.StartupNotices) > 0 {
+		buf.WriteString("      <div class=\"notice-block info-block\">\n")
+		buf.WriteString("        <strong>Startup Notices:</strong>\n        <ul>\n")
+		for _, sn := range data.StartupNotices {
+			buf.WriteString("          <li>" + html.EscapeString(sn) + "</li>\n")
+		}
+		buf.WriteString("        </ul>\n      </div>\n")
+	}
+
+	// Subsystem Duration Breakdown
+	if len(data.DurationBreakdown) > 0 {
+		buf.WriteString("      <div class=\"posture-timing\">\n")
+		buf.WriteString("        <h3 class=\"posture-subhead\">Subsystem Duration Breakdown</h3>\n")
+		buf.WriteString("        <div class=\"timing-grid\">\n")
+		knownKeys := []struct {
+			Key   string
+			Label string
+		}{
+			{"filesystem_walk", "Filesystem Walk"},
+			{"hashing", "Hashing"},
+			{"heuristics", "Heuristics"},
+			{"yara", "YARA-X Engine"},
+			{"process", "Process Inspection"},
+			{"network", "Network Sockets"},
+			{"correlation", "Evidence Correlation"},
+			{"total_duration", "Total Duration"},
+		}
+		renderedKeys := make(map[string]bool)
+		for _, item := range knownKeys {
+			if durVal, ok := data.DurationBreakdown[item.Key]; ok {
+				renderedKeys[item.Key] = true
+				buf.WriteString(fmt.Sprintf("          <div class=\"timing-item\"><span class=\"timing-label\">%s</span><strong class=\"timing-val\">%s</strong></div>\n",
+					html.EscapeString(item.Label), html.EscapeString(durVal)))
+			}
+		}
+		var extraKeys []string
+		for k := range data.DurationBreakdown {
+			if !renderedKeys[k] {
+				extraKeys = append(extraKeys, k)
+			}
+		}
+		sort.Strings(extraKeys)
+		for _, k := range extraKeys {
+			buf.WriteString(fmt.Sprintf("          <div class=\"timing-item\"><span class=\"timing-label\">%s</span><strong class=\"timing-val\">%s</strong></div>\n",
+				html.EscapeString(k), html.EscapeString(data.DurationBreakdown[k])))
+		}
+		buf.WriteString("        </div>\n")
+		buf.WriteString("      </div>\n")
+	}
+
 	// Subsystem breakdown notes
 	if data.KernelCoverage != nil {
 		taintDesc := data.KernelCoverage.TaintSeverity
@@ -875,25 +904,23 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 			data.UsersCoverage.AccountsInspected, data.UsersCoverage.SystemAccounts, shadowStr, data.UsersCoverage.DuplicateUIDs))
 	}
 
-	buf.WriteString("    </section>\n\n")
-
-	// 6. Top Rules Section
+	// Top Rules Section (Curated Detection Rules)
 	if len(data.TopRules) > 0 {
-		buf.WriteString("    <section class=\"card section-card\" aria-label=\"Top Triggered Rules\">\n")
-		buf.WriteString("      <h2 class=\"section-title\">Top Triggered Rules</h2>\n")
-		buf.WriteString("      <div class=\"table-wrap\">\n")
-		buf.WriteString("        <table class=\"data-table\">\n")
-		buf.WriteString("          <thead>\n")
-		buf.WriteString("            <tr><th>Rule Name</th><th>Severity</th><th>Count</th><th>Acknowledged</th></tr>\n")
-		buf.WriteString("          </thead>\n")
-		buf.WriteString("          <tbody>\n")
+		buf.WriteString("      <div class=\"top-rules-wrap\" style=\"margin-top: 14px;\">\n")
+		buf.WriteString("        <h3 class=\"posture-subhead\">Top Triggered Rules</h3>\n")
+		buf.WriteString("        <div class=\"table-wrap\">\n")
+		buf.WriteString("          <table class=\"data-table\">\n")
+		buf.WriteString("            <thead>\n")
+		buf.WriteString("              <tr><th>Rule Name</th><th>Severity</th><th>Count</th><th>Acknowledged</th></tr>\n")
+		buf.WriteString("            </thead>\n")
+		buf.WriteString("            <tbody>\n")
 		for _, tr := range data.TopRules {
 			badgeClass := "sev-" + strings.ToLower(string(canonicalSeverity(tr.Severity)))
 			ackStr := "No"
 			if tr.Acknowledged {
 				ackStr = "Yes"
 			}
-			buf.WriteString(fmt.Sprintf("            <tr><td><code>%s</code></td><td><span class=\"badge %s\">%s</span></td><td><strong>%d</strong></td><td>%s</td></tr>\n",
+			buf.WriteString(fmt.Sprintf("              <tr><td><code>%s</code></td><td><span class=\"badge %s\">%s</span></td><td><strong>%d</strong></td><td>%s</td></tr>\n",
 				html.EscapeString(tr.RuleName),
 				badgeClass,
 				html.EscapeString(string(canonicalSeverity(tr.Severity))),
@@ -901,14 +928,84 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 				ackStr,
 			))
 		}
-		buf.WriteString("          </tbody>\n")
-		buf.WriteString("        </table>\n")
+		buf.WriteString("            </tbody>\n")
+		buf.WriteString("          </table>\n")
+		buf.WriteString("        </div>\n")
 		buf.WriteString("      </div>\n")
-		buf.WriteString("    </section>\n\n")
 	}
 
-	// 7. Filterable Findings Table Section
-	buf.WriteString("    <section class=\"card section-card\" aria-label=\"Scan Findings\">\n")
+	buf.WriteString("    </section>\n\n")
+
+	// 4. Adversarial MITRE ATT&CK Matrix Heat-Map Section
+	buf.WriteString("    <section class=\"card section-card\" id=\"mitre-matrix-section\" aria-label=\"MITRE ATT&CK Matrix\">\n")
+	buf.WriteString("      <div class=\"mitre-matrix-header\">\n")
+	buf.WriteString("        <div class=\"mitre-titles\">\n")
+	buf.WriteString("          <h2 class=\"section-title\">MITRE ATT&CK&reg; Heat-Map Matrix</h2>\n")
+	buf.WriteString("          <span class=\"subtitle\">Enterprise adversarial tactics observed across inspected subsystems</span>\n")
+	buf.WriteString("        </div>\n")
+	buf.WriteString("      </div>\n")
+
+	if len(mitreGroups) > 0 {
+		buf.WriteString("      <div class=\"mitre-matrix-grid\">\n")
+		for _, grp := range mitreGroups {
+			buf.WriteString("        <div class=\"tactic-col\">\n")
+			buf.WriteString(fmt.Sprintf("          <div class=\"tactic-header\"><span class=\"tactic-name\">%s</span><span class=\"tactic-count\">%d</span></div>\n",
+				html.EscapeString(grp.Tactic), grp.TotalCount))
+			buf.WriteString("          <div class=\"tactic-techniques\">\n")
+			for _, tech := range grp.Techniques {
+				chipTitle := fmt.Sprintf("%s: %s (%d detections)", tech.ID, tech.Name, tech.Count)
+				buf.WriteString(fmt.Sprintf("            <button class=\"btn-tech-chip\" data-tech-id=\"%s\" title=\"%s\"><span class=\"chip-id\">%s</span><span class=\"chip-count\">%d</span></button>\n",
+					html.EscapeString(tech.ID),
+					html.EscapeString(chipTitle),
+					html.EscapeString(tech.ID+" "+tech.Name),
+					tech.Count,
+				))
+			}
+			buf.WriteString("          </div>\n")
+			buf.WriteString("        </div>\n")
+		}
+		buf.WriteString("      </div>\n")
+	} else {
+		buf.WriteString("      <div class=\"mitre-clean-card\">\n")
+		buf.WriteString("        <span class=\"mitre-clean-icon\">🛡️</span>\n")
+		buf.WriteString("        <div class=\"mitre-clean-text\">\n")
+		buf.WriteString("          <strong>Zero Active MITRE ATT&CK&reg; Adversarial Techniques Detected</strong>\n")
+		buf.WriteString("          <p>No malicious persistence, privilege escalation, credential theft, or execution artifacts were observed across inspected subsystems.</p>\n")
+		buf.WriteString("        </div>\n")
+		buf.WriteString("      </div>\n")
+	}
+	buf.WriteString("    </section>\n\n")
+
+	// 5. Scan Execution Metadata & Provenance Card
+	buf.WriteString("    <section class=\"card meta-card\" aria-label=\"Scan Execution Metadata\">\n")
+	buf.WriteString("      <div class=\"meta-grid\">\n")
+	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Host:</span> <strong class=\"meta-val\">" + html.EscapeString(report.FormatRedactedHostname(data.Hostname, data.RedactHosts)) + "</strong></div>\n")
+	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Scan Mode:</span> <strong class=\"meta-val badge-mode\">" + html.EscapeString(strings.ToUpper(data.ScanMode)) + "</strong></div>\n")
+	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Started:</span> <span class=\"meta-val\">" + html.EscapeString(data.StartTime.Format(time.RFC3339)) + "</span></div>\n")
+	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Duration:</span> <span class=\"meta-val\">" + html.EscapeString(data.Duration.Round(time.Millisecond).String()) + "</span></div>\n")
+	verStr := "v" + data.Version
+	if data.Commit != "" && data.Commit != "none" {
+		verStr += " (" + data.Commit + ")"
+	}
+	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Aether Version:</span> <span class=\"meta-val\">" + html.EscapeString(verStr) + "</span></div>\n")
+	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">Threads / Max Size:</span> <span class=\"meta-val\">" + fmt.Sprintf("%d threads / %d MB", data.Threads, data.MaxFileSize/(1024*1024)) + "</span></div>\n")
+	yaraBadgeClass := "badge-yara-disabled"
+	yaraBadgeText := "DISABLED (Native Heuristics Only)"
+	if data.YARAActive {
+		yaraBadgeClass = "badge-yara-active"
+		yaraBadgeText = "ACTIVE (" + data.YARAStatus + ")"
+	} else if data.YARAStatus != "" {
+		yaraBadgeText = data.YARAStatus
+	}
+	buf.WriteString("        <div class=\"meta-item\"><span class=\"meta-label\">YARA Engine:</span> <span class=\"meta-val\"><span class=\"" + yaraBadgeClass + "\">" + html.EscapeString(yaraBadgeText) + "</span></span></div>\n")
+	buf.WriteString("      </div>\n")
+	if len(data.TargetPaths) > 0 {
+		buf.WriteString("      <div class=\"meta-paths\"><span class=\"meta-label\">Target Paths:</span> <code>" + html.EscapeString(strings.Join(data.TargetPaths, ", ")) + "</code></div>\n")
+	}
+	buf.WriteString("    </section>\n\n")
+
+	// 6. Detailed Findings Dossier Section
+	buf.WriteString("    <section class=\"card section-card print-break-before\" aria-label=\"Scan Findings\">\n")
 	buf.WriteString("      <div class=\"findings-header\">\n")
 	buf.WriteString("        <h2 class=\"section-title\">Scan Findings</h2>\n")
 	buf.WriteString("        <div class=\"findings-stats-line\" id=\"findings-count-summary\"></div>\n")
@@ -2164,16 +2261,19 @@ code, pre {
 }
 
 @media print {
-  body { background: #ffffff !important; color: #000000 !important; padding: 0 !important; }
-  .card { border: 1px solid #cccccc !important; box-shadow: none !important; break-inside: avoid; }
+  @page { margin: 1.5cm; }
+  body { background: #ffffff !important; color: #000000 !important; padding: 0 !important; font-size: 11pt !important; }
+  .card { border: 1px solid #cccccc !important; box-shadow: none !important; break-inside: avoid; page-break-inside: avoid; margin-bottom: 14px !important; }
   .header-container { position: static !important; background: transparent !important; margin: 0 0 20px 0 !important; padding: 0 !important; border-bottom: 2px solid #000 !important; }
-  .header-right, .filter-bar, .capping-banner, .btn, #theme-toggle, #btn-export-csv, #btn-export-triage, #btn-print { display: none !important; }
+  .header-right, .filter-bar, .capping-banner, .btn, #theme-toggle, #btn-export-csv, #btn-export-triage, #btn-print, #btn-export-json { display: none !important; }
   .drawer-overlay { display: none !important; }
+  .data-table tr { break-inside: avoid; page-break-inside: avoid; }
   .data-table th { background: #eeeeee !important; color: #000000 !important; }
   .data-table td, .data-table th { border-bottom: 1px solid #dddddd !important; }
   .badge { border: 1px solid #000000 !important; color: #000000 !important; background: transparent !important; }
+  .print-break-before { break-before: page; page-break-before: always; }
   .executive-metrics-grid { display: block !important; }
-  .donut-card { display: none !important; }
+  .donut-card { break-inside: avoid; page-break-inside: avoid; }
   .counters-grid { display: grid !important; grid-template-columns: repeat(6, 1fr) !important; }
 }
 
@@ -2182,6 +2282,42 @@ code, pre {
   .counters-grid { grid-template-columns: repeat(2, 1fr); }
   .filter-pills { flex-wrap: wrap; }
 }
+
+/* Stacked Coverage Bar Chart Styles */
+.coverage-bar-wrap {
+  margin: 12px 0 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.coverage-bar-svg {
+  width: 100%;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+}
+.coverage-bar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.cov-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cov-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.cov-dot-inspected { background-color: #10b981; }
+.cov-dot-permission { background-color: #f59e0b; }
+.cov-dot-oversize { background-color: #8b5cf6; }
+.cov-dot-excluded { background-color: #64748b; }
 
 /* Executive Posture & Subsystem Timing Styles */
 .posture-card {

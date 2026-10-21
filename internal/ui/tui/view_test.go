@@ -285,3 +285,92 @@ func TestView_ConfirmQuitReplacesDashboard(t *testing.T) {
 		t.Error("dashboard must be hidden while the quit confirm modal is open")
 	}
 }
+
+func TestRenderTopRulesBars_ProportionalWidths(t *testing.T) {
+	th := theme.NewTheme(true)
+	m := Model{theme: th}
+
+	rules := []report.RuleSummary{
+		{RuleName: "Script_Reverse_Shell", Severity: report.SeverityAlert, Count: 20},
+		{RuleName: "Persistence_Systemd_Backdoor", Severity: report.SeverityWarning, Count: 10},
+		{RuleName: "Process_Deleted_Binary", Severity: report.SeverityNotice, Count: 5},
+	}
+
+	// Standard tier (e.g. 100 cols)
+	out := m.renderTopRulesBars(100, rules)
+	if !strings.Contains(out, "Top Detections:") {
+		t.Errorf("expected Top Detections header, got: %s", out)
+	}
+	if !strings.Contains(out, "Reverse_Shell") {
+		t.Errorf("expected trimmed rule name Reverse_Shell, got: %s", out)
+	}
+	if !strings.Contains(out, "Systemd_Backdoor") {
+		t.Errorf("expected trimmed rule name Systemd_Backdoor, got: %s", out)
+	}
+	if !strings.Contains(out, "(20)") || !strings.Contains(out, "(10)") || !strings.Contains(out, "(5)") {
+		t.Errorf("expected counts in output, got: %s", out)
+	}
+	if !strings.Contains(out, "█") {
+		t.Errorf("expected Unicode block characters in bar, got: %s", out)
+	}
+}
+
+func TestRenderTopRulesBars_CompactTier(t *testing.T) {
+	th := theme.NewTheme(true)
+	m := Model{theme: th}
+
+	rules := []report.RuleSummary{
+		{RuleName: "Script_Webshell_PHP", Severity: report.SeverityAlert, Count: 8},
+		{RuleName: "Linux_Cron_Persistence", Severity: report.SeverityWarning, Count: 3},
+	}
+
+	// Compact tier (< 80 cols, e.g. 70)
+	out := m.renderTopRulesBars(70, rules)
+	if !strings.Contains(out, "[Webshell_PHP: 8]") {
+		t.Errorf("expected compact chip [Webshell_PHP: 8], got: %s", out)
+	}
+	if !strings.Contains(out, "[Cron_Persistence: 3]") {
+		t.Errorf("expected compact chip [Cron_Persistence: 3], got: %s", out)
+	}
+}
+
+func TestRenderTopRulesBars_ASCIIMode(t *testing.T) {
+	th := theme.NewTheme(true, true) // ascii = true
+	m := Model{theme: th}
+
+	rules := []report.RuleSummary{
+		{RuleName: "Script_Reverse_Shell", Severity: report.SeverityAlert, Count: 15},
+		{RuleName: "Process_Fileless", Severity: report.SeverityWarning, Count: 5},
+	}
+
+	out := m.renderTopRulesBars(100, rules)
+	if !strings.Contains(out, "[TOP] Top Detections:") {
+		t.Errorf("expected ASCII header [TOP] Top Detections:, got: %s", out)
+	}
+	if !strings.Contains(out, "#") {
+		t.Errorf("expected ASCII '#' bar fill, got: %s", out)
+	}
+	if strings.Contains(out, "█") || strings.Contains(out, "░") {
+		t.Errorf("expected no Unicode bar characters in ASCII mode, got: %s", out)
+	}
+}
+
+func TestRenderProgressBar_ASCII(t *testing.T) {
+	thASCII := theme.NewTheme(true, true)
+	mASCII := Model{
+		theme:        thASCII,
+		scanFinished: true,
+	}
+
+	bar := mASCII.renderProgressBar(30)
+	if !strings.Contains(bar, "100%") {
+		t.Errorf("expected 100%% in progress bar, got: %s", bar)
+	}
+	if strings.Contains(bar, "█") || strings.Contains(bar, "─") {
+		t.Errorf("expected no Unicode progress bar characters in ASCII mode, got: %s", bar)
+	}
+	if !strings.Contains(bar, "=") {
+		t.Errorf("expected '=' fill in ASCII progress bar, got: %s", bar)
+	}
+}
+

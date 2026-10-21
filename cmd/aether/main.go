@@ -55,6 +55,7 @@ type globalFlags struct {
 	plain      bool
 	noAnim     bool
 	noColor    bool
+	ascii      bool
 }
 
 type scanCmdFlags struct {
@@ -294,7 +295,7 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 		mode = "full"
 	}
 
-	th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor())
+	th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor(), gFlags.ascii)
 
 	if usePlain {
 		var outWriter io.Writer = os.Stdout
@@ -365,7 +366,7 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 }
 
 func runInteractiveLauncher(cmd *cobra.Command, gFlags *globalFlags, sFlags *scanCmdFlags) error {
-	th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor())
+	th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor(), gFlags.ascii)
 
 	res, err := tui.RunInteractiveLauncher(th)
 	if err != nil {
@@ -515,6 +516,7 @@ matching and YARA signature engines without altering scanned systems.`,
 	rootCmd.PersistentFlags().BoolVar(&gFlags.plain, "plain", false, "Force plain text line-based output (no TUI)")
 	rootCmd.PersistentFlags().BoolVar(&gFlags.noAnim, "no-anim", false, "Disable animations and splash screen")
 	rootCmd.PersistentFlags().BoolVar(&gFlags.noColor, "no-color", false, "Disable color and styled terminal output")
+	rootCmd.PersistentFlags().BoolVar(&gFlags.ascii, "ascii", false, "Disable UTF-8 box characters and emojis (ASCII-only mode)")
 
 	// Scan command
 	scanCmd := &cobra.Command{
@@ -571,7 +573,7 @@ of compromise (IOCs) and YARA signature matches in strict read-only mode.`,
 verifies directory permissions, optionally installs binary to /usr/local/bin, and downloads
 the latest verified YARA-Forge Core ruleset.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor())
+			th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor(), gFlags.ascii)
 			opts := setup.SetupOptions{
 				DownloadRules: setupDownload,
 				CustomDir:     setupCustomDir,
@@ -673,7 +675,7 @@ pipeline as 'aether intel import'.`,
 			bus := events.NewEventBus()
 			defer bus.Close()
 
-			th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor())
+			th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor(), gFlags.ascii)
 
 			var reporter *report.ConcurrentReporter
 			if demoJSONOut != "" {

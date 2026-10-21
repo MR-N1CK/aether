@@ -185,11 +185,11 @@ func (m Model) renderDashboard() string {
 				modRow.WriteString(fmt.Sprintf("%s %s (%d hits)", m.spinner.View(), name, mod.Findings))
 			} else if mod.Finished {
 				if mod.Status == "NOT IMPLEMENTED" {
-					modRow.WriteString(m.theme.BadgeInfo.Render(fmt.Sprintf("⊘ %s", name)))
+					modRow.WriteString(m.theme.BadgeInfo.Render(fmt.Sprintf("%s %s", m.theme.IconSkip(), name)))
 				} else if mod.Err != nil || mod.Status == "FAILED" {
-					modRow.WriteString(m.theme.BadgeAlert.Render(fmt.Sprintf("✕ %s", name)))
+					modRow.WriteString(m.theme.BadgeAlert.Render(fmt.Sprintf("%s %s", m.theme.IconCross(), name)))
 				} else {
-					modRow.WriteString(m.theme.BadgeNotice.Render(fmt.Sprintf("✓ %s (%d)", name, mod.Findings)))
+					modRow.WriteString(m.theme.BadgeNotice.Render(fmt.Sprintf("%s %s (%d)", m.theme.IconCheck(), name, mod.Findings)))
 				}
 			} else {
 				modRow.WriteString(fmt.Sprintf("○ %s", name))
@@ -251,7 +251,11 @@ func (m Model) renderDashboard() string {
 }
 
 func (m Model) renderBrandHeader(width int, statusText string) string {
-	title := m.theme.BrandTitle.Render("✦ A E T H E R") + "  " + m.theme.BrandTagline.Render(":: DEFENSIVE LINUX THREAT HUNTING ENGINE")
+	brandPrefix := "✦ "
+	if m.theme.ASCII {
+		brandPrefix = "* "
+	}
+	title := m.theme.BrandTitle.Render(brandPrefix+"A E T H E R") + "  " + m.theme.BrandTagline.Render(":: DEFENSIVE LINUX THREAT HUNTING ENGINE")
 
 	targetPath := "Root Filesystem (/)"
 	if len(m.paths) > 0 {
@@ -338,7 +342,14 @@ func (m Model) renderRiskGauge(width int, alerts, warnings int) string {
 		empty = 0
 	}
 
-	bar := fillStyle.Render(strings.Repeat("█", filled)) + m.theme.FindingTimestamp.Render(strings.Repeat("░", empty))
+	filledChar := "█"
+	emptyChar := "░"
+	if m.theme.ASCII {
+		filledChar = "#"
+		emptyChar = "-"
+	}
+
+	bar := fillStyle.Render(strings.Repeat(filledChar, filled)) + m.theme.FindingTimestamp.Render(strings.Repeat(emptyChar, empty))
 	return fmt.Sprintf("Threat Level: [%s] %s", bar, fillStyle.Render(label))
 }
 
@@ -449,8 +460,13 @@ func (m Model) renderExecutiveSummaryMatrix(width int, alerts, warnings, notices
 	}
 
 	donut := m.renderDonutChart(alerts, warnings, notices, int(cleanFiles))
+	border := lipgloss.RoundedBorder()
+	if m.theme.ASCII {
+		border = theme.ASCIIBorder
+	}
+
 	donutBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(theme.ColorBorderLit).
 		Background(lipgloss.Color("#161B22")).
 		Padding(0, 1).
@@ -463,47 +479,47 @@ func (m Model) renderExecutiveSummaryMatrix(width int, alerts, warnings, notices
 	}
 
 	maliciousBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(theme.ColorAlert).
 		Background(lipgloss.Color("#161B22")).
 		Padding(0, 1).
 		Width(colWidth)
 
 	suspiciousBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(theme.ColorWarning).
 		Background(lipgloss.Color("#161B22")).
 		Padding(0, 1).
 		Width(colWidth)
 
 	safeBox := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(theme.ColorNotice).
 		Background(lipgloss.Color("#161B22")).
 		Padding(0, 1).
 		Width(colWidth)
 
 	malText := fmt.Sprintf("%s\n%s\n%s",
-		m.theme.StatValueAlert.Render(fmt.Sprintf("🚨 MALICIOUS (%d)", alerts)),
+		m.theme.StatValueAlert.Render(fmt.Sprintf("%s MALICIOUS (%d)", m.theme.IconAlert(), alerts)),
 		m.theme.FindingRowNormal.Render(fmt.Sprintf("%d Confirmed Threat(s)", alerts)),
 		m.theme.FindingTimestamp.Render("Backdoors & Implants"),
 	)
 	if alerts == 0 {
 		malText = fmt.Sprintf("%s\n%s\n%s",
-			m.theme.StatValueAlert.Render("🚨 MALICIOUS (0)"),
+			m.theme.StatValueAlert.Render(fmt.Sprintf("%s MALICIOUS (0)", m.theme.IconAlert())),
 			m.theme.FindingTimestamp.Render("0 Active Threats"),
 			m.theme.FindingTimestamp.Render("No Backdoors Found"),
 		)
 	}
 
 	suspText := fmt.Sprintf("%s\n%s\n%s",
-		m.theme.StatValueWarn.Render(fmt.Sprintf("⚠️ SUSPICIOUS (%d)", warnings+notices)),
+		m.theme.StatValueWarn.Render(fmt.Sprintf("%s SUSPICIOUS (%d)", m.theme.IconWarn(), warnings+notices)),
 		m.theme.FindingRowNormal.Render(fmt.Sprintf("%d Warn / %d Notice", warnings, notices)),
 		m.theme.FindingTimestamp.Render("Anomalies / Autostarts"),
 	)
 
 	safeText := fmt.Sprintf("%s\n%s\n%s",
-		m.theme.StatValueSafe.Render(fmt.Sprintf("🛡️ SAFE ASSETS (%s)", m.formatNumber(cleanFiles))),
+		m.theme.StatValueSafe.Render(fmt.Sprintf("%s SAFE ASSETS (%s)", m.theme.IconClean(), m.formatNumber(cleanFiles))),
 		m.theme.FindingRowNormal.Render(fmt.Sprintf("%s Files Verified Clean", m.formatNumber(cleanFiles))),
 		m.theme.FindingTimestamp.Render("Baseline Intact"),
 	)
@@ -1071,17 +1087,17 @@ func (m Model) renderFinished() string {
 	case verdict == events.VerdictCompromised || alerts > 0:
 		riskGauge := m.renderRiskGauge(cardWidth, alerts, warnings)
 		verdictBanner = m.theme.VerdictCompromised.Width(cardWidth).Render(
-			fmt.Sprintf("🚨 VERDICT: SYSTEM COMPROMISED%s\nActive threats or high-confidence compromise indicators detected (%d MALICIOUS ALERT(S)).\n%s", coverageSuffix, alerts, riskGauge),
+			fmt.Sprintf("%s VERDICT: SYSTEM COMPROMISED%s\nActive threats or high-confidence compromise indicators detected (%d MALICIOUS ALERT(S)).\n%s", m.theme.IconAlert(), coverageSuffix, alerts, riskGauge),
 		)
 	case verdict == events.VerdictSuspicious || warnings > 0 || notices > 0:
 		riskGauge := m.renderRiskGauge(cardWidth, alerts, warnings)
 		verdictBanner = m.theme.VerdictSuspicious.Width(cardWidth).Render(
-			fmt.Sprintf("⚠️ VERDICT: SUSPICIOUS ANOMALIES IDENTIFIED%s\nSecurity anomalies or unverified persistence hooks detected (%d Warnings, %d Notices).\n%s", coverageSuffix, warnings, notices, riskGauge),
+			fmt.Sprintf("%s VERDICT: SUSPICIOUS ANOMALIES IDENTIFIED%s\nSecurity anomalies or unverified persistence hooks detected (%d Warnings, %d Notices).\n%s", m.theme.IconWarn(), coverageSuffix, warnings, notices, riskGauge),
 		)
 	default:
 		riskGauge := m.renderRiskGauge(cardWidth, 0, 0)
 		verdictBanner = m.theme.VerdictClean.Width(cardWidth).Render(
-			fmt.Sprintf("🛡️ VERDICT: SYSTEM CLEAN & SECURE%s\nNo known indicators of compromise, backdoors, webshells, or anomalous artifacts identified.\n%s", coverageSuffix, riskGauge),
+			fmt.Sprintf("%s VERDICT: SYSTEM CLEAN & SECURE%s\nNo known indicators of compromise, backdoors, webshells, or anomalous artifacts identified.\n%s", m.theme.IconClean(), coverageSuffix, riskGauge),
 		)
 	}
 	b.WriteString(verdictBanner + "\n")
@@ -1092,12 +1108,17 @@ func (m Model) renderFinished() string {
 
 	// 4. Detailed Telemetry & Coverage Card
 	var stats strings.Builder
-	stats.WriteString(m.theme.SectionHeader.Render("📊 FORENSIC TELEMETRY & AUDIT METRICS") + "\n\n")
+	titleTelemetry := "📊 FORENSIC TELEMETRY & AUDIT METRICS"
+	if m.theme.ASCII {
+		titleTelemetry = "[STATS] FORENSIC TELEMETRY & AUDIT METRICS"
+	}
+	stats.WriteString(m.theme.SectionHeader.Render(titleTelemetry) + "\n\n")
 
 	// Row 1: Primary Metrics Badges with spacious breathing room
-	covText := fmt.Sprintf(" 📁 %s Inspected ", m.formatNumber(m.filesScanned))
+	covText := fmt.Sprintf(" %s %s Inspected ", m.theme.IconFile(), m.formatNumber(m.filesScanned))
 	if cov.TotalEligible() > 0 {
-		covText = fmt.Sprintf(" 📁 Coverage: %.1f%% (%s / %s) ",
+		covText = fmt.Sprintf(" %s Coverage: %.1f%% (%s / %s) ",
+			m.theme.IconFile(),
 			cov.CoveragePercentage(),
 			m.formatNumber(cov.FilesScanned),
 			m.formatNumber(cov.TotalEligible()),
@@ -1105,11 +1126,11 @@ func (m Model) renderFinished() string {
 	}
 	metricsRow := fmt.Sprintf("  %s   %s   %s   %s   %s   %s",
 		m.theme.PillNeutral.Render(covText),
-		m.theme.PillNeutral.Render(fmt.Sprintf(" ⏱ %s Elapsed ", m.formatDuration(m.elapsed))),
-		m.theme.PillAlert.Render(fmt.Sprintf(" 🚨 %d Alerts ", alerts)),
-		m.theme.PillWarn.Render(fmt.Sprintf(" ⚠️ %d Warnings ", warnings)),
-		m.theme.PillNotice.Render(fmt.Sprintf(" 🔍 %d Notices ", notices)),
-		m.theme.PillInfo.Render(fmt.Sprintf(" ℹ️ %d Infos ", infos)),
+		m.theme.PillNeutral.Render(fmt.Sprintf(" %s %s Elapsed ", m.theme.IconTime(), m.formatDuration(m.elapsed))),
+		m.theme.PillAlert.Render(fmt.Sprintf(" %s %d Alerts ", m.theme.IconAlert(), alerts)),
+		m.theme.PillWarn.Render(fmt.Sprintf(" %s %d Warnings ", m.theme.IconWarn(), warnings)),
+		m.theme.PillNotice.Render(fmt.Sprintf(" %s %d Notices ", m.theme.IconNotice(), notices)),
+		m.theme.PillInfo.Render(fmt.Sprintf(" %s %d Infos ", m.theme.IconInfo(), infos)),
 	)
 	stats.WriteString(metricsRow + "\n")
 
@@ -1132,7 +1153,7 @@ func (m Model) renderFinished() string {
 			skippedParts = append(skippedParts, fmt.Sprintf("%d Vanished", cov.SkippedVanished))
 		}
 		stats.WriteString(fmt.Sprintf("\n  %s %s: %s\n",
-			m.theme.FindingTimestamp.Render("⊘"),
+			m.theme.FindingTimestamp.Render(m.theme.IconSkip()),
 			m.theme.FindingTimestamp.Render(fmt.Sprintf("Skipped (%d)", cov.TotalSkipped())),
 			m.theme.FindingTimestamp.Render(strings.Join(skippedParts, "  •  ")),
 		))
@@ -1148,43 +1169,19 @@ func (m Model) renderFinished() string {
 			filesCount = yCov.FilesScanned
 		}
 		stats.WriteString(fmt.Sprintf("\n  %s %s\n",
-			m.theme.FindingTimestamp.Render("⚡"),
+			m.theme.FindingTimestamp.Render(m.theme.IconBolt()),
 			m.theme.FindingTimestamp.Render(fmt.Sprintf("Detection Engine: YARA-X ACTIVE (%d Rules Loaded  •  %d Files Evaluated)", rulesCount, filesCount)),
 		))
 	} else {
 		stats.WriteString(fmt.Sprintf("\n  %s %s\n",
-			m.theme.FindingTimestamp.Render("⚡"),
+			m.theme.FindingTimestamp.Render(m.theme.IconBolt()),
 			m.theme.FindingTimestamp.Render("Detection Engine: Pure-Go Native Heuristics Only (YARA-X Disabled / CGO-Free)"),
 		))
 	}
 
-	// Row 3: Curated Top Triggered Rules (top 4-5 chips instead of 20-rule wall)
+	// Row 3: Curated Top Triggered Rules with Proportional Horizontal Bars
 	if m.finishEvent != nil && len(m.finishEvent.TopRules) > 0 {
-		stats.WriteString(fmt.Sprintf("\n  %s  ", m.theme.SubSectionHeader.Render("🏷️ Top Detections:")))
-		maxRules := 4
-		if cardWidth > 110 {
-			maxRules = 6
-		}
-		displayed := 0
-		for idx, tr := range m.finishEvent.TopRules {
-			if idx >= maxRules {
-				break
-			}
-			shortName := tr.RuleName
-			shortName = strings.TrimPrefix(shortName, "Persistence_System_")
-			shortName = strings.TrimPrefix(shortName, "Persistence_")
-			shortName = strings.TrimPrefix(shortName, "Script_")
-			shortName = strings.TrimPrefix(shortName, "Process_")
-			shortName = strings.TrimPrefix(shortName, "Linux_")
-			chip := m.theme.PillNeutral.Render(fmt.Sprintf(" [%s: %d] ", shortName, tr.Count))
-			stats.WriteString(chip + "  ")
-			displayed++
-		}
-		if len(m.finishEvent.TopRules) > displayed {
-			remaining := len(m.finishEvent.TopRules) - displayed
-			stats.WriteString(m.theme.FindingTimestamp.Render(fmt.Sprintf("(+%d more)", remaining)))
-		}
-		stats.WriteString("\n")
+		stats.WriteString(m.renderTopRulesBars(cardWidth, m.finishEvent.TopRules))
 	}
 	b.WriteString(m.theme.CardBox.Width(cardWidth).Render(stats.String()) + "\n")
 
@@ -1265,6 +1262,26 @@ func (m Model) renderProgressBar(width int) string {
 		trackWidth = 5
 	}
 
+	if m.theme.ASCII {
+		filled := int(progressRatio * float64(trackWidth))
+		if filled > trackWidth {
+			filled = trackWidth
+		}
+		var b strings.Builder
+		for i := 0; i < filled; i++ {
+			if i == filled-1 && filled < trackWidth {
+				b.WriteByte('>')
+			} else {
+				b.WriteByte('=')
+			}
+		}
+		for i := filled; i < trackWidth; i++ {
+			b.WriteByte(' ')
+		}
+		gaugeStyle := m.theme.StatValueNotice
+		return fmt.Sprintf("[%s %3.0f%%]", gaugeStyle.Render(b.String()), progressRatio*100)
+	}
+
 	subBlocks := []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
 	exactFilled := progressRatio * float64(trackWidth)
 	wholeBlocks := int(exactFilled)
@@ -1316,4 +1333,128 @@ func (m Model) formatNumber(n int64) string {
 		out += string(c)
 	}
 	return out
+}
+
+// formatRuleShortName trims noisy prefixes to provide clean rule identification.
+func formatRuleShortName(ruleName string) string {
+	shortName := ruleName
+	shortName = strings.TrimPrefix(shortName, "Persistence_System_")
+	shortName = strings.TrimPrefix(shortName, "Persistence_")
+	shortName = strings.TrimPrefix(shortName, "Script_")
+	shortName = strings.TrimPrefix(shortName, "Process_")
+	shortName = strings.TrimPrefix(shortName, "Linux_")
+	return shortName
+}
+
+// renderTopRulesBars renders curated top triggered detection rules with responsive layout
+// and proportional horizontal mini-bars.
+func (m Model) renderTopRulesBars(cardWidth int, topRules []report.RuleSummary) string {
+	if len(topRules) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	title := "🏷️ Top Detections:"
+	if m.theme.ASCII {
+		title = "[TOP] Top Detections:"
+	}
+	sb.WriteString(fmt.Sprintf("\n  %s  ", m.theme.SubSectionHeader.Render(title)))
+
+	if cardWidth < theme.TierCompact {
+		// Compact tier: render as compact horizontal chips
+		maxRules := 3
+		displayed := 0
+		for idx, tr := range topRules {
+			if idx >= maxRules {
+				break
+			}
+			shortName := formatRuleShortName(tr.RuleName)
+			chip := m.theme.PillNeutral.Render(fmt.Sprintf("[%s: %d]", shortName, tr.Count))
+			sb.WriteString(chip + " ")
+			displayed++
+		}
+		if len(topRules) > displayed {
+			remaining := len(topRules) - displayed
+			sb.WriteString(m.theme.FindingTimestamp.Render(fmt.Sprintf("(+%d more)", remaining)))
+		}
+		sb.WriteString("\n")
+		return sb.String()
+	}
+
+	// Standard (80-110) or Wide (>110) tier: proportional horizontal mini-bars
+	sb.WriteString("\n")
+	maxRules := 4
+	if cardWidth > theme.TierStandard {
+		maxRules = 6
+	}
+	if len(topRules) < maxRules {
+		maxRules = len(topRules)
+	}
+
+	maxCount := 1
+	for i := 0; i < maxRules; i++ {
+		if topRules[i].Count > maxCount {
+			maxCount = topRules[i].Count
+		}
+	}
+
+	barMaxLen := 20
+	if cardWidth > theme.TierStandard {
+		barMaxLen = 30
+	} else if cardWidth < 90 {
+		barMaxLen = 14
+	}
+
+	fillChar := '█'
+	emptyChar := '░'
+	bullet := "•"
+	if m.theme.ASCII {
+		fillChar = '#'
+		emptyChar = '-'
+		bullet = "*"
+	}
+
+	for i := 0; i < maxRules; i++ {
+		tr := topRules[i]
+		shortName := formatRuleShortName(tr.RuleName)
+		if len(shortName) > 22 {
+			shortName = shortName[:19] + "..."
+		}
+
+		filledLen := int(float64(tr.Count) / float64(maxCount) * float64(barMaxLen))
+		if filledLen < 1 && tr.Count > 0 {
+			filledLen = 1
+		}
+		if filledLen > barMaxLen {
+			filledLen = barMaxLen
+		}
+		emptyLen := barMaxLen - filledLen
+
+		var barFilled string
+		switch tr.Severity {
+		case report.SeverityAlert:
+			barFilled = m.theme.StatValueAlert.Render(strings.Repeat(string(fillChar), filledLen))
+		case report.SeverityWarning:
+			barFilled = m.theme.StatValueWarn.Render(strings.Repeat(string(fillChar), filledLen))
+		case report.SeverityNotice:
+			barFilled = m.theme.StatValueNotice.Render(strings.Repeat(string(fillChar), filledLen))
+		default:
+			barFilled = m.theme.PillInfo.Render(strings.Repeat(string(fillChar), filledLen))
+		}
+		barEmpty := m.theme.FindingTimestamp.Render(strings.Repeat(string(emptyChar), emptyLen))
+
+		sb.WriteString(fmt.Sprintf("  %s %-22s %s%s %s\n",
+			m.theme.FindingTimestamp.Render(bullet),
+			shortName,
+			barFilled,
+			barEmpty,
+			m.theme.FindingTimestamp.Render(fmt.Sprintf("(%d)", tr.Count)),
+		))
+	}
+
+	if len(topRules) > maxRules {
+		remaining := len(topRules) - maxRules
+		sb.WriteString(fmt.Sprintf("    %s\n", m.theme.FindingTimestamp.Render(fmt.Sprintf("(+%d additional detection rules)", remaining))))
+	}
+
+	return sb.String()
 }

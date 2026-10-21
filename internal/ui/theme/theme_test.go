@@ -70,3 +70,24 @@ func TestTheme_ColorBadges(t *testing.T) {
 		}
 	}
 }
+
+func TestTheme_ASCII(t *testing.T) {
+	th := theme.NewTheme(false, true)
+	if !th.ASCII {
+		t.Fatal("expected theme to have ASCII=true")
+	}
+
+	if th.IconAlert() != "[!]" {
+		t.Errorf("expected [!], got %q", th.IconAlert())
+	}
+	if th.IconWarn() != "[*]" {
+		t.Errorf("expected [*], got %q", th.IconWarn())
+	}
+	if th.IconClean() != "[OK]" {
+		t.Errorf("expected [OK], got %q", th.IconClean())
+	}
+	if th.IconBolt() != "[YARA]" {
+		t.Errorf("expected [YARA], got %q", th.IconBolt())
+	}
+}
+

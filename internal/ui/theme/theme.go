@@ -18,7 +18,23 @@ const (
 	MarginMedium  = 2
 	MinTermWidth  = 72
 	MinTermHeight = 18
+
+	TierCompact  = 80  // < 80 cols: compact single-column layout
+	TierStandard = 110 // 80 - 110 cols: balanced standard layout
+	TierWide     = 140 // > 110 cols: wide multi-column layout
 )
+
+// ASCIIBorder defines standard 7-bit ASCII borders for serial consoles and minimal terminals.
+var ASCIIBorder = lipgloss.Border{
+	Top:         "-",
+	Bottom:      "-",
+	Left:        "|",
+	Right:       "|",
+	TopLeft:     "+",
+	TopRight:    "+",
+	BottomLeft:  "+",
+	BottomRight: "+",
+}
 
 // Palette definitions - Premium Executive Studio Palette (Apple Pro / Stripe / Linear luxury clarity)
 var (
@@ -43,6 +59,7 @@ var (
 // Theme encapsulates styling configurations respecting terminal capabilities and NO_COLOR.
 type Theme struct {
 	NoColor bool
+	ASCII   bool
 
 	// Layout and Card styles
 	AppContainer  lipgloss.Style
@@ -112,18 +129,26 @@ func DetectNoColor() bool {
 	return ok && val != ""
 }
 
-// NewTheme creates a Theme instance customized for color or monochrome terminals.
-func NewTheme(noColor bool) *Theme {
-	t := &Theme{NoColor: noColor}
+// NewTheme creates a Theme instance customized for color, monochrome, and ASCII terminals.
+func NewTheme(noColor bool, ascii ...bool) *Theme {
+	isASCII := len(ascii) > 0 && ascii[0]
+	t := &Theme{NoColor: noColor, ASCII: isASCII}
+
+	border := lipgloss.RoundedBorder()
+	thickBorder := lipgloss.ThickBorder()
+	if isASCII {
+		border = ASCIIBorder
+		thickBorder = ASCIIBorder
+	}
 
 	if noColor {
 		// Monochrome styles: no background/foreground color escapes
 		t.AppContainer = lipgloss.NewStyle().Padding(0, 1)
-		t.HeaderBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+		t.HeaderBox = lipgloss.NewStyle().Border(border).Padding(0, 1)
 		t.LogoText = lipgloss.NewStyle().Bold(true)
 		t.SubHeaderText = lipgloss.NewStyle()
-		t.CardBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
-		t.CardActive = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).Padding(0, 1)
+		t.CardBox = lipgloss.NewStyle().Border(border).Padding(0, 1)
+		t.CardActive = lipgloss.NewStyle().Border(thickBorder).Padding(0, 1)
 		t.StatusBar = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true, false, false, false)
 
 		t.FindingRowNormal = lipgloss.NewStyle()
@@ -133,21 +158,21 @@ func NewTheme(noColor bool) *Theme {
 		t.FindingPath = lipgloss.NewStyle()
 		t.FindingReason = lipgloss.NewStyle()
 
-		t.ModalBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2)
+		t.ModalBox = lipgloss.NewStyle().Border(border).Padding(1, 2)
 		t.ModalHeader = lipgloss.NewStyle().Bold(true)
 		t.ModalFieldKey = lipgloss.NewStyle().Bold(true)
 		t.ModalFieldVal = lipgloss.NewStyle()
 
-		t.VerdictClean = lipgloss.NewStyle().Bold(true).Border(lipgloss.RoundedBorder()).Padding(1, 2)
-		t.VerdictSuspicious = lipgloss.NewStyle().Bold(true).Border(lipgloss.RoundedBorder()).Padding(1, 2)
-		t.VerdictCompromised = lipgloss.NewStyle().Bold(true).Border(lipgloss.RoundedBorder()).Padding(1, 2)
+		t.VerdictClean = lipgloss.NewStyle().Bold(true).Border(border).Padding(1, 2)
+		t.VerdictSuspicious = lipgloss.NewStyle().Bold(true).Border(border).Padding(1, 2)
+		t.VerdictCompromised = lipgloss.NewStyle().Bold(true).Border(border).Padding(1, 2)
 
 		t.BadgeInfo = lipgloss.NewStyle().Bold(true)
 		t.BadgeNotice = lipgloss.NewStyle().Bold(true)
 		t.BadgeWarning = lipgloss.NewStyle().Bold(true)
 		t.BadgeAlert = lipgloss.NewStyle().Bold(true)
 
-		t.BrandBannerBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+		t.BrandBannerBox = lipgloss.NewStyle().Border(border).Padding(0, 1)
 		t.BrandTitle = lipgloss.NewStyle().Bold(true)
 		t.BrandTagline = lipgloss.NewStyle()
 		t.StatValueSafe = lipgloss.NewStyle().Bold(true)
@@ -179,7 +204,7 @@ func NewTheme(noColor bool) *Theme {
 		Padding(0, 1)
 
 	t.BrandBannerBox = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(ColorAccent).
 		Background(ColorSurface).
 		Padding(0, 1)
@@ -193,7 +218,7 @@ func NewTheme(noColor bool) *Theme {
 		Bold(true)
 
 	t.HeaderBox = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(ColorBorder).
 		Background(ColorSurface).
 		Padding(0, 1)
@@ -206,13 +231,13 @@ func NewTheme(noColor bool) *Theme {
 		Foreground(ColorTextMute)
 
 	t.CardBox = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(ColorBorder).
 		Background(ColorSurface).
 		Padding(0, 1)
 
 	t.CardActive = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(ColorBorderLit).
 		Background(ColorSurface).
 		Padding(0, 1)
@@ -244,7 +269,7 @@ func NewTheme(noColor bool) *Theme {
 		Foreground(ColorTextMute)
 
 	t.ModalBox = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(ColorAccent).
 		Background(ColorSurface).
 		Padding(1, 2)
@@ -262,7 +287,7 @@ func NewTheme(noColor bool) *Theme {
 
 	t.VerdictClean = lipgloss.NewStyle().
 		Bold(true).
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(ColorNotice).
 		Foreground(ColorNotice).
 		Background(lipgloss.Color("#064E3B")).
@@ -270,7 +295,7 @@ func NewTheme(noColor bool) *Theme {
 
 	t.VerdictSuspicious = lipgloss.NewStyle().
 		Bold(true).
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(ColorWarning).
 		Foreground(ColorWarning).
 		Background(lipgloss.Color("#451A03")).
@@ -278,7 +303,7 @@ func NewTheme(noColor bool) *Theme {
 
 	t.VerdictCompromised = lipgloss.NewStyle().
 		Bold(true).
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(ColorAlert).
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(lipgloss.Color("#7F1D1D")).
@@ -346,12 +371,12 @@ func NewTheme(noColor bool) *Theme {
 		Bold(true).
 		Foreground(ColorTextPrim).
 		Background(ColorAccent).
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(ColorBorderLit).
 		Padding(0, 2)
 
 	t.CommandPalette = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(ColorBorderLit).
 		Background(ColorSurface).
 		Padding(1, 2)
@@ -495,3 +520,92 @@ func (t *Theme) StatusPill(label string, active bool) string {
 func CleanANSI(s string) string {
 	return strings.ReplaceAll(s, "\x1b", "")
 }
+
+// IconAlert returns the severity alert icon, falling back to [!] in ASCII mode.
+func (t *Theme) IconAlert() string {
+	if t.ASCII {
+		return "[!]"
+	}
+	return "🚨"
+}
+
+// IconWarn returns the severity warning icon, falling back to [*] in ASCII mode.
+func (t *Theme) IconWarn() string {
+	if t.ASCII {
+		return "[*]"
+	}
+	return "⚠️"
+}
+
+// IconNotice returns the severity notice icon, falling back to [+] in ASCII mode.
+func (t *Theme) IconNotice() string {
+	if t.ASCII {
+		return "[+]"
+	}
+	return "🔍"
+}
+
+// IconInfo returns the severity info icon, falling back to [i] in ASCII mode.
+func (t *Theme) IconInfo() string {
+	if t.ASCII {
+		return "[i]"
+	}
+	return "ℹ️"
+}
+
+// IconClean returns the clean verdict icon, falling back to [OK] in ASCII mode.
+func (t *Theme) IconClean() string {
+	if t.ASCII {
+		return "[OK]"
+	}
+	return "🛡️"
+}
+
+// IconCheck returns the success checkmark icon, falling back to [+] in ASCII mode.
+func (t *Theme) IconCheck() string {
+	if t.ASCII {
+		return "[+]"
+	}
+	return "✓"
+}
+
+// IconCross returns the failure cross icon, falling back to [x] in ASCII mode.
+func (t *Theme) IconCross() string {
+	if t.ASCII {
+		return "[x]"
+	}
+	return "✕"
+}
+
+// IconSkip returns the skipped module icon, falling back to [-] in ASCII mode.
+func (t *Theme) IconSkip() string {
+	if t.ASCII {
+		return "[-]"
+	}
+	return "⊘"
+}
+
+// IconBolt returns the YARA/engine icon, falling back to [YARA] in ASCII mode.
+func (t *Theme) IconBolt() string {
+	if t.ASCII {
+		return "[YARA]"
+	}
+	return "⚡"
+}
+
+// IconFile returns the file inspected icon, falling back to [FILES] in ASCII mode.
+func (t *Theme) IconFile() string {
+	if t.ASCII {
+		return "[FILES]"
+	}
+	return "📁"
+}
+
+// IconTime returns the elapsed duration icon, falling back to [TIME] in ASCII mode.
+func (t *Theme) IconTime() string {
+	if t.ASCII {
+		return "[TIME]"
+	}
+	return "⏱"
+}
+

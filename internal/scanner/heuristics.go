@@ -547,12 +547,52 @@ func linkerHookMatch(data []byte) bool {
 	return false
 }
 
+// isScriptOrTextCandidate checks if the file has characteristics of an interpretable script,
+// configuration file, or text payload rather than a binary asset (image, media, archive, database, compiled binary).
+func isScriptOrTextCandidate(path string, data []byte) bool {
+	if len(data) == 0 || IsELF(data) || bytes.HasPrefix(data, []byte("!<arch>\n")) {
+		return false
+	}
+
+	// Always inspect files with shebang
+	if len(data) >= 2 && data[0] == '#' && data[1] == '!' {
+		return true
+	}
+
+	// Fast rejection of known binary assets by extension
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tiff",
+		".woff", ".woff2", ".ttf", ".eot", ".otf",
+		".mp3", ".mp4", ".wav", ".ogg", ".avi", ".mkv", ".flac",
+		".zip", ".gz", ".tar", ".bz2", ".xz", ".7z", ".zst", ".deb", ".rpm", ".iso",
+		".bin", ".dat", ".pak", ".asar", ".so", ".a", ".o", ".pyc", ".pyo", ".pyd",
+		".db", ".sqlite", ".sqlite3", ".mdb", ".idx",
+		".pdf", ".doc", ".docx", ".xls", ".xlsx":
+		return false
+	}
+
+	// Binary detection: check the first 512 bytes for null bytes (standard POSIX / git heuristic)
+	checkLen := len(data)
+	if checkLen > 512 {
+		checkLen = 512
+	}
+	if bytes.IndexByte(data[:checkLen], 0) != -1 {
+		return false
+	}
+
+	return true
+}
+
 // CheckAllSuspiciousScriptContent evaluates file bytes for all matching malicious script patterns,
 // including interactive/encrypted reverse shells, netcat/socat listeners, procfs manipulation,
 // webshells, droppers, ransomware encryptors, and data exfiltration routines.
 func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageDB, cfg *config.Config) []*HeuristicMatch {
-	if len(data) == 0 {
+	if !isScriptOrTextCandidate(path, data) {
 		return nil
+	}
+	if len(data) > 2*1024*1024 {
+		data = data[:2*1024*1024]
 	}
 
 	cleaned := filepath.Clean(path)
@@ -579,22 +619,33 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 
 	// If documentation metadata outside volatile temp directories, suppress non-critical dropper/server/exfil text examples
 	if isDoc && !isInTemp {
-		if !reProcHiding.Match(data) && !reOpenSSLRevShell.Match(data) &&
-			!reRevShellInteractive.Match(data) && !reNetcatRevShell.Match(data) && !reSocatRevShell.Match(data) &&
-			!reRansomwareScript.Match(data) && !rePowerShellEncoded.Match(data) && !rePamExecHook.Match(data) {
+		hasCriticalSignal := (bytes.Contains(data, []byte("/proc/")) && reProcHiding.Match(data)) ||
+			((bytes.Contains(data, []byte("s_client")) || bytes.Contains(data, []byte("mkfifo"))) && reOpenSSLRevShell.Match(data)) ||
+			((bytes.Contains(data, []byte("/dev/tcp")) || bytes.Contains(data, []byte("/dev/udp"))) && reRevShellInteractive.Match(data)) ||
+			((bytes.Contains(data, []byte("nc")) || bytes.Contains(data, []byte("netcat")) || bytes.Contains(data, []byte("ncat"))) && reNetcatRevShell.Match(data)) ||
+			(bytes.Contains(data, []byte("socat")) && reSocatRevShell.Match(data)) ||
+			((bytes.Contains(data, []byte("Fernet")) || bytes.Contains(data, []byte("fernet")) || bytes.Contains(data, []byte("Cipher")) || bytes.Contains(data, []byte("cipher")) || bytes.Contains(data, []byte("AES")) || bytes.Contains(data, []byte("ChaCha20"))) && reRansomwareScript.Match(data)) ||
+			((bytes.Contains(data, []byte("pwsh")) || bytes.Contains(data, []byte("powershell"))) && rePowerShellEncoded.Match(data)) ||
+			((bytes.Contains(data, []byte("pam_exec")) || bytes.Contains(data, []byte("pam_script"))) && rePamExecHook.Match(data))
+
+		if !hasCriticalSignal {
 			return nil
 		}
 	}
 
 	// If unit test file, mock server listeners are benign test fixtures
-	if isTest && reExfilServer.Match(data) && !reRevShellInteractive.Match(data) && !reRansomwareScript.Match(data) {
-		return nil
+	if isTest && (bytes.Contains(data, []byte("bind")) || bytes.Contains(data, []byte("listen"))) && reExfilServer.Match(data) {
+		hasRealThreat := ((bytes.Contains(data, []byte("/dev/tcp")) || bytes.Contains(data, []byte("/dev/udp"))) && reRevShellInteractive.Match(data)) ||
+			((bytes.Contains(data, []byte("Fernet")) || bytes.Contains(data, []byte("fernet")) || bytes.Contains(data, []byte("Cipher")) || bytes.Contains(data, []byte("cipher")) || bytes.Contains(data, []byte("AES")) || bytes.Contains(data, []byte("ChaCha20"))) && reRansomwareScript.Match(data))
+		if !hasRealThreat {
+			return nil
+		}
 	}
 
 	var matches []*HeuristicMatch
 
 	// 1. Process hiding via procfs mount manipulation
-	if reProcHiding.Match(data) {
+	if bytes.Contains(data, []byte("/proc/")) && reProcHiding.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Process_Hiding_Procfs",
 			Reason:   fmt.Sprintf("Stealth process hiding via procfs tmpfs/bind mount manipulation in %s", filepath.Base(cleaned)),
@@ -604,7 +655,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 2. Encrypted OpenSSL reverse shell
-	if reOpenSSLRevShell.Match(data) {
+	if (bytes.Contains(data, []byte("s_client")) || bytes.Contains(data, []byte("mkfifo"))) && reOpenSSLRevShell.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_OpenSSL_Reverse_Shell",
 			Reason:   fmt.Sprintf("Encrypted OpenSSL interactive reverse shell payload in %s", filepath.Base(cleaned)),
@@ -614,7 +665,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 3. Interactive bash/sh /dev/tcp or /dev/udp reverse shell
-	if reRevShellInteractive.Match(data) {
+	if (bytes.Contains(data, []byte("/dev/tcp")) || bytes.Contains(data, []byte("/dev/udp"))) && reRevShellInteractive.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Reverse_Shell_Interactive",
 			Reason:   fmt.Sprintf("Interactive reverse shell command payload (/dev/tcp redirection) in script %s", filepath.Base(cleaned)),
@@ -624,7 +675,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 4. Netcat reverse shell
-	if reNetcatRevShell.Match(data) {
+	if (bytes.Contains(data, []byte("nc")) || bytes.Contains(data, []byte("netcat")) || bytes.Contains(data, []byte("ncat"))) && reNetcatRevShell.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Netcat_Reverse_Shell",
 			Reason:   fmt.Sprintf("Netcat interactive reverse shell payload in script %s", filepath.Base(cleaned)),
@@ -634,7 +685,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 5. Socat reverse shell (including openssl-connect)
-	if reSocatRevShell.Match(data) {
+	if bytes.Contains(data, []byte("socat")) && reSocatRevShell.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Socat_Reverse_Shell",
 			Reason:   fmt.Sprintf("Socat interactive reverse shell payload in script %s", filepath.Base(cleaned)),
@@ -644,7 +695,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 6. Inline interpreter reverse shell (Python, Perl, PHP, Ruby, Lua, Node)
-	if reInlineScriptRev.Match(data) {
+	if (bytes.Contains(data, []byte("socket")) || bytes.Contains(data, []byte("Socket")) || bytes.Contains(data, []byte("tcp")) || bytes.Contains(data, []byte("fsockopen")) || bytes.Contains(data, []byte("pty")) || bytes.Contains(data, []byte("child_process"))) && reInlineScriptRev.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Reverse_Shell_Inline",
 			Reason:   fmt.Sprintf("Inline interpreter network reverse shell payload in script %s", filepath.Base(cleaned)),
@@ -654,7 +705,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 7. Generic PHP webshell / backdoor evaluation
-	if reWebshellGeneric.Match(data) {
+	if bytes.Contains(data, []byte("$_")) && reWebshellGeneric.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Webshell_PHP_Generic_Backdoor",
 			Reason:   fmt.Sprintf("Dynamic evaluation webshell backdoor payload in %s", filepath.Base(cleaned)),
@@ -664,7 +715,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 8. Webshell behavioral traits (login hash + eval, upload/file manager execution)
-	if reWebshellTraits.Match(data) {
+	if (bytes.Contains(data, []byte("password")) || bytes.Contains(data, []byte("pass")) || bytes.Contains(data, []byte("shell")) || bytes.Contains(data, []byte("b374k")) || bytes.Contains(data, []byte("wso")) || bytes.Contains(data, []byte("c99")) || bytes.Contains(data, []byte("r57")) || bytes.Contains(data, []byte("weevely")) || bytes.Contains(data, []byte("alfa")) || bytes.Contains(data, []byte("$_"))) && reWebshellTraits.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Webshell_Traits",
 			Reason:   fmt.Sprintf("Webshell behavioral traits and command interface in %s", filepath.Base(cleaned)),
@@ -674,7 +725,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 9. Download and execute dropper (curl/wget | sh)
-	if reDownloadAndExec.Match(data) {
+	if (bytes.Contains(data, []byte("curl")) || bytes.Contains(data, []byte("wget")) || bytes.Contains(data, []byte("fetch")) || bytes.Contains(data, []byte("aria2c"))) && reDownloadAndExec.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Download_And_Execute",
 			Reason:   fmt.Sprintf("Remote download-and-pipe execution payload (curl/wget | sh) in script %s", filepath.Base(cleaned)),
@@ -684,7 +735,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 10. Python / Script Ransomware Encryptor
-	if reRansomwareScript.Match(data) {
+	if (bytes.Contains(data, []byte("Fernet")) || bytes.Contains(data, []byte("fernet")) || bytes.Contains(data, []byte("Cipher")) || bytes.Contains(data, []byte("cipher")) || bytes.Contains(data, []byte("AES")) || bytes.Contains(data, []byte("ChaCha20"))) && reRansomwareScript.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Python_Ransomware_Encryptor",
 			Reason:   fmt.Sprintf("Automated file encryption and ransomware locker routine in script %s", filepath.Base(cleaned)),
@@ -694,7 +745,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 11. Data Exfiltration Stealer
-	if reDataExfiltration.Match(data) {
+	if (bytes.Contains(data, []byte("send")) || bytes.Contains(data, []byte("post")) || bytes.Contains(data, []byte("exfil")) || bytes.Contains(data, []byte("stealer")) || bytes.Contains(data, []byte("b64encode"))) && reDataExfiltration.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Data_Exfiltration_Stealer",
 			Reason:   fmt.Sprintf("Automated filesystem harvesting and network exfiltration routine in script %s", filepath.Base(cleaned)),
@@ -704,7 +755,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 12. C2 Data Exfiltration Collection Server
-	if reExfilServer.Match(data) {
+	if (bytes.Contains(data, []byte("bind")) || bytes.Contains(data, []byte("listen"))) && reExfilServer.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_C2_Exfiltration_Server",
 			Reason:   fmt.Sprintf("Command-and-control exfiltration listener and data collection server in script %s", filepath.Base(cleaned)),
@@ -714,7 +765,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 13. Encoded PowerShell command execution
-	if rePowerShellEncoded.Match(data) {
+	if (bytes.Contains(data, []byte("pwsh")) || bytes.Contains(data, []byte("powershell"))) && rePowerShellEncoded.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_PowerShell_Encoded_Execution",
 			Reason:   fmt.Sprintf("Encoded PowerShell payload execution (-EncodedCommand) in %s", filepath.Base(cleaned)),
@@ -724,7 +775,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 14. Pluggable Authentication Module (PAM) execution hook
-	if rePamExecHook.Match(data) {
+	if (bytes.Contains(data, []byte("pam_exec")) || bytes.Contains(data, []byte("pam_script"))) && rePamExecHook.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Persistence_PAM_Exec_Suspicious",
 			Reason:   fmt.Sprintf("Pluggable Authentication Module (PAM) execution hook targeting volatile/unprivileged path in %s", filepath.Base(cleaned)),
@@ -734,7 +785,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 15. Dynamic linker hijack — value-inspected (volatile/relative/missing library targets, ld.so preload/audit config)
-	if linkerHookMatch(data) {
+	if (bytes.Contains(data, []byte("LD_")) || bytes.Contains(data, []byte("ld.so"))) && linkerHookMatch(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Persistence_Linker_Audit_Hijack",
 			Reason:   fmt.Sprintf("Dynamic linker intercept hook referencing a volatile or relative library path, or ld.so preload/audit configuration, in %s", filepath.Base(cleaned)),
@@ -744,7 +795,7 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 	}
 
 	// 16. Automated cloud exfiltration tool
-	if reCloudExfilTool.Match(data) {
+	if (bytes.Contains(data, []byte("rclone")) || bytes.Contains(data, []byte("mega")) || bytes.Contains(data, []byte("s3")) || bytes.Contains(data, []byte("gsutil")) || bytes.Contains(data, []byte("gcloud")) || bytes.Contains(data, []byte("azcopy")) || bytes.Contains(data, []byte("s5cmd")) || bytes.Contains(data, []byte("transfer.sh")) || bytes.Contains(data, []byte("file.io")) || bytes.Contains(data, []byte("bashupload")) || bytes.Contains(data, []byte("catbox")) || bytes.Contains(data, []byte("0x0.st"))) && reCloudExfilTool.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Cloud_Exfiltration_Tool",
 			Reason:   fmt.Sprintf("Automated cloud exfiltration staging/transfer command in %s", filepath.Base(cleaned)),

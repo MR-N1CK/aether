@@ -73,3 +73,115 @@ func TestFuzzyHaystack_CrossFieldBoundary(t *testing.T) {
 		t.Error("expected path-field query to match with positive score")
 	}
 }
+
+func TestParseQueryFilter(t *testing.T) {
+	q := "sev:alert mod:persistence path:/etc/cron cron"
+	qf := ParseQueryFilter(q)
+
+	if qf.Severity != "alert" {
+		t.Errorf("expected severity 'alert', got %q", qf.Severity)
+	}
+	if qf.Module != "persistence" {
+		t.Errorf("expected module 'persistence', got %q", qf.Module)
+	}
+	if qf.Path != "/etc/cron" {
+		t.Errorf("expected path '/etc/cron', got %q", qf.Path)
+	}
+	if qf.FreeText != "cron" {
+		t.Errorf("expected freeText 'cron', got %q", qf.FreeText)
+	}
+}
+
+func TestQueryFilter_Matches(t *testing.T) {
+	cases := []struct {
+		name     string
+		filter   string
+		path     string
+		reason   string
+		module   string
+		severity string
+		rule     string
+		want     bool
+	}{
+		{
+			name:     "Structured severity match",
+			filter:   "sev:alert",
+			path:     "/tmp/shell.sh",
+			reason:   "Reverse shell detected",
+			module:   "filesystem",
+			severity: "ALERT",
+			rule:     "Script_Reverse_Shell",
+			want:     true,
+		},
+		{
+			name:     "Structured severity mismatch",
+			filter:   "sev:alert",
+			path:     "/tmp/file.txt",
+			reason:   "World writable",
+			module:   "filesystem",
+			severity: "WARNING",
+			rule:     "World_Writable",
+			want:     false,
+		},
+		{
+			name:     "Compound sev and module match",
+			filter:   "sev:warning mod:process",
+			path:     "/proc/1234/exe",
+			reason:   "Deleted executable running",
+			module:   "process",
+			severity: "WARNING",
+			rule:     "Process_Deleted_Binary",
+			want:     true,
+		},
+		{
+			name:     "Compound sev and module mismatch",
+			filter:   "sev:warning mod:persistence",
+			path:     "/proc/1234/exe",
+			reason:   "Deleted executable running",
+			module:   "process",
+			severity: "WARNING",
+			rule:     "Process_Deleted_Binary",
+			want:     false,
+		},
+		{
+			name:     "Path filter match",
+			filter:   "path:/etc",
+			path:     "/etc/cron.d/job",
+			reason:   "Suspicious cron job",
+			module:   "persistence",
+			severity: "ALERT",
+			rule:     "Persistence_Cron",
+			want:     true,
+		},
+		{
+			name:     "Combined structured filter with free text",
+			filter:   "sev:alert mod:filesystem netcat",
+			path:     "/tmp/implant.sh",
+			reason:   "Interactive netcat reverse shell",
+			module:   "filesystem",
+			severity: "ALERT",
+			rule:     "Script_Netcat_Reverse_Shell",
+			want:     true,
+		},
+		{
+			name:     "Combined structured filter with non-matching free text",
+			filter:   "sev:alert mod:filesystem ransom",
+			path:     "/tmp/implant.sh",
+			reason:   "Interactive netcat reverse shell",
+			module:   "filesystem",
+			severity: "ALERT",
+			rule:     "Script_Netcat_Reverse_Shell",
+			want:     false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			qf := ParseQueryFilter(tc.filter)
+			got := qf.Matches(tc.path, tc.reason, tc.module, tc.severity, tc.rule)
+			if got != tc.want {
+				t.Errorf("filter %q on finding got %v, want %v", tc.filter, got, tc.want)
+			}
+		})
+	}
+}

@@ -653,8 +653,9 @@ func (m *Model) recomputeVisible() {
 	if m.filterQuery == "" {
 		visible = append(visible, m.findings...)
 	} else {
+		qf := ParseQueryFilter(m.filterQuery)
 		for _, f := range m.findings {
-			if _, ok := fuzzyScore(fuzzyHaystack(f.Path, f.Reason, f.Module, string(f.Severity), f.RuleName), m.filterQuery); ok {
+			if qf.Matches(f.Path, f.Reason, f.Module, string(f.Severity), f.RuleName) {
 				visible = append(visible, f)
 			}
 		}

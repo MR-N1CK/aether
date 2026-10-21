@@ -232,8 +232,8 @@ func (m Model) renderDashboard() string {
 	if m.isFiltering {
 		footerText = fmt.Sprintf("Search Filter: %s█  (Press [Enter] to apply, [Esc] to cancel)", m.filterQuery)
 	} else if m.filterQuery != "" {
-		footerText = fmt.Sprintf("Filter: %q (%s Clear)   %s Nav   %s Dossier   %s Yank Cmd",
-			m.filterQuery,
+		footerText = fmt.Sprintf("Filter: %s (%s Clear)   %s Nav   %s Dossier   %s Yank Cmd",
+			m.formatFilterSummary(),
 			m.theme.KeyHint.Render("[Esc]"),
 			m.theme.KeyHint.Render("[j/k]"),
 			m.theme.KeyHint.Render("[Enter]"),
@@ -1191,8 +1191,8 @@ func (m Model) renderFinished() string {
 	if m.isFiltering {
 		footerText = fmt.Sprintf("Search Filter: %s█  (Press [Enter] to apply, [Esc] to cancel)", m.filterQuery)
 	} else if m.filterQuery != "" {
-		footerText = fmt.Sprintf("Filter: %q (%s Clear)   %s Nav   %s Dossier   %s Yank Cmd",
-			m.filterQuery,
+		footerText = fmt.Sprintf("Filter: %s (%s Clear)   %s Nav   %s Dossier   %s Yank Cmd",
+			m.formatFilterSummary(),
 			m.theme.KeyHint.Render("[Esc]"),
 			m.theme.KeyHint.Render("[j/k]"),
 			m.theme.KeyHint.Render("[Enter]"),
@@ -1202,6 +1202,31 @@ func (m Model) renderFinished() string {
 	b.WriteString(m.theme.StatusBar.Width(cardWidth).Render(footerText))
 
 	return m.theme.AppContainer.Render(b.String())
+}
+
+// formatFilterSummary formats active filter chips and search terms for status bar presentation.
+func (m Model) formatFilterSummary() string {
+	qf := ParseQueryFilter(m.filterQuery)
+	var parts []string
+	if qf.Severity != "" {
+		parts = append(parts, m.theme.StatValueAlert.Render("[SEV:"+strings.ToUpper(qf.Severity)+"]"))
+	}
+	if qf.Module != "" {
+		parts = append(parts, m.theme.StatValueWarn.Render("[MOD:"+strings.ToUpper(qf.Module)+"]"))
+	}
+	if qf.Path != "" {
+		parts = append(parts, m.theme.StatValueNotice.Render("[PATH:"+qf.Path+"]"))
+	}
+	if qf.Rule != "" {
+		parts = append(parts, m.theme.StatValueNotice.Render("[RULE:"+qf.Rule+"]"))
+	}
+	if qf.FreeText != "" {
+		parts = append(parts, fmt.Sprintf("%q", qf.FreeText))
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("%q", m.filterQuery)
+	}
+	return strings.Join(parts, " ")
 }
 
 func (m Model) renderProgressBar(width int) string {

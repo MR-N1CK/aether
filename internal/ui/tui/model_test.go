@@ -171,6 +171,46 @@ func TestRecomputeVisible_FilterClampsSelection(t *testing.T) {
 	}
 }
 
+func TestRecomputeVisible_StructuredGrammar(t *testing.T) {
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	f1 := mkF(report.SeverityAlert, 90, "/tmp/revshell.sh", "Shell_Rev", base)
+	f1.Module = "filesystem"
+	f2 := mkF(report.SeverityWarning, 50, "/etc/cron.d/stealth", "Persistence_Cron", base.Add(time.Second))
+	f2.Module = "persistence"
+	f3 := mkF(report.SeverityWarning, 45, "/proc/999/exe", "Process_Masquerade", base.Add(2*time.Second))
+	f3.Module = "process"
+
+	m := newTestModel([]report.Finding{f1, f2, f3})
+
+	// Test sev:alert
+	m.filterQuery = "sev:alert"
+	m.recomputeVisible()
+	if len(m.visible) != 1 || m.visible[0].Path != "/tmp/revshell.sh" {
+		t.Errorf("expected 1 alert finding, got %+v", m.visible)
+	}
+
+	// Test mod:persistence
+	m.filterQuery = "mod:persistence"
+	m.recomputeVisible()
+	if len(m.visible) != 1 || m.visible[0].Path != "/etc/cron.d/stealth" {
+		t.Errorf("expected 1 persistence finding, got %+v", m.visible)
+	}
+
+	// Test compound sev:warning mod:process
+	m.filterQuery = "sev:warning mod:process"
+	m.recomputeVisible()
+	if len(m.visible) != 1 || m.visible[0].Path != "/proc/999/exe" {
+		t.Errorf("expected 1 process warning finding, got %+v", m.visible)
+	}
+
+	// Test path filter
+	m.filterQuery = "path:/etc"
+	m.recomputeVisible()
+	if len(m.visible) != 1 || m.visible[0].RuleName != "Persistence_Cron" {
+		t.Errorf("expected 1 cron finding matching path:/etc, got %+v", m.visible)
+	}
+}
+
 func TestGuardedQuit_ConfirmFlow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

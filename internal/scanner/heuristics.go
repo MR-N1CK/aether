@@ -548,8 +548,68 @@ func linkerHookMatch(data []byte) bool {
 	return false
 }
 
+// hasScriptAttackToken performs a fast, SIMD-accelerated byte-token prefilter
+// to identify attacker script primitives within non-ELF assets before extension or NUL rejection.
+func hasScriptAttackToken(data []byte) bool {
+	// Common interactive & network primitives
+	if bytes.Contains(data, []byte("/dev/tcp")) ||
+		bytes.Contains(data, []byte("/dev/udp")) ||
+		bytes.Contains(data, []byte("s_client")) ||
+		bytes.Contains(data, []byte("mkfifo")) ||
+		bytes.Contains(data, []byte("/bin/sh")) ||
+		bytes.Contains(data, []byte("/bin/bash")) ||
+		bytes.Contains(data, []byte("socat")) ||
+		bytes.Contains(data, []byte("netcat")) ||
+		bytes.Contains(data, []byte("ncat")) ||
+		bytes.Contains(data, []byte("nc ")) ||
+		bytes.Contains(data, []byte("nc -")) {
+		return true
+	}
+
+	// Dynamic evaluation & webshell backdoors
+	if bytes.Contains(data, []byte("$_POST")) ||
+		bytes.Contains(data, []byte("$_GET")) ||
+		bytes.Contains(data, []byte("$_REQUEST")) ||
+		bytes.Contains(data, []byte("eval(")) ||
+		bytes.Contains(data, []byte("assert(")) ||
+		bytes.Contains(data, []byte("base64_decode")) ||
+		bytes.Contains(data, []byte("shell_exec")) ||
+		bytes.Contains(data, []byte("passthru")) ||
+		bytes.Contains(data, []byte("fsockopen")) ||
+		bytes.Contains(data, []byte("child_process")) ||
+		bytes.Contains(data, []byte("b374k")) ||
+		bytes.Contains(data, []byte("wso")) ||
+		bytes.Contains(data, []byte("c99")) ||
+		bytes.Contains(data, []byte("r57")) ||
+		bytes.Contains(data, []byte("weevely")) {
+		return true
+	}
+
+	// Stealth droppers, lockers, hooks & exfil
+	if bytes.Contains(data, []byte("curl ")) ||
+		bytes.Contains(data, []byte("wget ")) ||
+		bytes.Contains(data, []byte("Fernet")) ||
+		bytes.Contains(data, []byte("fernet")) ||
+		bytes.Contains(data, []byte("ChaCha20")) ||
+		bytes.Contains(data, []byte("pam_exec")) ||
+		bytes.Contains(data, []byte("pam_script")) ||
+		bytes.Contains(data, []byte("LD_PRELOAD")) ||
+		bytes.Contains(data, []byte("LD_AUDIT")) ||
+		bytes.Contains(data, []byte("powershell")) ||
+		bytes.Contains(data, []byte("pwsh")) ||
+		bytes.Contains(data, []byte("rclone")) ||
+		bytes.Contains(data, []byte("transfer.sh")) ||
+		bytes.Contains(data, []byte("/proc/")) {
+		return true
+	}
+
+	return false
+}
+
 // isScriptOrTextCandidate checks if the file has characteristics of an interpretable script,
 // configuration file, or text payload rather than a binary asset (image, media, archive, database, compiled binary).
+// Files with binary extensions (.bin, .dat, .so, .pyc) or early NUL bytes are NOT skipped
+// if they contain active script attack primitives (closing shebang-less attacker bypasses).
 func isScriptOrTextCandidate(path string, data []byte) bool {
 	if len(data) == 0 || IsELF(data) || bytes.HasPrefix(data, []byte("!<arch>\n")) {
 		return false
@@ -560,7 +620,13 @@ func isScriptOrTextCandidate(path string, data []byte) bool {
 		return true
 	}
 
-	// Fast rejection of known binary assets by extension
+	// If the file contains active script attack primitives, inspect regardless
+	// of extension or early NUL bytes (e.g. bash payload.bin, perl x.dat, PHP includes in /var/www).
+	if hasScriptAttackToken(data) {
+		return true
+	}
+
+	// Fast rejection of known binary assets by extension when no attack tokens exist
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tiff",

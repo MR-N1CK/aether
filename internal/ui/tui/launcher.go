@@ -66,12 +66,18 @@ type LauncherModel struct {
 	hostname    string
 	cpuCores    int
 	osArch      string
+	version     string
 }
 
-// NewLauncherModel creates an initialized LauncherModel.
-func NewLauncherModel(th *theme.Theme) LauncherModel {
+// NewLauncherModel creates an initialized LauncherModel with optional version string.
+func NewLauncherModel(th *theme.Theme, ver ...string) LauncherModel {
 	if th == nil {
 		th = theme.NewTheme(theme.DetectNoColor())
+	}
+
+	v := "1.0.0"
+	if len(ver) > 0 && ver[0] != "" {
+		v = ver[0]
 	}
 
 	ti := textinput.New()
@@ -167,6 +173,7 @@ func NewLauncherModel(th *theme.Theme) LauncherModel {
 		hostname:    host,
 		cpuCores:    runtime.NumCPU(),
 		osArch:      fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+		version:     v,
 	}
 }
 
@@ -306,10 +313,11 @@ func (m LauncherModel) View() string {
 		wBox = 68
 	}
 
+	vStr := "v" + strings.TrimPrefix(m.version, "v")
 	headerTop := fmt.Sprintf("%s %s %s",
 		azureStyle.Render("AETHER"),
 		indigoStyle.Render("COMMAND CENTER"),
-		subStyle.Render("v1.0.0"),
+		subStyle.Render(vStr),
 	)
 	headerBadges := fmt.Sprintf("%s  %s", privBadge, yaraBadge)
 
@@ -415,8 +423,8 @@ func (m LauncherModel) View() string {
 }
 
 // RunInteractiveLauncher executes the Bubble Tea interactive Command Center.
-func RunInteractiveLauncher(th *theme.Theme) (LauncherResult, error) {
-	m := NewLauncherModel(th)
+func RunInteractiveLauncher(th *theme.Theme, ver ...string) (LauncherResult, error) {
+	m := NewLauncherModel(th, ver...)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {

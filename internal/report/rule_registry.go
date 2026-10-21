@@ -1,6 +1,7 @@
 package report
 
 import (
+	"strings"
 	"sync"
 )
 
@@ -39,6 +40,9 @@ func RegisterRuleMeta(name string, meta RuleMeta) {
 	if meta.Confidence == "" {
 		meta.Confidence = ConfidenceMedium
 	}
+	if meta.EvidenceStrength == "" {
+		meta.EvidenceStrength = deriveRuleEvidenceStrength(name, meta.Confidence)
+	}
 	ruleRegistryMu.Lock()
 	defer ruleRegistryMu.Unlock()
 	if _, dup := ruleRegistry[name]; dup {
@@ -75,14 +79,44 @@ func RegisteredRuleNames() []string {
 	return names
 }
 
+// deriveRuleEvidenceStrength determines the canonical EvidenceStrength for a rule.
+func deriveRuleEvidenceStrength(name string, conf Confidence) EvidenceStrength {
+	nl := strings.ToLower(name)
+	if strings.Contains(nl, "reverse_shell") || strings.Contains(nl, "revshell") ||
+		strings.Contains(nl, "netcat") || strings.Contains(nl, "socat") ||
+		strings.Contains(nl, "openssl") ||
+		strings.Contains(nl, "ransomware") || strings.Contains(nl, "ransom") || strings.Contains(nl, "locker") ||
+		strings.Contains(nl, "rootkit") ||
+		strings.Contains(nl, "proc_hiding") || strings.Contains(nl, "process_hiding") ||
+		strings.Contains(nl, "redteam") || strings.Contains(nl, "ghostshell") || strings.Contains(nl, "kali_master") ||
+		strings.Contains(nl, "webshell") || strings.Contains(nl, "trojan") || strings.Contains(nl, "trojaned") ||
+		strings.Contains(nl, "uid0") || strings.Contains(nl, "extra_uid0") ||
+		strings.Contains(nl, "memfd") || strings.Contains(nl, "fileless") ||
+		strings.Contains(nl, "ioc") || strings.Contains(nl, "symlink_escape") ||
+		strings.Contains(nl, "hidden_lkm") {
+		return StrengthDirect
+	}
+
+	if strings.Contains(nl, "multi_vector") || strings.Contains(nl, "mixed") {
+		return StrengthCorroborated
+	}
+
+	return StrengthContextual
+}
+
 // mustRegister is the package-internal registration helper used by init().
-func mustRegister(name, title, why string, mitre []MITREMapping, remediation []string, conf Confidence) {
+func mustRegister(name, title, why string, mitre []MITREMapping, remediation []string, conf Confidence, strength ...EvidenceStrength) {
+	st := deriveRuleEvidenceStrength(name, conf)
+	if len(strength) > 0 && strength[0] != "" {
+		st = strength[0]
+	}
 	RegisterRuleMeta(name, RuleMeta{
-		Title:       title,
-		Why:         why,
-		MITRE:       mitre,
-		Remediation: remediation,
-		Confidence:  confidenceValue(conf),
+		Title:            title,
+		Why:              why,
+		MITRE:            mitre,
+		Remediation:      remediation,
+		Confidence:       confidenceValue(conf),
+		EvidenceStrength: st,
 	})
 }
 

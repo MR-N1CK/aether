@@ -103,6 +103,23 @@ func TestRegisteredRuleNames_Unique(t *testing.T) {
 	}
 }
 
+func TestAllRegisteredRulesHaveEvidenceStrength(t *testing.T) {
+	names := report.RegisteredRuleNames()
+	if len(names) == 0 {
+		t.Fatal("expected registered rules, got 0")
+	}
+	for _, n := range names {
+		meta, ok := report.LookupRuleMeta(n)
+		if !ok {
+			t.Errorf("rule %q not found in registry", n)
+			continue
+		}
+		if meta.EvidenceStrength == "" {
+			t.Errorf("rule %q has empty EvidenceStrength", n)
+		}
+	}
+}
+
 func TestPopulateFindingDetails_UsesRegistry(t *testing.T) {
 	// A registered rule must get its Title from the registry.
 	f := report.NewFinding("process", report.SeverityAlert, "/proc/1337", "reason", "Process_Hidden_PID")

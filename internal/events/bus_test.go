@@ -174,6 +174,19 @@ func TestComputeVerdict(t *testing.T) {
 	if v, reason := events.ComputeVerdict([]report.Finding{structuredFinding}, 1, 0, 0, 0); v != events.VerdictCompromised {
 		t.Errorf("expected COMPROMISED for structured StrengthDirect alert regardless of rule name, got %s (reason: %s)", v, reason)
 	}
+
+	// Alert with registered rule having StrengthDirect in registry without substring matching
+	directRegisteredFinding := report.NewFinding("test", report.SeverityAlert, "/path", "ransomware locker", "Script_Python_Ransomware_Encryptor")
+	if v, reason := events.ComputeVerdict([]report.Finding{directRegisteredFinding}, 1, 0, 0, 0); v != events.VerdictCompromised {
+		t.Errorf("expected COMPROMISED for registered StrengthDirect rule, got %s (reason: %s)", v, reason)
+	}
+
+	// Alert with registered rule that has StrengthContextual -> stays SUSPICIOUS
+	contextualFinding := report.NewFinding("test", report.SeverityAlert, "/etc/config", "world writable config", "Heuristic_World_Writable_In_Etc")
+	contextualFinding.EvidenceStrength = report.StrengthContextual
+	if v, reason := events.ComputeVerdict([]report.Finding{contextualFinding}, 1, 0, 0, 0); v != events.VerdictSuspicious {
+		t.Errorf("expected SUSPICIOUS for contextual alert, got %s (reason: %s)", v, reason)
+	}
 }
 
 func TestCoverageStats_DenominatorAndPercentage(t *testing.T) {

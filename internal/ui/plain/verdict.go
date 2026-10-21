@@ -112,6 +112,15 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 		}
 		row("Findings", fmt.Sprintf("%d Alerts, %d Warnings, %d Notices, %d Infos", ev.Alerts, ev.Warnings, ev.Notices, ev.Infos))
 		row("Risk Meter", fmt.Sprintf("[%s%s] %d/100", barFilled, barEmpty, threatScore))
+		engineText := "Pure-Go Native Heuristics Only (YARA-X Disabled / CGO-Free)"
+		if ev.YARAActive {
+			rulesCount := 0
+			if ev.YARACoverage != nil {
+				rulesCount = ev.YARACoverage.RulesLoaded
+			}
+			engineText = fmt.Sprintf("YARA-X ACTIVE (%d Rules Loaded)", rulesCount)
+		}
+		row("Engine", engineText)
 		row("Duration", fmt.Sprintf("%s  Coverage: %d/%d (%.1f%%)", ev.TotalDuration.Round(time.Millisecond), ev.Coverage.FilesScanned, ev.Coverage.TotalEligible(), ev.Coverage.CoveragePercentage()))
 		fmt.Fprintf(w, "+%s+\n", hrFine)
 		timingTitle := " Subsystem Timing Breakdown "
@@ -196,6 +205,15 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 	}
 	lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render("Risk Meter:"), fmt.Sprintf("[%s] %d%%", meterStyled, threatScore)))
 	lines = append(lines, fmt.Sprintf("%s %s %s %s %s", keyStyle.Render("Breakdown:"), badgeAlert, badgeWarn, badgeNotice, badgeInfo))
+	engineText := "Pure-Go Native Heuristics Only (YARA-X Disabled / CGO-Free)"
+	if ev.YARAActive {
+		rulesCount := 0
+		if ev.YARACoverage != nil {
+			rulesCount = ev.YARACoverage.RulesLoaded
+		}
+		engineText = fmt.Sprintf("YARA-X ACTIVE (%d Rules Loaded)", rulesCount)
+	}
+	verdictRow("Engine:", engineText, valStyle.Render)
 	lines = append(lines, fmt.Sprintf("%s %s (%d files inspected, %d skipped)",
 		keyStyle.Render("Telemetry:"),
 		valStyle.Render(ev.TotalDuration.Round(time.Millisecond).String()),

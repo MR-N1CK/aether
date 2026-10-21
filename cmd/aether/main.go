@@ -368,7 +368,7 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 func runInteractiveLauncher(cmd *cobra.Command, gFlags *globalFlags, sFlags *scanCmdFlags) error {
 	th := theme.NewTheme(gFlags.noColor || theme.DetectNoColor(), gFlags.ascii)
 
-	res, err := tui.RunInteractiveLauncher(th)
+	res, err := tui.RunInteractiveLauncher(th, version)
 	if err != nil {
 		return err
 	}

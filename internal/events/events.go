@@ -375,6 +375,8 @@ func ComputeVerdict(findings []report.Finding, alerts, warnings, notices, notice
 			isHC := false
 			if f.EvidenceStrength == report.StrengthDirect || (f.EvidenceRecord != nil && f.EvidenceRecord.EvidenceStrength == report.StrengthDirect) {
 				isHC = true
+			} else if meta, ok := report.LookupRuleMeta(f.RuleName); ok && meta.EvidenceStrength == report.StrengthDirect {
+				isHC = true
 			} else if hc, ok := f.Metadata["high_confidence"].(bool); ok && hc {
 				isHC = true
 			} else if conf, ok := f.Metadata["confidence"].(string); ok && strings.EqualFold(conf, "high") {
@@ -382,18 +384,6 @@ func ComputeVerdict(findings []report.Finding, alerts, warnings, notices, notice
 			} else if f.Confidence == report.ConfidenceHigh {
 				isHC = true
 			} else if ioc, ok := f.Metadata["is_ioc_match"].(bool); ok && ioc {
-				isHC = true
-			} else if strings.Contains(f.RuleName, "IOC") ||
-				strings.Contains(f.RuleName, "Reverse_Shell") ||
-				strings.Contains(f.RuleName, "RevShell") ||
-				strings.Contains(f.RuleName, "OpenSSL") ||
-				strings.Contains(f.RuleName, "Socat") ||
-				strings.Contains(f.RuleName, "Netcat") ||
-				strings.Contains(f.RuleName, "RedTeam") ||
-				strings.Contains(f.RuleName, "GhostShell") ||
-				strings.Contains(f.RuleName, "Webshell") ||
-				strings.Contains(f.RuleName, "Symlink_Escape") ||
-				strings.Contains(f.RuleName, "LDPRELOAD") {
 				isHC = true
 			} else if strongCount, ok := f.Metadata["distinct_strong_classes"].(int); ok && strongCount >= 2 {
 				isHC = true

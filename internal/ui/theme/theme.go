@@ -25,22 +25,23 @@ const (
 	TierUltraWide = 200 // > 160 cols: high-density flight deck
 )
 
-// Geometric Unicode architectural glyphs
+// Geometric Unicode architectural glyphs (Zero-Emoji precision standard)
 const (
 	GlyphBrand       = "◈"
-	GlyphSelected    = "◆"
-	GlyphUnselected  = "◇"
-	GlyphRunning     = "⚡"
+	GlyphSelected    = "▶"
+	GlyphUnselected  = " "
+	GlyphRunning     = "◈"
 	GlyphCheck       = "✔"
 	GlyphCross       = "✖"
-	GlyphAlert       = "🚨"
-	GlyphWarn        = "⚠️"
-	GlyphClean       = "🛡️"
+	GlyphAlert       = "▲"
+	GlyphWarn        = "◆"
+	GlyphNotice      = "◇"
+	GlyphClean       = "■"
 	GlyphKernel      = "⏣"
-	GlyphNetwork     = "🌐"
+	GlyphNetwork     = "⬡"
 	GlyphProcess     = "⚙"
 	GlyphPersistence = "⚓"
-	GlyphFilesystem  = "📁"
+	GlyphFilesystem  = "▤"
 )
 
 // SubBlocks defines 1/8th fractional vertical block runes for smooth gradient rendering.
@@ -58,24 +59,24 @@ var ASCIIBorder = lipgloss.Border{
 	BottomRight: "+",
 }
 
-// Palette definitions - Premium Executive Studio Palette (Apple Pro / Stripe / Linear luxury clarity)
+// Palette definitions - Master-tier Obsidian Studio Palette
 var (
-	ColorObsidian  = lipgloss.Color("#0B0F17") // Deep void black
-	ColorSurface   = lipgloss.Color("#161B22") // Card background
-	ColorBorder    = lipgloss.Color("#334155") // Sleek titanium slate border
-	ColorBorderLit = lipgloss.Color("#3B82F6") // Focused azure border
-	ColorTextPrim  = lipgloss.Color("#FFFFFF") // Crisp platinum white text
-	ColorTextSec   = lipgloss.Color("#F1F5F9") // Soft silver text
-	ColorTextMute  = lipgloss.Color("#94A3B8") // Refined slate gray
-	ColorAccent    = lipgloss.Color("#3B82F6") // Luminous Royal Azure
+	ColorObsidian  = lipgloss.Color("#080B11") // Deep void obsidian
+	ColorSurface   = lipgloss.Color("#0F141C") // Surface card background
+	ColorBorder    = lipgloss.Color("#1E293B") // Subtle slate hairline border
+	ColorBorderLit = lipgloss.Color("#38BDF8") // Focused sky cyan border
+	ColorTextPrim  = lipgloss.Color("#F8FAFC") // Crisp platinum white text
+	ColorTextSec   = lipgloss.Color("#E2E8F0") // Soft titanium slate text
+	ColorTextMute  = lipgloss.Color("#64748B") // Refined deep slate gray
+	ColorAccent    = lipgloss.Color("#0284C7") // Deep Sky Cyan / Steel
 	ColorIndigo    = lipgloss.Color("#6366F1") // Electric Indigo
-	ColorCyan      = lipgloss.Color("#0EA5E9") // Bright Sapphire Sky
+	ColorCyan      = lipgloss.Color("#38BDF8") // Telemetry cyan
 
-	// Executive severity colors - vibrant, distinct, harmonious
-	ColorInfo    = lipgloss.Color("#0EA5E9") // Sapphire Blue
-	ColorNotice  = lipgloss.Color("#10B981") // Emerald Mint
-	ColorWarning = lipgloss.Color("#F59E0B") // Honey Amber
-	ColorAlert   = lipgloss.Color("#EF4444") // Coral Crimson
+	// Executive severity colors - restrained, distinct, high-contrast
+	ColorInfo    = lipgloss.Color("#38BDF8") // Sky Cyan
+	ColorNotice  = lipgloss.Color("#34D399") // Crisp Mint Emerald
+	ColorWarning = lipgloss.Color("#FBBF24") // Warm Amber
+	ColorAlert   = lipgloss.Color("#F43F5E") // Vivid Rose Crimson
 )
 
 // Theme encapsulates styling configurations respecting terminal capabilities and NO_COLOR.
@@ -253,7 +254,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 
 	t.BrandBannerBox = lipgloss.NewStyle().
 		Border(border).
-		BorderForeground(ColorAccent).
+		BorderForeground(ColorBorder).
 		Background(ColorSurface).
 		Padding(0, 1)
 
@@ -300,7 +301,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 
 	t.FindingRowSelected = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#1E3A8A")).
+		Background(lipgloss.Color("#1E293B")).
 		Bold(true)
 
 	t.FindingTimestamp = lipgloss.NewStyle().
@@ -471,15 +472,11 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 		Foreground(lipgloss.Color("#334155"))
 
 	t.FlightDeckLeftPane = lipgloss.NewStyle().
-		Border(border).
+		Border(lipgloss.NormalBorder(), false, true, false, false).
 		BorderForeground(ColorBorder).
-		Background(ColorSurface).
 		Padding(0, 1)
 
 	t.FlightDeckRightPane = lipgloss.NewStyle().
-		Border(border).
-		BorderForeground(ColorBorder).
-		Background(ColorSurface).
 		Padding(0, 1)
 
 	t.InspectorBox = lipgloss.NewStyle().
@@ -684,7 +681,7 @@ func (t *Theme) IconAlert() string {
 	if t.ASCII {
 		return "[!]"
 	}
-	return "🚨"
+	return "▲"
 }
 
 // IconWarn returns the severity warning icon, falling back to [*] in ASCII mode.
@@ -692,7 +689,7 @@ func (t *Theme) IconWarn() string {
 	if t.ASCII {
 		return "[*]"
 	}
-	return "⚠️"
+	return "◆"
 }
 
 // IconNotice returns the severity notice icon, falling back to [+] in ASCII mode.
@@ -700,7 +697,7 @@ func (t *Theme) IconNotice() string {
 	if t.ASCII {
 		return "[+]"
 	}
-	return "🔍"
+	return "◇"
 }
 
 // IconInfo returns the severity info icon, falling back to [i] in ASCII mode.
@@ -708,7 +705,7 @@ func (t *Theme) IconInfo() string {
 	if t.ASCII {
 		return "[i]"
 	}
-	return "ℹ️"
+	return "▫"
 }
 
 // IconClean returns the clean verdict icon, falling back to [OK] in ASCII mode.
@@ -716,7 +713,7 @@ func (t *Theme) IconClean() string {
 	if t.ASCII {
 		return "[OK]"
 	}
-	return "🛡️"
+	return "■"
 }
 
 // IconCheck returns the success checkmark icon, falling back to [+] in ASCII mode.
@@ -724,7 +721,7 @@ func (t *Theme) IconCheck() string {
 	if t.ASCII {
 		return "[+]"
 	}
-	return "✓"
+	return "✔"
 }
 
 // IconCross returns the failure cross icon, falling back to [x] in ASCII mode.
@@ -732,7 +729,7 @@ func (t *Theme) IconCross() string {
 	if t.ASCII {
 		return "[x]"
 	}
-	return "✕"
+	return "✖"
 }
 
 // IconSkip returns the skipped module icon, falling back to [-] in ASCII mode.
@@ -748,7 +745,7 @@ func (t *Theme) IconBolt() string {
 	if t.ASCII {
 		return "[YARA]"
 	}
-	return "⚡"
+	return "◈"
 }
 
 // IconFile returns the file inspected icon, falling back to [FILES] in ASCII mode.
@@ -756,7 +753,7 @@ func (t *Theme) IconFile() string {
 	if t.ASCII {
 		return "[FILES]"
 	}
-	return "📁"
+	return "▤"
 }
 
 // IconTime returns the elapsed duration icon, falling back to [TIME] in ASCII mode.
@@ -764,6 +761,6 @@ func (t *Theme) IconTime() string {
 	if t.ASCII {
 		return "[TIME]"
 	}
-	return "⏱"
+	return "◷"
 }
 

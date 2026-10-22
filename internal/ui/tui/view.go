@@ -129,14 +129,10 @@ func (m Model) renderSplash() string {
 		sub := m.theme.BrandTagline.Render(tagline)
 		b.WriteString(sub + "\n\n")
 
-		// Hairline progress track
+		// High-precision fractional sub-block progress track
 		trackWidth := 46
-		filled := (m.splashFrame * trackWidth) / m.maxSplash
-		if filled > trackWidth {
-			filled = trackWidth
-		}
-		bar := lipgloss.NewStyle().Foreground(theme.ColorCyan).Render(strings.Repeat("━", filled)) +
-			lipgloss.NewStyle().Foreground(theme.ColorBorder).Render(strings.Repeat("─", trackWidth-filled))
+		ratio := float64(m.splashFrame) / float64(m.maxSplash)
+		bar := theme.RenderFractionalBar(trackWidth, ratio, lipgloss.NewStyle().Foreground(theme.ColorCyan), m.theme.FindingTimestamp, m.theme.ASCII)
 		b.WriteString(bar + "\n\n")
 
 		hint := m.theme.FindingTimestamp.Render("Press any key to enter command center...")
@@ -410,7 +406,7 @@ func (m Model) renderInspectorDock(sel *report.Finding, width int) string {
 	if sel == nil {
 		cleanMsg := fmt.Sprintf("%s SYSTEM BASELINE SECURE — No malicious implants or anomalies detected. Monitoring host integrity...", theme.GlyphClean)
 		if m.filterQuery != "" {
-			cleanMsg = fmt.Sprintf("🔍 Filter active: %s — No finding selected in filtered feed.", m.filterQuery)
+			cleanMsg = fmt.Sprintf("◈ Filter active: %s — No finding selected in filtered feed.", m.filterQuery)
 		}
 		b.WriteString(m.theme.InspectorTitle.Render(fmt.Sprintf("%s FORENSIC INSPECTOR DOCK", theme.GlyphBrand)) + "\n")
 		b.WriteString(m.theme.StatValueSafe.Render(cleanMsg))
@@ -701,7 +697,7 @@ func (m Model) renderExecutiveSummaryMatrix(width int, alerts, warnings, notices
 	donutBox := lipgloss.NewStyle().
 		Border(border).
 		BorderForeground(theme.ColorBorderLit).
-		Background(lipgloss.Color("#161B22")).
+		Background(theme.ColorSurface).
 		Padding(0, 1).
 		Align(lipgloss.Center).
 		Render(fmt.Sprintf("%s\n%s", m.theme.KeyHint.Render("DONUT"), donut))
@@ -714,21 +710,21 @@ func (m Model) renderExecutiveSummaryMatrix(width int, alerts, warnings, notices
 	maliciousBox := lipgloss.NewStyle().
 		Border(border).
 		BorderForeground(theme.ColorAlert).
-		Background(lipgloss.Color("#161B22")).
+		Background(theme.ColorSurface).
 		Padding(0, 1).
 		Width(colWidth)
 
 	suspiciousBox := lipgloss.NewStyle().
 		Border(border).
 		BorderForeground(theme.ColorWarning).
-		Background(lipgloss.Color("#161B22")).
+		Background(theme.ColorSurface).
 		Padding(0, 1).
 		Width(colWidth)
 
 	safeBox := lipgloss.NewStyle().
 		Border(border).
 		BorderForeground(theme.ColorNotice).
-		Background(lipgloss.Color("#161B22")).
+		Background(theme.ColorSurface).
 		Padding(0, 1).
 		Width(colWidth)
 
@@ -965,7 +961,7 @@ func (m Model) renderFeedInner(width, maxVisible int, compact bool) (string, int
 		ts := f.Timestamp.Format("15:04:05")
 		prefix := "  "
 		if i == m.selectedIndex {
-			prefix = "▶ "
+			prefix = m.theme.BrandTagline.Render("▶ ")
 		}
 
 		pathStr := formatPathCol(f.Path, pathWidth)
@@ -1008,7 +1004,7 @@ func (m Model) previewContent(sel *report.Finding, width int) (string, int) {
 	}
 
 	var p strings.Builder
-	pTitle := fmt.Sprintf("🔍 THREAT PREVIEW  •  %s  %s", m.theme.SeverityBadge(sel.Severity), m.theme.BrandTitle.Render(sel.Title))
+	pTitle := fmt.Sprintf("%s THREAT PREVIEW  •  %s  %s", theme.GlyphBrand, m.theme.SeverityBadge(sel.Severity), m.theme.BrandTitle.Render(sel.Title))
 	p.WriteString(pTitle + "\n")
 
 	p.WriteString(fmt.Sprintf("  %s %s\n",
@@ -1076,7 +1072,7 @@ func (m Model) renderDetailModal() string {
 
 	var b strings.Builder
 	badge := m.theme.SeverityBadge(f.Severity)
-	title := fmt.Sprintf("🔍 FORENSIC THREAT DOSSIER :: %s %s", badge, f.Title)
+	title := fmt.Sprintf("%s FORENSIC THREAT DOSSIER :: %s %s", theme.GlyphBrand, badge, f.Title)
 	b.WriteString(m.theme.ModalHeader.Render(title) + "\n\n")
 
 	// Render Tab Navigation Bar
@@ -1212,7 +1208,7 @@ func (m Model) renderQuitConfirm() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(m.theme.ModalHeader.Render("⚠  SCAN IN PROGRESS — ABORT?") + "\n\n")
+	b.WriteString(m.theme.ModalHeader.Render("◆  SCAN IN PROGRESS — ABORT?") + "\n\n")
 	b.WriteString(m.theme.FindingRowNormal.Render("Quitting now stops all detection modules mid-flight.") + "\n")
 	b.WriteString(m.theme.FindingRowNormal.Render("Findings gathered so far stay on screen but no final") + "\n")
 	b.WriteString(m.theme.FindingRowNormal.Render("report is written.") + "\n\n")
@@ -1234,10 +1230,10 @@ func (m Model) renderCommandPalette() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(m.theme.ModalHeader.Render("⌨  AETHER FORENSIC COMMAND CENTER") + "\n\n")
+	b.WriteString(m.theme.ModalHeader.Render("◈  AETHER FORENSIC COMMAND CENTER") + "\n\n")
 
 	// Search Input Box
-	searchPrompt := fmt.Sprintf("  🔍 Filter Actions: %s█", m.paletteQuery)
+	searchPrompt := fmt.Sprintf("  ◈ Filter Actions: %s█", m.paletteQuery)
 	b.WriteString(m.theme.SubSectionHeader.Render(searchPrompt) + "\n\n")
 
 	actions := m.getFilteredPaletteActions()
@@ -1341,7 +1337,7 @@ func (m Model) renderFinished() string {
 
 	// 4. Detailed Telemetry & Coverage Card
 	var stats strings.Builder
-	titleTelemetry := "📊 FORENSIC TELEMETRY & AUDIT METRICS"
+	titleTelemetry := "◈  F O R E N S I C   T E L E M E T R Y   &   A U D I T   M E T R I C S"
 	if m.theme.ASCII {
 		titleTelemetry = "[STATS] FORENSIC TELEMETRY & AUDIT METRICS"
 	}

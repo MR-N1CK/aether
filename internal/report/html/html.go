@@ -967,7 +967,7 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 		buf.WriteString("      </div>\n")
 	} else {
 		buf.WriteString("      <div class=\"mitre-clean-card\">\n")
-		buf.WriteString("        <span class=\"mitre-clean-icon\">🛡️</span>\n")
+		buf.WriteString("        <span class=\"mitre-clean-icon\">✔</span>\n")
 		buf.WriteString("        <div class=\"mitre-clean-text\">\n")
 		buf.WriteString("          <strong>Zero Active MITRE ATT&CK&reg; Adversarial Techniques Detected</strong>\n")
 		buf.WriteString("          <p>No malicious persistence, privilege escalation, credential theft, or execution artifacts were observed across inspected subsystems.</p>\n")
@@ -1013,7 +1013,7 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 
 	// Capping Notice Banner if capped
 	if isCapped {
-		buf.WriteString(fmt.Sprintf("      <div class=\"capping-banner\" id=\"capping-banner\" role=\"alert\">⚠️ Showing <strong>%d</strong> of <strong>%d</strong> total findings (configured cap: %d; see JSON output for full dataset).</div>\n",
+		buf.WriteString(fmt.Sprintf("      <div class=\"capping-banner\" id=\"capping-banner\" role=\"alert\">◆ Showing <strong>%d</strong> of <strong>%d</strong> total findings (configured cap: %d; see JSON output for full dataset).</div>\n",
 			len(jsonFindingsList), totalFindingsCount, data.MaxReportFindings))
 	}
 
@@ -1210,35 +1210,35 @@ const aetherInlineSVG = `<svg class="aether-logo" width="36" height="36" viewBox
 // CSS Stylesheet for Aether Report
 const htmlReportCSS = `
 :root {
-  --bg-main: #0b0f19;
-  --bg-card: #111827;
-  --bg-surface: #1f2937;
-  --bg-hover: #374151;
-  --border-color: #374151;
-  --text-main: #f3f4f6;
-  --text-muted: #9ca3af;
-  --accent: #38bdf8;
+  --bg-main: #080B11;
+  --bg-card: #0F141C;
+  --bg-surface: #161E2E;
+  --bg-hover: #1E293B;
+  --border-color: #1E293B;
+  --text-main: #F8FAFC;
+  --text-muted: #94A3B8;
+  --accent: #38BDF8;
   --accent-glow: rgba(56, 189, 248, 0.15);
   
-  --sev-alert-bg: rgba(239, 68, 68, 0.18);
-  --sev-alert-border: #ef4444;
-  --sev-alert-text: #fca5a5;
+  --sev-alert-bg: rgba(244, 63, 94, 0.15);
+  --sev-alert-border: #F43F5E;
+  --sev-alert-text: #FDA4AF;
 
-  --sev-warn-bg: rgba(245, 158, 11, 0.18);
-  --sev-warn-border: #f59e0b;
-  --sev-warn-text: #fcd34d;
+  --sev-warn-bg: rgba(251, 191, 36, 0.15);
+  --sev-warn-border: #FBBF24;
+  --sev-warn-text: #FDE68A;
 
-  --sev-notice-bg: rgba(56, 189, 248, 0.18);
-  --sev-notice-border: #38bdf8;
-  --sev-notice-text: #7dd3fc;
+  --sev-notice-bg: rgba(52, 211, 153, 0.15);
+  --sev-notice-border: #34D399;
+  --sev-notice-text: #A7F3D0;
 
-  --sev-info-bg: rgba(156, 163, 175, 0.18);
-  --sev-info-border: #9ca3af;
-  --sev-info-text: #d1d5db;
+  --sev-info-bg: rgba(56, 189, 248, 0.15);
+  --sev-info-border: #38BDF8;
+  --sev-info-text: #BAE6FD;
 
-  --verdict-clean-border: #10b981;
+  --verdict-clean-border: #10B981;
   --verdict-clean-bg: rgba(16, 185, 129, 0.12);
-  --verdict-clean-text: #34d399;
+  --verdict-clean-text: #34D399;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -1297,7 +1297,7 @@ code, pre {
   z-index: 50;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  background-color: rgba(11, 15, 25, 0.88);
+  background-color: rgba(8, 11, 17, 0.90);
   display: flex;
   align-items: center;
   justify-content: space-between;

@@ -19,10 +19,32 @@ const (
 	MinTermWidth  = 72
 	MinTermHeight = 18
 
-	TierCompact  = 80  // < 80 cols: compact single-column layout
-	TierStandard = 110 // 80 - 110 cols: balanced standard layout
-	TierWide     = 140 // > 110 cols: wide multi-column layout
+	TierCompact   = 84  // < 84 cols: compact single-column layout
+	TierStandard  = 120 // 84 - 120 cols: balanced standard layout
+	TierWide      = 160 // 120 - 160 cols: wide multi-column layout
+	TierUltraWide = 200 // > 160 cols: high-density flight deck
 )
+
+// Geometric Unicode architectural glyphs
+const (
+	GlyphBrand       = "◈"
+	GlyphSelected    = "◆"
+	GlyphUnselected  = "◇"
+	GlyphRunning     = "⚡"
+	GlyphCheck       = "✔"
+	GlyphCross       = "✖"
+	GlyphAlert       = "🚨"
+	GlyphWarn        = "⚠️"
+	GlyphClean       = "🛡️"
+	GlyphKernel      = "⏣"
+	GlyphNetwork     = "🌐"
+	GlyphProcess     = "⚙"
+	GlyphPersistence = "⚓"
+	GlyphFilesystem  = "📁"
+)
+
+// SubBlocks defines 1/8th fractional vertical block runes for smooth gradient rendering.
+var SubBlocks = []rune{' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'}
 
 // ASCIIBorder defines standard 7-bit ASCII borders for serial consoles and minimal terminals.
 var ASCIIBorder = lipgloss.Border{
@@ -121,6 +143,20 @@ type Theme struct {
 	PillKey     lipgloss.Style
 	TableHead   lipgloss.Style
 	Divider     lipgloss.Style
+
+	// Flight Deck & Inspector styles
+	FlightDeckLeftPane  lipgloss.Style
+	FlightDeckRightPane lipgloss.Style
+	InspectorBox        lipgloss.Style
+	InspectorTitle      lipgloss.Style
+	InspectorTarget     lipgloss.Style
+	InspectorHash       lipgloss.Style
+	InspectorCmd        lipgloss.Style
+	ModuleRowRunning    lipgloss.Style
+	ModuleRowDone       lipgloss.Style
+	ModuleRowPending    lipgloss.Style
+	TabBadgeActive      lipgloss.Style
+	TabBadgeInactive    lipgloss.Style
 }
 
 // DetectNoColor returns true if NO_COLOR environment variable is set per no-color.org.
@@ -195,6 +231,18 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 		t.PillKey = lipgloss.NewStyle().Bold(true)
 		t.TableHead = lipgloss.NewStyle().Bold(true)
 		t.Divider = lipgloss.NewStyle()
+		t.FlightDeckLeftPane = lipgloss.NewStyle().Border(border).Padding(0, 1)
+		t.FlightDeckRightPane = lipgloss.NewStyle().Border(border).Padding(0, 1)
+		t.InspectorBox = lipgloss.NewStyle().Border(border).Padding(0, 1)
+		t.InspectorTitle = lipgloss.NewStyle().Bold(true)
+		t.InspectorTarget = lipgloss.NewStyle().Bold(true)
+		t.InspectorHash = lipgloss.NewStyle()
+		t.InspectorCmd = lipgloss.NewStyle().Bold(true)
+		t.ModuleRowRunning = lipgloss.NewStyle().Bold(true)
+		t.ModuleRowDone = lipgloss.NewStyle()
+		t.ModuleRowPending = lipgloss.NewStyle()
+		t.TabBadgeActive = lipgloss.NewStyle().Bold(true)
+		t.TabBadgeInactive = lipgloss.NewStyle()
 		return t
 	}
 
@@ -422,7 +470,117 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 	t.Divider = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#334155"))
 
+	t.FlightDeckLeftPane = lipgloss.NewStyle().
+		Border(border).
+		BorderForeground(ColorBorder).
+		Background(ColorSurface).
+		Padding(0, 1)
+
+	t.FlightDeckRightPane = lipgloss.NewStyle().
+		Border(border).
+		BorderForeground(ColorBorder).
+		Background(ColorSurface).
+		Padding(0, 1)
+
+	t.InspectorBox = lipgloss.NewStyle().
+		Border(border).
+		BorderForeground(ColorBorderLit).
+		Background(ColorSurface).
+		Padding(0, 1)
+
+	t.InspectorTitle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorCyan)
+
+	t.InspectorTarget = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorTextPrim)
+
+	t.InspectorHash = lipgloss.NewStyle().
+		Foreground(ColorTextMute)
+
+	t.InspectorCmd = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorNotice).
+		Background(lipgloss.Color("#064E3B")).
+		Padding(0, 1)
+
+	t.ModuleRowRunning = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorCyan)
+
+	t.ModuleRowDone = lipgloss.NewStyle().
+		Foreground(ColorNotice)
+
+	t.ModuleRowPending = lipgloss.NewStyle().
+		Foreground(ColorTextMute)
+
+	t.TabBadgeActive = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(ColorAccent).
+		Padding(0, 1)
+
+	t.TabBadgeInactive = lipgloss.NewStyle().
+		Foreground(ColorTextMute).
+		Background(lipgloss.Color("#1E293B")).
+		Padding(0, 1)
+
 	return t
+}
+
+// RenderFractionalBar renders a high-precision progress bar using Unicode eighth-blocks.
+func RenderFractionalBar(width int, ratio float64, filledStyle, emptyStyle lipgloss.Style, ascii bool) string {
+	if width <= 0 {
+		return ""
+	}
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+	}
+
+	if ascii {
+		filled := int(ratio * float64(width))
+		if filled > width {
+			filled = width
+		}
+		empty := width - filled
+		if empty < 0 {
+			empty = 0
+		}
+		return filledStyle.Render(strings.Repeat("#", filled)) + emptyStyle.Render(strings.Repeat("-", empty))
+	}
+
+	// 8 sub-divisions per column cell
+	totalSubUnits := int(ratio * float64(width) * 8.0)
+	fullChars := totalSubUnits / 8
+	fraction := totalSubUnits % 8
+
+	var b strings.Builder
+	if fullChars > width {
+		fullChars = width
+	}
+	b.WriteString(filledStyle.Render(strings.Repeat("█", fullChars)))
+
+	if fullChars < width {
+		if fraction > 0 {
+			subRunes := []rune{' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉'}
+			b.WriteString(filledStyle.Render(string(subRunes[fraction])))
+			remaining := width - fullChars - 1
+			if remaining > 0 {
+				b.WriteString(emptyStyle.Render(strings.Repeat("░", remaining)))
+			}
+		} else {
+			remaining := width - fullChars
+			if remaining > 0 {
+				b.WriteString(emptyStyle.Render(strings.Repeat("░", remaining)))
+			}
+		}
+	}
+
+	return b.String()
 }
 
 // SeverityBadge renders a styled badge with distinct colorblind textual markers for the given severity.

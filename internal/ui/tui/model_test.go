@@ -368,3 +368,91 @@ func TestJumpAlertNavigation(t *testing.T) {
 	}
 }
 
+func TestDashboardTabsAndYankKeybindings(t *testing.T) {
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	findings := []report.Finding{
+		mkF(report.SeverityWarning, 50, "/tmp/warn.sh", "Process_Warn", base),
+		mkF(report.SeverityAlert, 90, "/tmp/alert.sh", "Shell_Rev", base.Add(time.Second)),
+		mkF(report.SeverityNotice, 30, "/tmp/note.sh", "Log_Odd", base.Add(2*time.Second)),
+	}
+	m := newTestModel(findings)
+	m.recomputeVisible()
+
+	if len(m.visible) != 3 {
+		t.Fatalf("expected 3 findings initially on tab 1 (All), got %d", len(m.visible))
+	}
+
+	// Press 2 -> Malicious Threats tab (Alerts only)
+	nm, _ := m.Update(keyRunes("2"))
+	m = nm.(Model)
+	if m.dashboardTab != 1 {
+		t.Errorf("expected dashboardTab 1, got %d", m.dashboardTab)
+	}
+	if len(m.visible) != 1 || m.visible[0].Severity != report.SeverityAlert {
+		t.Errorf("expected 1 alert on tab 2, got %d", len(m.visible))
+	}
+
+	// Press 3 -> Suspicious Anomalies tab (Warnings only)
+	nm, _ = m.Update(keyRunes("3"))
+	m = nm.(Model)
+	if m.dashboardTab != 2 {
+		t.Errorf("expected dashboardTab 2, got %d", m.dashboardTab)
+	}
+	if len(m.visible) != 1 || m.visible[0].Severity != report.SeverityWarning {
+		t.Errorf("expected 1 warning on tab 3, got %d", len(m.visible))
+	}
+
+	// Press 4 -> Audit Notices tab (Notices only)
+	nm, _ = m.Update(keyRunes("4"))
+	m = nm.(Model)
+	if m.dashboardTab != 3 {
+		t.Errorf("expected dashboardTab 3, got %d", m.dashboardTab)
+	}
+	if len(m.visible) != 1 || m.visible[0].Severity != report.SeverityNotice {
+		t.Errorf("expected 1 notice on tab 4, got %d", len(m.visible))
+	}
+
+	// Press 1 -> All Findings
+	nm, _ = m.Update(keyRunes("1"))
+	m = nm.(Model)
+	if m.dashboardTab != 0 {
+		t.Errorf("expected dashboardTab 0, got %d", m.dashboardTab)
+	}
+	if len(m.visible) != 3 {
+		t.Errorf("expected 3 findings on tab 1, got %d", len(m.visible))
+	}
+
+	// Press Tab -> cycles to next tab
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = nm.(Model)
+	if m.dashboardTab != 1 {
+		t.Errorf("expected tab cycle to 1, got %d", m.dashboardTab)
+	}
+
+	// Press Shift+Tab -> cycles back
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = nm.(Model)
+	if m.dashboardTab != 0 {
+		t.Errorf("expected tab cycle back to 0, got %d", m.dashboardTab)
+	}
+
+	// Test p (copy path), h (copy hash), c (copy cmd)
+	nm, _ = m.Update(keyRunes("p"))
+	m = nm.(Model)
+	if m.toastMessage == "" {
+		t.Errorf("expected toast message after pressing p")
+	}
+
+	nm, _ = m.Update(keyRunes("h"))
+	m = nm.(Model)
+	if m.toastMessage == "" {
+		t.Errorf("expected toast message after pressing h")
+	}
+
+	nm, _ = m.Update(keyRunes("c"))
+	m = nm.(Model)
+	if m.toastMessage == "" {
+		t.Errorf("expected toast message after pressing c")
+	}
+}
+

@@ -374,3 +374,128 @@ func TestRenderProgressBar_ASCII(t *testing.T) {
 	}
 }
 
+func TestRenderTabBar(t *testing.T) {
+	th := theme.NewTheme(true)
+	m := Model{
+		theme: th,
+		findings: []report.Finding{
+			{Severity: report.SeverityAlert},
+			{Severity: report.SeverityWarning},
+			{Severity: report.SeverityNotice},
+		},
+		activeModules: map[string]*ModuleStatus{
+			"process": {Name: "process"},
+			"network": {Name: "network"},
+		},
+		dashboardTab: 1, // Threats tab
+	}
+
+	tabBar := m.renderTabBar(120)
+	for _, want := range []string{"1: ALL (3)", "2: THREATS (1)", "3: ANOMALIES (1)", "4: NOTICES (1)", "5: PIPELINE (2)"} {
+		if !strings.Contains(tabBar, want) {
+			t.Errorf("expected tab bar to contain %q, got: %s", want, tabBar)
+		}
+	}
+}
+
+func TestRenderModuleMatrixPane(t *testing.T) {
+	th := theme.NewTheme(true)
+	m := Model{
+		theme: th,
+		moduleOrder: []string{"process", "network"},
+		activeModules: map[string]*ModuleStatus{
+			"process": {Name: "process", Running: true, Findings: 2},
+			"network": {Name: "network", Finished: true, Findings: 0, Duration: 50 * time.Millisecond},
+		},
+	}
+
+	pane := m.renderModuleMatrixPane(36, 10)
+	if !strings.Contains(pane, "EXECUTION PIPELINE") {
+		t.Errorf("expected EXECUTION PIPELINE title in matrix pane, got: %s", pane)
+	}
+	if !strings.Contains(pane, "process") || !strings.Contains(pane, "network") {
+		t.Errorf("expected module names in matrix pane, got: %s", pane)
+	}
+	if !strings.Contains(pane, "2h") {
+		t.Errorf("expected 2 hits badge in matrix pane, got: %s", pane)
+	}
+}
+
+func TestRenderInspectorDock(t *testing.T) {
+	th := theme.NewTheme(true)
+
+	// Clean baseline dock
+	mClean := Model{theme: th}
+	cleanDock := mClean.renderInspectorDock(nil, 120)
+	if !strings.Contains(cleanDock, "FORENSIC INSPECTOR DOCK") || !strings.Contains(cleanDock, "SYSTEM BASELINE SECURE") {
+		t.Errorf("expected clean baseline dock, got: %s", cleanDock)
+	}
+
+	// Threat finding dock with runbook
+	finding := &report.Finding{
+		Severity: report.SeverityAlert,
+		Title:    "Reverse Shell Activity",
+		RuleName: "Script_Reverse_Shell",
+		Path:     "/tmp/nc.sh",
+		Hashes:   map[string]string{"SHA256": "abcdef1234567890"},
+		Remediation: []string{
+			"Kill process with `kill -9 1234`",
+		},
+	}
+	mThreat := Model{theme: th}
+	dock := mThreat.renderInspectorDock(finding, 120)
+	if !strings.Contains(dock, "FORENSIC DOCK:") || !strings.Contains(dock, "Script_Reverse_Shell") {
+		t.Errorf("expected finding header in inspector dock, got: %s", dock)
+	}
+	if !strings.Contains(dock, "/tmp/nc.sh") {
+		t.Errorf("expected target path in inspector dock, got: %s", dock)
+	}
+	if !strings.Contains(dock, "SHA-256: abcdef1234567890") {
+		t.Errorf("expected SHA-256 in inspector dock, got: %s", dock)
+	}
+	if !strings.Contains(dock, "RUNBOOK [c]:") {
+		t.Errorf("expected runbook command in inspector dock, got: %s", dock)
+	}
+}
+
+func TestFlightDeckDashboard_WideAndCompact(t *testing.T) {
+	th := theme.NewTheme(true)
+	finding := report.Finding{
+		Severity: report.SeverityAlert,
+		Title:    "Reverse Shell",
+		RuleName: "Script_Reverse_Shell",
+		Path:     "/tmp/shell.sh",
+		Reason:   "reverse shell detected",
+	}
+	m := Model{
+		theme:         th,
+		findings:      []report.Finding{finding},
+		visible:       []report.Finding{finding},
+		moduleOrder:   []string{"process"},
+		activeModules: map[string]*ModuleStatus{"process": {Name: "process", Running: true}},
+		state:         stateDashboard,
+	}
+
+	// Wide flight deck mode (width = 140 >= TierStandard 120)
+	m.width = 140
+	m.height = 35
+	wideView := m.renderDashboard()
+	if !strings.Contains(wideView, "EXECUTION PIPELINE") {
+		t.Errorf("expected wide view to contain EXECUTION PIPELINE left pane, got: %s", wideView)
+	}
+	if !strings.Contains(wideView, "FORENSIC DOCK") {
+		t.Errorf("expected wide view to contain FORENSIC DOCK bottom pane, got: %s", wideView)
+	}
+	if !strings.Contains(wideView, "1: ALL (1)") {
+		t.Errorf("expected wide view to contain Tab Bar, got: %s", wideView)
+	}
+
+	// Compact mode (width = 90 < TierStandard 120)
+	m.width = 90
+	m.height = 30
+	compactView := m.renderDashboard()
+	if !strings.Contains(compactView, "Active Modules:") {
+		t.Errorf("expected compact view to contain horizontal Active Modules row, got: %s", compactView)
+	}
+}
+

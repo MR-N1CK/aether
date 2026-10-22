@@ -96,6 +96,7 @@ type Model struct {
 	smoothFilesScanned float64
 	velocitySamples    []float64
 	activeTab          int
+	dashboardTab       int
 	modalScrollY         int
 	showPalette          bool
 	paletteQuery         string
@@ -153,8 +154,9 @@ func NewModel(ctx context.Context, cancel context.CancelFunc, sub *events.Subscr
 		activeModules:   make(map[string]*ModuleStatus),
 		findings:        make([]report.Finding, 0),
 		visible:         make([]report.Finding, 0),
-		velocitySamples: make([]float64, 0, 10),
+		velocitySamples: make([]float64, 0, 24),
 		activeTab:       0,
+		dashboardTab:    0,
 		sortBy:          sortBySeverity,
 		spinner:         sp,
 	}
@@ -165,7 +167,7 @@ func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		m.listenEvents(),
-		m.tick30FPS(),
+		m.tick60FPS(),
 	}
 
 	if m.state == stateSplash {
@@ -185,8 +187,8 @@ func (m Model) listenEvents() tea.Cmd {
 	}
 }
 
-func (m Model) tick30FPS() tea.Cmd {
-	return tea.Tick(33*time.Millisecond, func(t time.Time) tea.Msg {
+func (m Model) tick60FPS() tea.Cmd {
+	return tea.Tick(16*time.Millisecond, func(t time.Time) tea.Msg {
 		return frameTickMsg(t)
 	})
 }
@@ -239,12 +241,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var spCmd tea.Cmd
 		m.spinner, spCmd = m.spinner.Update(msg)
 		if m.scanFinished && (diff <= 0.05 && diff >= -0.05) && time.Now().After(m.toastUntil) {
-			// Scan is finished and display settled: reduce from 30 FPS to 1s idle heartbeat
+			// Scan is finished and display settled: reduce from 60 FPS to 1s idle heartbeat
 			cmds = append(cmds, spCmd, tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
 				return frameTickMsg(t)
 			}))
 		} else {
-			cmds = append(cmds, spCmd, m.tick30FPS())
+			cmds = append(cmds, spCmd, m.tick60FPS())
 		}
 
 	case events.Event:
@@ -308,8 +310,8 @@ func (m *Model) handleScanEvent(e events.Event) {
 		m.filesScanned = ev.CurrentFiles
 		m.filesPerSec = ev.FilesPerSec
 		m.velocitySamples = append(m.velocitySamples, ev.FilesPerSec)
-		if len(m.velocitySamples) > 10 {
-			m.velocitySamples = m.velocitySamples[len(m.velocitySamples)-10:]
+		if len(m.velocitySamples) > 24 {
+			m.velocitySamples = m.velocitySamples[len(m.velocitySamples)-24:]
 		}
 
 	case events.ScanFinished:
@@ -491,10 +493,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		case "G", "end":
 			m.modalScrollY = 9999
 			return nil
-		case "y":
+		case "p":
 			m.copySelectedPath()
 			return nil
-		case "h", "hash", "#":
+		case "y", "h", "hash", "#":
 			m.copySelectedHash()
 			return nil
 		case "c", "r":
@@ -531,6 +533,39 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.cancelScan()
 		}
 		return tea.Quit
+
+	case "1":
+		m.dashboardTab = 0
+		m.recomputeVisible()
+		m.showToast("Tab [1: All Findings]")
+
+	case "2":
+		m.dashboardTab = 1
+		m.recomputeVisible()
+		m.showToast("Tab [2: Malicious Threats]")
+
+	case "3":
+		m.dashboardTab = 2
+		m.recomputeVisible()
+		m.showToast("Tab [3: Suspicious Anomalies]")
+
+	case "4":
+		m.dashboardTab = 3
+		m.recomputeVisible()
+		m.showToast("Tab [4: Audit Notices]")
+
+	case "5":
+		m.dashboardTab = 4
+		m.recomputeVisible()
+		m.showToast("Tab [5: Execution Pipeline]")
+
+	case "tab":
+		m.dashboardTab = (m.dashboardTab + 1) % 5
+		m.recomputeVisible()
+
+	case "shift+tab":
+		m.dashboardTab = (m.dashboardTab + 4) % 5
+		m.recomputeVisible()
 
 	case "s":
 		if m.sortBy == sortBySeverity {
@@ -593,10 +628,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.selectedIndex = 0
 		}
 
-	case "y":
+	case "p":
 		m.copySelectedPath()
 
-	case "h":
+	case "y", "h":
 		m.copySelectedHash()
 
 	case "c", "r":
@@ -700,16 +735,33 @@ func (m *Model) recomputeVisible() {
 	}
 
 	visible := make([]report.Finding, 0, len(m.findings))
-	if m.filterQuery == "" {
-		visible = append(visible, m.findings...)
-	} else {
-		qf := ParseQueryFilter(m.filterQuery)
-		for _, f := range m.findings {
-			if qf.Matches(f.Path, f.Reason, f.Module, string(f.Severity), f.RuleName) {
-				visible = append(visible, f)
+	for _, f := range m.findings {
+		// Category tab filtering (0: All, 1: Threats, 2: Anomalies, 3: Notices, 4: Pipeline)
+		switch m.dashboardTab {
+		case 1:
+			if f.Severity != report.SeverityAlert && f.Severity != report.SeverityCritical {
+				continue
+			}
+		case 2:
+			if f.Severity != report.SeverityWarning && f.Severity != report.SeverityHigh && f.Severity != report.SeverityMedium {
+				continue
+			}
+		case 3:
+			if f.Severity != report.SeverityNotice && f.Severity != report.SeverityLow && f.Severity != report.SeverityInfo {
+				continue
 			}
 		}
+
+		if m.filterQuery != "" {
+			qf := ParseQueryFilter(m.filterQuery)
+			if !qf.Matches(f.Path, f.Reason, f.Module, string(f.Severity), f.RuleName) {
+				continue
+			}
+		}
+
+		visible = append(visible, f)
 	}
+
 	m.sortFindings(visible)
 	m.visible = visible
 
@@ -880,13 +932,14 @@ type PaletteAction struct {
 func getPaletteActions() []PaletteAction {
 	return []PaletteAction{
 		{"Enter", "Inspect Finding", "Open forensic threat dossier for selected item", "inspect"},
+		{"1-5", "Filter Tabs", "Quick switch between All, Threats, Anomalies, Notices, Pipeline", "switch_tab"},
 		{"n", "Next Alert", "Jump directly to the next critical threat finding", "next_alert"},
 		{"N", "Previous Alert", "Jump to the previous critical threat finding", "prev_alert"},
 		{"/", "Filter Findings", "Filter findings feed with live fuzzy / grammar query", "filter"},
 		{"s", "Toggle Sort", "Toggle sorting order between severity and arrival", "sort"},
 		{"r / c", "Containment Runbook", "Copy remediation command to system clipboard", "copy_runbook"},
-		{"y", "Copy Path", "Copy inspected target path to clipboard", "copy_path"},
-		{"h", "Copy Hash", "Copy SHA256 / MD5 digest to clipboard", "copy_hash"},
+		{"p", "Copy Path", "Copy inspected target path to clipboard", "copy_path"},
+		{"y / h", "Copy Hash", "Copy SHA256 / MD5 digest to clipboard", "copy_hash"},
 		{"o", "Open HTML Report", "Launch forensic HTML report in system browser", "open_html"},
 		{"Tab", "Next Dossier Tab", "Cycle through Assessment, Artifact, MITRE, Remediation tabs", "next_tab"},
 		{"q", "Quit Scanner", "Safely exit Aether threat hunter", "quit"},
@@ -933,6 +986,10 @@ func (m *Model) executePaletteAction(actionID string) tea.Cmd {
 			m.showToast("Feed sorted by severity (worst first)")
 		}
 		m.recomputeVisible()
+	case "switch_tab":
+		m.dashboardTab = (m.dashboardTab + 1) % 5
+		m.recomputeVisible()
+		m.showToast(fmt.Sprintf("Switched to Tab %d", m.dashboardTab+1))
 	case "copy_runbook":
 		m.copySelectedCommand()
 	case "copy_path":

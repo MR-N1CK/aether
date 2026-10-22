@@ -166,71 +166,103 @@ func (m Model) renderDashboard() string {
 	// 1. Permanent Brand Header
 	b.WriteString(m.renderBrandHeader(cardWidth, m.spinner.View()+" SCANNING IN PROGRESS...") + "\n")
 
-	// 2. Active Modules Row
-	var modRow strings.Builder
-	modRow.WriteString(m.theme.SectionHeader.Render("Active Modules: ") + " ")
-	if len(m.moduleOrder) == 0 {
-		if yara.IsCompiledIn() {
-			modRow.WriteString(m.spinner.View() + " Initializing detection modules & YARA-X rules...")
-		} else {
-			modRow.WriteString(m.spinner.View() + " Initializing detection modules (native heuristics only)...")
-		}
-	} else {
-		for i, name := range m.moduleOrder {
-			mod := m.activeModules[name]
-			if i > 0 {
-				modRow.WriteString("  │  ")
-			}
-			if mod.Running {
-				modRow.WriteString(fmt.Sprintf("%s %s (%d hits)", m.spinner.View(), name, mod.Findings))
-			} else if mod.Finished {
-				if mod.Status == "NOT IMPLEMENTED" {
-					modRow.WriteString(m.theme.BadgeInfo.Render(fmt.Sprintf("%s %s", m.theme.IconSkip(), name)))
-				} else if mod.Err != nil || mod.Status == "FAILED" {
-					modRow.WriteString(m.theme.BadgeAlert.Render(fmt.Sprintf("%s %s", m.theme.IconCross(), name)))
-				} else {
-					modRow.WriteString(m.theme.BadgeNotice.Render(fmt.Sprintf("%s %s (%d)", m.theme.IconCheck(), name, mod.Findings)))
-				}
-			} else {
-				modRow.WriteString(fmt.Sprintf("○ %s", name))
-			}
-		}
-	}
-	b.WriteString(m.theme.CardBox.Width(cardWidth).Render(modRow.String()) + "\n")
-
-	// 3. Progress / Stats Bar
+	// 2. Telemetry HUD: Tab Bar & Progress Bar
+	tabBar := m.renderTabBar(cardWidth)
 	statText := fmt.Sprintf("Files Inspected: %s", m.formatNumber(int64(m.smoothFilesScanned)))
 	if m.filesPerSec > 0 {
 		spark := m.renderSparkline(m.velocitySamples)
 		statText += fmt.Sprintf("  │  Velocity: %.0f files/sec [%s]", m.filesPerSec, spark)
 	}
 
-	// Render custom smooth progress track. Measure the visual width of the
-	// ANSI-styled stat text with lipgloss.Width — a raw len() would count
-	// escape sequences and skew the gauge alignment mid-render.
 	barWidth := cardWidth - lipgloss.Width(statText) - 10
 	if barWidth > 15 {
 		gauge := m.renderProgressBar(barWidth)
 		statText = fmt.Sprintf("%s   %s", gauge, statText)
 	}
-	b.WriteString(m.theme.CardBox.Width(cardWidth).Render(statText) + "\n")
 
-	// 4. Findings Feed Table
-	findingsView := m.renderFindingsFeed(cardWidth)
-	b.WriteString(findingsView + "\n")
+	telemetryContent := tabBar + "\n" + statText
+	b.WriteString(m.theme.CardBox.Width(cardWidth).Render(telemetryContent) + "\n")
+
+	// 3. Center Section: Adaptive Flight Deck vs Compact Stacked
+	if cardWidth >= theme.TierStandard { // >= 120 cols: Flight Deck 3-pane layout
+		matrixWidth := 36
+		feedWidth := cardWidth - matrixWidth - 2
+		if feedWidth < 70 {
+			feedWidth = 70
+			matrixWidth = cardWidth - feedWidth - 2
+		}
+
+		maxRows := 6
+		if m.height > 28 {
+			maxRows = 8
+		}
+		if m.height > 34 {
+			maxRows = 12
+		}
+
+		feedInner, _ := m.renderFeedInner(feedWidth, maxRows, true)
+		feedBox := m.theme.FlightDeckRightPane.Width(feedWidth).Render(feedInner)
+
+		feedHeight := lipgloss.Height(feedBox)
+		matrixBox := m.renderModuleMatrixPane(matrixWidth, feedHeight)
+
+		centerSplit := lipgloss.JoinHorizontal(lipgloss.Top, matrixBox, " ", feedBox)
+		b.WriteString(centerSplit + "\n")
+
+		// 4. Bottom Forensic Inspector Dock
+		inspectorDock := m.renderInspectorDock(m.SelectedFinding(), cardWidth)
+		b.WriteString(inspectorDock + "\n")
+	} else {
+		// Compact / Narrow Stacked Layout (< 120 cols)
+		var modRow strings.Builder
+		modRow.WriteString(m.theme.SectionHeader.Render("Active Modules: ") + " ")
+		if len(m.moduleOrder) == 0 {
+			if yara.IsCompiledIn() {
+				modRow.WriteString(m.spinner.View() + " Initializing detection modules & YARA-X rules...")
+			} else {
+				modRow.WriteString(m.spinner.View() + " Initializing detection modules (native heuristics only)...")
+			}
+		} else {
+			for i, name := range m.moduleOrder {
+				mod := m.activeModules[name]
+				if i > 0 {
+					modRow.WriteString("  │  ")
+				}
+				if mod.Running {
+					modRow.WriteString(fmt.Sprintf("%s %s (%d hits)", m.spinner.View(), name, mod.Findings))
+				} else if mod.Finished {
+					if mod.Status == "NOT IMPLEMENTED" {
+						modRow.WriteString(m.theme.BadgeInfo.Render(fmt.Sprintf("%s %s", m.theme.IconSkip(), name)))
+					} else if mod.Err != nil || mod.Status == "FAILED" {
+						modRow.WriteString(m.theme.BadgeAlert.Render(fmt.Sprintf("%s %s", m.theme.IconCross(), name)))
+					} else {
+						modRow.WriteString(m.theme.BadgeNotice.Render(fmt.Sprintf("%s %s (%d)", m.theme.IconCheck(), name, mod.Findings)))
+					}
+				} else {
+					modRow.WriteString(fmt.Sprintf("○ %s", name))
+				}
+			}
+		}
+		b.WriteString(m.theme.CardBox.Width(cardWidth).Render(modRow.String()) + "\n")
+
+		// Findings Feed Table
+		findingsView := m.renderFindingsFeed(cardWidth)
+		b.WriteString(findingsView + "\n")
+	}
 
 	// 5. Status / Keybinding Footer
 	sortLabel := "severity"
 	if m.sortBy == sortByArrival {
 		sortLabel = "arrival"
 	}
-	footerText := fmt.Sprintf("%s Nav   %s Dossier   %s Filter   %s Sort:%s   %s Yank   %s Shortcuts   %s Quit",
+	footerText := fmt.Sprintf("%s Tabs   %s Nav   %s Dossier   %s Filter   %s Sort:%s   %s Yank   %s Shortcuts   %s Quit",
+		m.theme.KeyHint.Render("[1-5]"),
 		m.theme.KeyHint.Render("[j/k]"),
 		m.theme.KeyHint.Render("[Enter]"),
 		m.theme.KeyHint.Render("[/]"),
 		m.theme.KeyHint.Render("[s]"),
 		sortLabel,
-		m.theme.KeyHint.Render("[y/h/c]"),
+		m.theme.KeyHint.Render("[p/y/c]"),
 		m.theme.KeyHint.Render("[?]"),
 		m.theme.KeyHint.Render("[q]"),
 	)
@@ -248,6 +280,207 @@ func (m Model) renderDashboard() string {
 	b.WriteString(m.theme.StatusBar.Width(cardWidth).Render(footerText))
 
 	return m.theme.AppContainer.Render(b.String())
+}
+
+// renderTabBar renders the interactive 1-5 filter tabs.
+func (m Model) renderTabBar(width int) string {
+	alerts, warns, notes := 0, 0, 0
+	for _, f := range m.findings {
+		switch f.Severity {
+		case report.SeverityAlert, report.SeverityCritical:
+			alerts++
+		case report.SeverityWarning, report.SeverityHigh, report.SeverityMedium:
+			warns++
+		case report.SeverityNotice, report.SeverityLow, report.SeverityInfo:
+			notes++
+		}
+	}
+
+	tabs := []struct {
+		id    int
+		label string
+	}{
+		{0, fmt.Sprintf("1: ALL (%d)", len(m.findings))},
+		{1, fmt.Sprintf("2: THREATS (%d)", alerts)},
+		{2, fmt.Sprintf("3: ANOMALIES (%d)", warns)},
+		{3, fmt.Sprintf("4: NOTICES (%d)", notes)},
+		{4, fmt.Sprintf("5: PIPELINE (%d)", len(m.activeModules))},
+	}
+
+	var tabItems []string
+	for _, tab := range tabs {
+		if m.dashboardTab == tab.id {
+			tabItems = append(tabItems, m.theme.TabBadgeActive.Render(tab.label))
+		} else {
+			tabItems = append(tabItems, m.theme.TabBadgeInactive.Render(tab.label))
+		}
+	}
+
+	return strings.Join(tabItems, " ")
+}
+
+// renderModuleMatrixPane renders the execution pipeline matrix for the left pane of the Flight Deck.
+func (m Model) renderModuleMatrixPane(width, height int) string {
+	var b strings.Builder
+	title := fmt.Sprintf("%s EXECUTION PIPELINE", theme.GlyphBrand)
+	b.WriteString(m.theme.SectionHeader.Render(title) + "\n\n")
+
+	if len(m.moduleOrder) == 0 {
+		msg := "Initializing modules..."
+		if yara.IsCompiledIn() {
+			msg = "Loading YARA-X rules..."
+		}
+		b.WriteString(m.theme.ModuleRowPending.Render(m.spinner.View() + " " + msg) + "\n")
+	} else {
+		innerWidth := width - 4
+		if innerWidth < 20 {
+			innerWidth = 20
+		}
+		nameColWidth := innerWidth - 13
+		if nameColWidth < 8 {
+			nameColWidth = 8
+		}
+
+		for _, name := range m.moduleOrder {
+			mod := m.activeModules[name]
+			var icon, hitsStr, durStr string
+			var rowStyle lipgloss.Style
+
+			if mod.Running {
+				icon = m.spinner.View()
+				rowStyle = m.theme.ModuleRowRunning
+				hitsStr = fmt.Sprintf("%2dh", mod.Findings)
+				durStr = "..."
+			} else if mod.Finished {
+				if mod.Status == "NOT IMPLEMENTED" {
+					icon = m.theme.IconSkip()
+					rowStyle = m.theme.ModuleRowPending
+				} else if mod.Err != nil || mod.Status == "FAILED" {
+					icon = m.theme.IconCross()
+					rowStyle = m.theme.BadgeAlert
+				} else {
+					icon = theme.GlyphCheck
+					rowStyle = m.theme.ModuleRowDone
+				}
+				hitsStr = fmt.Sprintf("%2dh", mod.Findings)
+				if mod.Duration > 0 {
+					if mod.Duration < time.Second {
+						durStr = fmt.Sprintf("%3dms", mod.Duration.Milliseconds())
+					} else {
+						durStr = fmt.Sprintf("%4.1fs", mod.Duration.Seconds())
+					}
+				} else {
+					durStr = "  ok"
+				}
+			} else {
+				icon = theme.GlyphUnselected
+				rowStyle = m.theme.ModuleRowPending
+				hitsStr = " -- "
+				durStr = "wait"
+			}
+
+			truncName := runewidth.Truncate(name, nameColWidth, "…")
+			namePad := nameColWidth - runewidth.StringWidth(truncName)
+			if namePad > 0 {
+				truncName += strings.Repeat(" ", namePad)
+			}
+
+			line := fmt.Sprintf("%s %s %s %s",
+				icon,
+				rowStyle.Render(truncName),
+				m.theme.PillNeutral.Render(hitsStr),
+				m.theme.FindingTimestamp.Render(durStr),
+			)
+			b.WriteString(line + "\n")
+		}
+	}
+
+	content := b.String()
+	box := m.theme.FlightDeckLeftPane.Width(width)
+	if height > 0 {
+		box = box.Height(height)
+	}
+	return box.Render(content)
+}
+
+// renderInspectorDock renders the bottom forensic inspector dock with detailed provenance and runbook.
+func (m Model) renderInspectorDock(sel *report.Finding, width int) string {
+	var b strings.Builder
+
+	if sel == nil {
+		cleanMsg := fmt.Sprintf("%s SYSTEM BASELINE SECURE — No malicious implants or anomalies detected. Monitoring host integrity...", theme.GlyphClean)
+		if m.filterQuery != "" {
+			cleanMsg = fmt.Sprintf("🔍 Filter active: %s — No finding selected in filtered feed.", m.filterQuery)
+		}
+		b.WriteString(m.theme.InspectorTitle.Render(fmt.Sprintf("%s FORENSIC INSPECTOR DOCK", theme.GlyphBrand)) + "\n")
+		b.WriteString(m.theme.StatValueSafe.Render(cleanMsg))
+		return m.theme.InspectorBox.Width(width).Render(b.String())
+	}
+
+	report.PopulateFindingDetails(sel)
+
+	// Line 1: Header with Glyph, Severity Badge, Title, and Rule Name
+	header := fmt.Sprintf("%s FORENSIC DOCK: %s %s  •  Rule: %s",
+		theme.GlyphBrand,
+		m.theme.SeverityBadge(sel.Severity),
+		m.theme.InspectorTitle.Render(sel.Title),
+		sel.RuleName,
+	)
+	b.WriteString(header + "\n")
+
+	// Line 2: Target Path & Provenance Metadata
+	targetLine := fmt.Sprintf("Target: %s", m.theme.InspectorTarget.Render(sel.Path))
+	var metaParts []string
+	if sel.Module != "" {
+		metaParts = append(metaParts, fmt.Sprintf("Module: %s", sel.Module))
+	}
+	if sel.EvidenceRecord != nil {
+		metaParts = append(metaParts, fmt.Sprintf("Evidence: %s", sel.EvidenceRecord.EvidenceStrength))
+	}
+	if sel.Confidence != "" {
+		metaParts = append(metaParts, fmt.Sprintf("Confidence: %s", sel.Confidence))
+	}
+	if len(metaParts) > 0 {
+		targetLine += "  │  " + m.theme.FindingTimestamp.Render(strings.Join(metaParts, "  •  "))
+	}
+	b.WriteString(targetLine + "\n")
+
+	// Line 3: Hashes (SHA-256 or MD5)
+	sha256 := sel.Hashes["SHA256"]
+	if sha256 == "" {
+		sha256 = sel.Hashes["MD5"]
+	}
+	if sha256 != "" {
+		b.WriteString(fmt.Sprintf("Digest: %s\n", m.theme.InspectorHash.Render("SHA-256: "+sha256)))
+	}
+
+	// Line 4: Actionable Containment Command & Hotkeys
+	cmd := ""
+	for _, step := range sel.Remediation {
+		if strings.Contains(step, "`") {
+			start := strings.Index(step, "`")
+			end := strings.LastIndex(step, "`")
+			if end > start {
+				cmd = step[start+1 : end]
+				break
+			}
+		}
+	}
+	if cmd == "" && len(sel.Remediation) > 0 {
+		cmd = sel.Remediation[0]
+	}
+
+	if cmd != "" {
+		cmdBox := m.theme.InspectorCmd.Render("RUNBOOK [c]: " + cmd)
+		b.WriteString(cmdBox + "  " + m.theme.FindingTimestamp.Render("[Enter: Full Dossier  p: Path  y/h: Hash  c: Cmd]"))
+	} else if len(sel.MITRE) > 0 {
+		mitreText := fmt.Sprintf("MITRE: %s %s (%s)", sel.MITRE[0].Tactic, sel.MITRE[0].Technique, sel.MITRE[0].TechniqueName)
+		b.WriteString(m.theme.BadgeNotice.Render(mitreText) + "  " + m.theme.FindingTimestamp.Render("[Enter: Full Dossier  p: Path  y/h: Hash]"))
+	} else {
+		b.WriteString(m.theme.FindingTimestamp.Render("Press [Enter] for full threat dossier  •  [p] Yank path  •  [y/h] Yank hash"))
+	}
+
+	return m.theme.InspectorBox.Width(width).Render(b.String())
 }
 
 func (m Model) renderBrandHeader(width int, statusText string) string {
@@ -1282,35 +1515,8 @@ func (m Model) renderProgressBar(width int) string {
 		return fmt.Sprintf("[%s %3.0f%%]", gaugeStyle.Render(b.String()), progressRatio*100)
 	}
 
-	subBlocks := []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
-	exactFilled := progressRatio * float64(trackWidth)
-	wholeBlocks := int(exactFilled)
-	if wholeBlocks > trackWidth {
-		wholeBlocks = trackWidth
-	}
-	if wholeBlocks < 0 {
-		wholeBlocks = 0
-	}
-
-	frac := int((exactFilled - float64(wholeBlocks)) * 8)
-
-	var b strings.Builder
-	for i := 0; i < wholeBlocks; i++ {
-		b.WriteRune('█')
-	}
-	if wholeBlocks < trackWidth && frac > 0 {
-		b.WriteRune(subBlocks[frac-1])
-		for i := wholeBlocks + 1; i < trackWidth; i++ {
-			b.WriteRune('─')
-		}
-	} else {
-		for i := wholeBlocks; i < trackWidth; i++ {
-			b.WriteRune('─')
-		}
-	}
-
-	gaugeStyle := m.theme.StatValueNotice
-	return fmt.Sprintf("[%s %3.0f%%]", gaugeStyle.Render(b.String()), progressRatio*100)
+	bar := theme.RenderFractionalBar(trackWidth, progressRatio, m.theme.StatValueNotice, m.theme.FindingTimestamp, false)
+	return fmt.Sprintf("[%s %3.0f%%]", bar, progressRatio*100)
 }
 
 func (m Model) formatDuration(d time.Duration) string {

@@ -18,7 +18,8 @@ func init() {
 			"Quarantine the referenced payload binary and remove the autostart entries.",
 			"Check process tree for active instances spawned by these persistence mechanisms.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthCorroborated)
 
 	mustRegister("Persistence_Mixed",
 		"Mixed Persistence Mechanisms Detected",
@@ -30,7 +31,8 @@ func init() {
 			"Review each persistence configuration flagged in the finding.",
 			"Correlate modification times with authentication logs.",
 		},
-		ConfidenceMedium)
+		ConfidenceMedium,
+		StrengthCorroborated)
 
 	// ---- File content heuristics ----
 	mustRegister("File_Suspicious_Private_Key_Location",
@@ -44,7 +46,8 @@ func init() {
 			"Check whether the key matches any entry in ~/.ssh/authorized_keys or server configs.",
 			"If unauthorized, revoke the key pair across all servers and remove the file.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	mustRegister("Script_RedTeam_Persistence_Framework",
 		"Red-Team Stealth Implant & Persistence Framework",
@@ -59,7 +62,8 @@ func init() {
 			"Quarantine the framework script and inspect systemd service directories and cron tabs for installed implants.",
 			"Audit system authentication logs to determine initial intrusion vector.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("Script_Process_Hiding_Procfs",
 		"Stealth Process Hiding via Procfs Manipulation",
@@ -72,7 +76,8 @@ func init() {
 			"Unmount unauthorized tmpfs filesystems from /proc mountpoints (`umount -l /proc/<PID>`).",
 			"Check running processes and kernel task list for rogue concealed PIDs.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("Script_Python_Ransomware_Encryptor",
 		"Ransomware File Encryptor & Locker",
@@ -86,7 +91,8 @@ func init() {
 			"Verify if any files in target directories were encrypted or deleted.",
 			"Check for locally backed-up session recovery keys in temporary locations.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("Script_Data_Exfiltration_Stealer",
 		"Automated Data Exfiltration / File Stealer",
@@ -100,7 +106,8 @@ func init() {
 			"Audit file access timestamps to identify what confidential documents were staged or exfiltrated.",
 			"Quarantine the exfiltration client script.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	mustRegister("Script_C2_Exfiltration_Server",
 		"C2 Data Exfiltration Collection Server",
@@ -113,7 +120,8 @@ func init() {
 			"Terminate the listening process and block the configured port.",
 			"Inspect exfiltrated data dumps to identify compromised client endpoints.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	mustRegister("Script_Reverse_Shell_Interactive",
 		"Interactive Reverse Shell Socket Redirection",
@@ -127,7 +135,8 @@ func init() {
 			"Trace process parentage (PPID) and inspect open sockets (/proc/<PID>/net or /proc/net/tcp).",
 			"Isolate the host from the network to sever C2 communications.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("Container_Dangerous_Capability_Overprivilege",
 		"Container Process with Dangerous Host Breakout Capabilities",
@@ -141,7 +150,8 @@ func init() {
 			"Avoid running containers with `--privileged` flag in Docker or Podman.",
 			"Enable Seccomp and AppArmor profiles to restrict container system calls.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	mustRegister("Script_Reverse_Shell_Inline",
 		"Interactive Reverse Shell Script / Backdoor (Inline Interpreter)",
@@ -155,7 +165,8 @@ func init() {
 			"Inspect network connections and firewall logs for active or outbound traffic to the target host/port.",
 			"Check the process tree for any spawned interactive shells.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("Script_OpenSSL_Reverse_Shell",
 		"Encrypted OpenSSL Reverse Shell Backdoor",
@@ -169,7 +180,8 @@ func init() {
 			"Inspect TLS egress logs for the destination host and block the endpoint.",
 			"Check the process tree for any spawned interactive shells.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("Script_Socat_Reverse_Shell",
 		"Socat Relay Reverse Shell Backdoor",
@@ -182,7 +194,8 @@ func init() {
 			"Quarantine the script file and review authentication and bash history logs.",
 			"Inspect network connections for outbound traffic to the socat target.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("Script_Netcat_Reverse_Shell",
 		"Netcat Reverse Shell Backdoor",
@@ -195,7 +208,8 @@ func init() {
 			"Quarantine the script file and review authentication and bash history logs.",
 			"Inspect network connections and firewall logs for active or outbound traffic to the target host/port.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("Script_Download_And_Execute",
 		"Remote Download and Pipe Execution Dropper",
@@ -208,7 +222,8 @@ func init() {
 			"Verify whether the remote URL is a trusted official software installer.",
 			"Inspect the downloaded URL content in an isolated environment before executing.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	mustRegister("Script_PowerShell_Encoded_Execution",
 		"Encoded PowerShell Command Execution",
@@ -222,7 +237,8 @@ func init() {
 			"Identify the processes and network connections spawned by the PowerShell interpreter.",
 			"Quarantine or remove the invoking script.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	mustRegister("Script_Cloud_Exfiltration_Tool",
 		"Automated Cloud Storage Exfiltration Tool",
@@ -236,7 +252,8 @@ func init() {
 			"Check network egress logs for large volume data transfers to the target cloud provider.",
 			"Revoke compromised cloud storage access tokens immediately.",
 		},
-		ConfidenceMedium)
+		ConfidenceMedium,
+		StrengthContextual)
 
 	mustRegister("Persistence_Linker_Audit_Hijack",
 		"Dynamic Linker Hook Hijack (LD_PRELOAD / LD_AUDIT)",
@@ -250,7 +267,8 @@ func init() {
 			"Verify the integrity and package ownership of any preloaded or audit library; delete-or-restore entries referencing volatile paths.",
 			"Remove unauthorized LD_PRELOAD / LD_AUDIT entries from shell profiles and systemd service environments.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	mustRegister("Persistence_PAM_Exec_Suspicious",
 		"Suspicious PAM Authentication Hook (pam_exec / pam_script)",
@@ -264,7 +282,22 @@ func init() {
 			"Verify whether the script was placed by a legitimate administrative package.",
 			"Quarantine the rogue script and remove the pam_exec directive from the PAM configuration.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthCorroborated)
+
+	mustRegister("Persistence_Service_Volatile_Path",
+		"Systemd Service Executes from Volatile Directory",
+		"A systemd service unit executes an executable located in a world-writable or volatile directory (/tmp, /var/tmp, /dev/shm).",
+		[]MITREMapping{
+			{Tactic: "Persistence", Technique: "T1543.002", TechniqueName: "Systemd Service"},
+		},
+		[]string{
+			"Stop and disable the rogue systemd service immediately.",
+			"Quarantine the volatile executable referenced in ExecStart.",
+			"Remove the service unit file and reload systemd (systemctl daemon-reload).",
+		},
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("Webshell_PHP_Generic_Backdoor",
 		"PHP Web Shell / Dynamic Code Execution Backdoor",
@@ -277,7 +310,8 @@ func init() {
 			"Review the web server document root access logs around the file's modification time.",
 			"Quarantine the file and check for unauthorized administrative web sessions.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	// ---- Filesystem heuristics ----
 	mustRegister("Heuristic_Suspicious_SUID_SGID",
@@ -290,7 +324,8 @@ func init() {
 			"Confirm package ownership using dpkg/rpm.",
 			"Remove the SUID bit using `chmod u-s <path>` if elevated privilege is unnecessary.",
 		},
-		ConfidenceMedium)
+		ConfidenceMedium,
+		StrengthContextual)
 
 	mustRegister("Process_Memfd_Execution",
 		"Memory Execution / Unlinked Binary",
@@ -303,7 +338,8 @@ func init() {
 			"Inspect /proc/<pid>/exe and /proc/<pid>/fd to extract the in-memory binary image.",
 			"Terminate the process and investigate how it was launched.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	// ---- Users ----
 	mustRegister("Users_Extra_UID0_Account",
@@ -318,7 +354,8 @@ func init() {
 			"Remove or lock the rogue UID 0 account immediately.",
 			"Review authentication logs to trace account creation.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	// ---- Kernel / rootkit ----
 	mustRegister("Kernel_Hidden_LKM_Module",
@@ -333,7 +370,8 @@ func init() {
 			"Reboot into a trusted live forensics environment to inspect rootkit hooks.",
 			"Quarantine any malicious kernel object (.ko) files.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	// ---- IOC ----
 	// NOTE: hash-IOC rule names are dynamic ("IOC_Hash_<TYPE>" or a custom
@@ -350,7 +388,8 @@ func init() {
 			"Quarantine the matching IOC payload file.",
 			"Correlate the IOC across enterprise endpoint telemetry.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("IOC_Hash_SHA1",
 		"Cryptographic Threat Intelligence IOC Match (SHA-1)",
@@ -363,7 +402,8 @@ func init() {
 			"Quarantine the matching IOC payload file.",
 			"Correlate the IOC across enterprise endpoint telemetry.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("IOC_Hash_MD5",
 		"Cryptographic Threat Intelligence IOC Match (MD5)",
@@ -376,7 +416,8 @@ func init() {
 			"Quarantine the matching IOC payload file.",
 			"Correlate the IOC across enterprise endpoint telemetry.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("Network_IOC_IP_Connection",
 		"Connection to Known Malicious IP Indicator",
@@ -389,9 +430,37 @@ func init() {
 			"Block the destination IP at the perimeter firewall.",
 			"Review proxy/netflow history for the destination to scope the compromise.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
+
+	mustRegister("IOC_Hash_Match",
+		"Cryptographic Threat Intelligence IOC Hash Match",
+		"The file cryptographic hash matches a known high-confidence threat indicator of compromise (IOC).",
+		[]MITREMapping{
+			{Tactic: "Execution", Technique: "T1204.002", TechniqueName: "Malicious File"},
+		},
+		[]string{
+			"Immediately isolate the affected system.",
+			"Quarantine the matching IOC payload file.",
+			"Correlate the IOC across enterprise endpoint telemetry.",
+		},
+		ConfidenceHigh,
+		StrengthDirect)
 
 	// ---- SSH persistence ----
+	mustRegister("SSH_Unauthorized_Key_Injection",
+		"Unauthorized SSH Key Injection / Backdoor",
+		"An unauthorized public key has been appended to an administrative or user authorized_keys file for persistent remote access.",
+		[]MITREMapping{
+			{Tactic: "Persistence", Technique: "T1098.004", TechniqueName: "SSH Authorized Keys"},
+		},
+		[]string{
+			"Remove unauthorized public keys from ~/.ssh/authorized_keys.",
+			"Rotate host SSH keys and review SSH access logs.",
+		},
+		ConfidenceHigh,
+		StrengthDirect)
+
 	mustRegister("Persistence_SSH_Key_Non_Standard_Location",
 		"SSH Key Material in Non-Standard Location",
 		"SSH key material was found outside standard ~/.ssh paths, which may indicate staged credentials or persistence setup.",
@@ -403,7 +472,8 @@ func init() {
 			"Verify the key's legitimacy with the system owner.",
 			"If unauthorized, remove the key and rotate any credentials it protected.",
 		},
-		ConfidenceMedium)
+		ConfidenceMedium,
+		StrengthContextual)
 
 	mustRegister("Persistence_Reverse_Shell_Primitive",
 		"Reverse Shell Primitive in Persistence Hook",
@@ -416,7 +486,8 @@ func init() {
 			"Remove the persistence entry and quarantine the referenced script.",
 			"Trace the hook's creation time against authentication logs.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	// ---- De-obfuscation & Entropy heuristics ----
 	mustRegister("Script_Obfuscated_Payload",
@@ -431,7 +502,8 @@ func init() {
 			"Review process execution logs for instances executing de-obfuscated commands.",
 			"Inspect cron and startup scripts for persistence of the dropper.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	mustRegister("High_Entropy_ELF_In_Tmp",
 		"High-Entropy Packed Binary in Volatile Directory",
@@ -445,7 +517,8 @@ func init() {
 			"Check running processes (/proc/<pid>/exe) to see if the packed binary is actively running.",
 			"Identify the user account and network connection that downloaded the binary.",
 		},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	mustRegister("High_Entropy_Script",
 		"High-Entropy Script / Encrypted Payload",
@@ -457,7 +530,8 @@ func init() {
 			"Inspect the script for dynamic evaluation wrappers (e.g. eval, exec, base64_decode).",
 			"Quarantine the script payload and verify if target services were compromised.",
 		},
-		ConfidenceMedium)
+		ConfidenceMedium,
+		StrengthContextual)
 
 	mustRegister("Script_Webshell_Traits",
 		"Webshell Backdoor Behavioral Traits",
@@ -471,5 +545,6 @@ func init() {
 			"Isolate or quarantine the webshell script immediately.",
 			"Audit file upload endpoints and web application permissions for unauthorized writes.",
 		},
-		ConfidenceMedium)
+		ConfidenceMedium,
+		StrengthContextual)
 }

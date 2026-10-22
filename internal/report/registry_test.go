@@ -10,7 +10,7 @@ import (
 func TestRegisterRuleMeta_Enforcement(t *testing.T) {
 	// First registration succeeds (unique name); second panics.
 	report.RegisterRuleMeta("Test_Duplicate_Rule", report.RuleMeta{
-		Title: "X", Why: "y", Remediation: []string{"r"},
+		Title: "X", Why: "y", Remediation: []string{"r"}, EvidenceStrength: report.StrengthContextual,
 	})
 	defer func() {
 		if r := recover(); r == nil {
@@ -18,7 +18,7 @@ func TestRegisterRuleMeta_Enforcement(t *testing.T) {
 		}
 	}()
 	report.RegisterRuleMeta("Test_Duplicate_Rule", report.RuleMeta{
-		Title: "X", Why: "y", Remediation: []string{"r"},
+		Title: "X", Why: "y", Remediation: []string{"r"}, EvidenceStrength: report.StrengthContextual,
 	})
 }
 
@@ -27,9 +27,10 @@ func TestRegisterRuleMeta_RejectsEmpty(t *testing.T) {
 		name string
 		meta report.RuleMeta
 	}{
-		{"missing_why", report.RuleMeta{Title: "T", Remediation: []string{"r"}}},
-		{"missing_remediation", report.RuleMeta{Title: "T", Why: "w"}},
-		{"missing_title", report.RuleMeta{Why: "W", Remediation: []string{"r"}}},
+		{"missing_why", report.RuleMeta{Title: "T", Remediation: []string{"r"}, EvidenceStrength: report.StrengthContextual}},
+		{"missing_remediation", report.RuleMeta{Title: "T", Why: "w", EvidenceStrength: report.StrengthContextual}},
+		{"missing_title", report.RuleMeta{Why: "W", Remediation: []string{"r"}, EvidenceStrength: report.StrengthContextual}},
+		{"missing_evidence_strength", report.RuleMeta{Title: "T", Why: "W", Remediation: []string{"r"}}},
 	}
 	for _, tc := range cases {
 		func() {
@@ -108,14 +109,56 @@ func TestAllRegisteredRulesHaveEvidenceStrength(t *testing.T) {
 	if len(names) == 0 {
 		t.Fatal("expected registered rules, got 0")
 	}
+	var directCount, corroboratedCount, contextualCount int
 	for _, n := range names {
 		meta, ok := report.LookupRuleMeta(n)
 		if !ok {
 			t.Errorf("rule %q not found in registry", n)
 			continue
 		}
-		if meta.EvidenceStrength == "" {
-			t.Errorf("rule %q has empty EvidenceStrength", n)
+		switch meta.EvidenceStrength {
+		case report.StrengthDirect:
+			directCount++
+		case report.StrengthCorroborated:
+			corroboratedCount++
+		case report.StrengthContextual:
+			contextualCount++
+		default:
+			t.Errorf("rule %q has invalid EvidenceStrength: %q", n, meta.EvidenceStrength)
+		}
+	}
+	if directCount < 15 {
+		t.Errorf("expected at least 15 direct evidence rules, got %d", directCount)
+	}
+	if corroboratedCount < 3 {
+		t.Errorf("expected at least 3 corroborated evidence rules, got %d", corroboratedCount)
+	}
+	if contextualCount < 30 {
+		t.Errorf("expected at least 30 contextual evidence rules, got %d", contextualCount)
+	}
+}
+
+func TestEvaluateEvidenceStrength_TypedNotNameBased(t *testing.T) {
+	// A registered rule returns the developer-declared strength.
+	strengthRegistered := report.EvaluateEvidenceStrength("Script_Reverse_Shell_Interactive", "reason", false, nil)
+	if strengthRegistered != report.StrengthDirect {
+		t.Errorf("expected StrengthDirect for registered rule, got %s", strengthRegistered)
+	}
+
+	// An unregistered rule matching names that used to trigger substring matches
+	// MUST now default to StrengthContextual (no name inference).
+	unregisteredNames := []string{
+		"Reverse_Shell_Unregistered_Test_Name",
+		"Netcat_Payload_Custom",
+		"Ransomware_Test_Locker",
+		"Userland_Rootkit_Unknown",
+		"Custom_Webshell_Backdoor",
+		"Fake_Proc_Hiding_Technique",
+	}
+	for _, name := range unregisteredNames {
+		s := report.EvaluateEvidenceStrength(name, "malicious signature matched", false, nil)
+		if s != report.StrengthContextual {
+			t.Errorf("unregistered rule %q must default strictly to StrengthContextual, got %s", name, s)
 		}
 	}
 }

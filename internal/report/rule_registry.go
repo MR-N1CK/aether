@@ -1,7 +1,6 @@
 package report
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -24,6 +23,7 @@ var (
 // RegisterRuleMeta registers enrichment metadata for a rule name. It panics on
 // duplicate registration or incomplete metadata so that a rule can never ship
 // without enrichment (fail-fast at process start).
+// EvidenceStrength is strictly required and cannot be defaulted from naming heuristics.
 func RegisterRuleMeta(name string, meta RuleMeta) {
 	if name == "" {
 		panic("report: RegisterRuleMeta called with empty rule name")
@@ -41,7 +41,7 @@ func RegisterRuleMeta(name string, meta RuleMeta) {
 		meta.Confidence = ConfidenceMedium
 	}
 	if meta.EvidenceStrength == "" {
-		meta.EvidenceStrength = deriveRuleEvidenceStrength(name, meta.Confidence)
+		panic("rule " + name + ": explicit EvidenceStrength is required")
 	}
 	ruleRegistryMu.Lock()
 	defer ruleRegistryMu.Unlock()
@@ -79,44 +79,19 @@ func RegisteredRuleNames() []string {
 	return names
 }
 
-// deriveRuleEvidenceStrength determines the canonical EvidenceStrength for a rule.
-func deriveRuleEvidenceStrength(name string, conf Confidence) EvidenceStrength {
-	nl := strings.ToLower(name)
-	if strings.Contains(nl, "reverse_shell") || strings.Contains(nl, "revshell") ||
-		strings.Contains(nl, "netcat") || strings.Contains(nl, "socat") ||
-		strings.Contains(nl, "openssl") ||
-		strings.Contains(nl, "ransomware") || strings.Contains(nl, "ransom") || strings.Contains(nl, "locker") ||
-		strings.Contains(nl, "rootkit") ||
-		strings.Contains(nl, "proc_hiding") || strings.Contains(nl, "process_hiding") ||
-		strings.Contains(nl, "redteam") || strings.Contains(nl, "ghostshell") || strings.Contains(nl, "kali_master") ||
-		strings.Contains(nl, "webshell") || strings.Contains(nl, "trojan") || strings.Contains(nl, "trojaned") ||
-		strings.Contains(nl, "uid0") || strings.Contains(nl, "extra_uid0") ||
-		strings.Contains(nl, "memfd") || strings.Contains(nl, "fileless") ||
-		strings.Contains(nl, "ioc") || strings.Contains(nl, "symlink_escape") ||
-		strings.Contains(nl, "hidden_lkm") {
-		return StrengthDirect
-	}
-
-	if strings.Contains(nl, "multi_vector") || strings.Contains(nl, "mixed") {
-		return StrengthCorroborated
-	}
-
-	return StrengthContextual
-}
-
 // mustRegister is the package-internal registration helper used by init().
-func mustRegister(name, title, why string, mitre []MITREMapping, remediation []string, conf Confidence, strength ...EvidenceStrength) {
-	st := deriveRuleEvidenceStrength(name, conf)
-	if len(strength) > 0 && strength[0] != "" {
-		st = strength[0]
-	}
+// Every rule MUST explicitly provide its EvidenceStrength:
+// - StrengthDirect for confirmed, unambiguous malicious signatures or cryptographic IOCs
+// - StrengthCorroborated for multi-stage or cross-domain persistence setups
+// - StrengthContextual for dual-use tools, uncorroborated listeners, droppers, and operational anomalies
+func mustRegister(name, title, why string, mitre []MITREMapping, remediation []string, conf Confidence, strength EvidenceStrength) {
 	RegisterRuleMeta(name, RuleMeta{
 		Title:            title,
 		Why:              why,
 		MITRE:            mitre,
 		Remediation:      remediation,
 		Confidence:       confidenceValue(conf),
-		EvidenceStrength: st,
+		EvidenceStrength: strength,
 	})
 }
 

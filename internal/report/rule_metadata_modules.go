@@ -13,8 +13,12 @@ func init() {
 }
 
 func registerPersistenceRules() {
-	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence) {
-		mustRegister(name, title, why, mitre, remediation, c)
+	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence, s ...EvidenceStrength) {
+		strength := StrengthContextual
+		if len(s) > 0 && s[0] != "" {
+			strength = s[0]
+		}
+		mustRegister(name, title, why, mitre, remediation, c, strength)
 	}
 
 	m("Persistence_Systemd_Unowned_Unit",
@@ -432,8 +436,12 @@ func registerPersistenceRules() {
 }
 
 func registerProcessRules() {
-	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence) {
-		mustRegister(name, title, why, mitre, remediation, c)
+	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence, s ...EvidenceStrength) {
+		strength := StrengthContextual
+		if len(s) > 0 && s[0] != "" {
+			strength = s[0]
+		}
+		mustRegister(name, title, why, mitre, remediation, c, strength)
 	}
 
 	m("Process_Hidden_PID",
@@ -441,14 +449,16 @@ func registerProcessRules() {
 		"A process is accessible via direct /proc/<PID> stat but absent from the /proc directory listing, indicating procfs-level hiding typical of LKM rootkits.",
 		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1014", TechniqueName: "Rootkit"}, {Tactic: "Defense Evasion", Technique: "T1564.001", TechniqueName: "Hidden Files and Directories"}},
 		[]string{"Dump the hidden process's /proc/<pid>/exe, cmdline, and maps via direct PID access.", "Compare /proc listing vs direct stat from trusted live media."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Process_Interactive_Reverse_Shell",
 		"Interactive Reverse Shell Socket Redirection",
 		"Process stdin/stdout is redirected to a network socket, establishing an interactive shell session with an external host.",
 		[]MITREMapping{{Tactic: "Execution", Technique: "T1059.004", TechniqueName: "Unix Shell"}, {Tactic: "Command and Control", Technique: "T1071", TechniqueName: "Application Layer Protocol"}},
 		[]string{"Terminate the rogue PID (kill -9 <PID>).", "Trace PPID and inspect open sockets; isolate host from network."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Process_Deleted_Binary",
 		"Process Running Deleted Binary",
@@ -497,7 +507,8 @@ func registerProcessRules() {
 		"A process has an anonymous executable memory mapping containing an ELF header, indicating fileless code execution.",
 		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1620", TechniqueName: "Reflective Code Loading"}},
 		[]string{"Dump the anonymous mapping via /proc/<pid>/mem or a memory forensics capture.", "Investigate the process's parent and launch vector."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Process_Fileless_Memory_Mapping",
 		"Fileless Anonymous Memory Mapping",
@@ -550,8 +561,12 @@ func registerProcessRules() {
 }
 
 func registerNetworkRules() {
-	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence) {
-		mustRegister(name, title, why, mitre, remediation, c)
+	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence, s ...EvidenceStrength) {
+		strength := StrengthContextual
+		if len(s) > 0 && s[0] != "" {
+			strength = s[0]
+		}
+		mustRegister(name, title, why, mitre, remediation, c, strength)
 	}
 
 	m("Network_Wildcard_Listener_Unrecognized_Process",
@@ -580,12 +595,17 @@ func registerNetworkRules() {
 		"Legacy alias for Network_IOC_IP_Connection. See the canonical rule for remediation.",
 		[]MITREMapping{{Tactic: "Command and Control", Technique: "T1071", TechniqueName: "Application Layer Protocol"}},
 		[]string{"Identify and terminate the process holding the malicious connection.", "Block the destination IP."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 }
 
 func registerKernelRules() {
-	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence) {
-		mustRegister(name, title, why, mitre, remediation, c)
+	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence, s ...EvidenceStrength) {
+		strength := StrengthContextual
+		if len(s) > 0 && s[0] != "" {
+			strength = s[0]
+		}
+		mustRegister(name, title, why, mitre, remediation, c, strength)
 	}
 
 	m("Kernel_Hidden_LKM_Module_Legacy",
@@ -593,7 +613,8 @@ func registerKernelRules() {
 		"Legacy alias for Kernel_Hidden_LKM_Module.",
 		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1014", TechniqueName: "Rootkit"}},
 		[]string{"Inspect loaded kernel modules and audit /lib/modules."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Kernel_Modprobe_Install_Command_Legacy",
 		"Modprobe Install Command (Legacy Alias)",
@@ -611,8 +632,12 @@ func registerKernelRules() {
 }
 
 func registerUsersRules() {
-	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence) {
-		mustRegister(name, title, why, mitre, remediation, c)
+	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence, s ...EvidenceStrength) {
+		strength := StrengthContextual
+		if len(s) > 0 && s[0] != "" {
+			strength = s[0]
+		}
+		mustRegister(name, title, why, mitre, remediation, c, strength)
 	}
 
 	m("Users_Duplicate_UID",
@@ -687,8 +712,12 @@ func registerUsersRules() {
 }
 
 func registerScannerRules() {
-	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence) {
-		mustRegister(name, title, why, mitre, remediation, c)
+	m := func(name, title, why string, mitre []MITREMapping, remediation []string, c Confidence, s ...EvidenceStrength) {
+		strength := StrengthContextual
+		if len(s) > 0 && s[0] != "" {
+			strength = s[0]
+		}
+		mustRegister(name, title, why, mitre, remediation, c, strength)
 	}
 
 	m("Heuristic_Suspicious_SUID_SGID_Legacy",
@@ -781,119 +810,136 @@ func registerScannerRules() {
 		"YARA rule matched obfuscated PHP code execution backdoor patterns.",
 		[]MITREMapping{{Tactic: "Persistence", Technique: "T1505.003", TechniqueName: "Web Shell"}},
 		[]string{"Quarantine the PHP file and review web server access logs around its mtime."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Webshell_PHP_Known_Families",
 		"PHP Web Shell — Known Families (c99/r57/WSO/b374k) (YARA)",
 		"YARA rule matched strings from known PHP webshell families.",
 		[]MITREMapping{{Tactic: "Persistence", Technique: "T1505.003", TechniqueName: "Web Shell"}},
 		[]string{"Quarantine the PHP file and audit the web server for compromise."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Webshell_JSP_Runtime_Exec",
 		"JSP Web Shell — Runtime Exec (YARA)",
 		"YARA rule matched JSP runtime execution patterns typical of Java web shells.",
 		[]MITREMapping{{Tactic: "Persistence", Technique: "T1505.003", TechniqueName: "Web Shell"}},
 		[]string{"Quarantine the JSP file and review application server logs."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Implant_RedTeam_Persistence_Framework",
 		"Red-Team Persistence Framework Implant (YARA)",
 		"YARA rule matched an automated red-team persistence framework (stealth procfs mounting and backdoor installers).",
 		[]MITREMapping{{Tactic: "Persistence", Technique: "T1547.001", TechniqueName: "Boot or Logon Autostart Execution"}},
 		[]string{"Isolate the host and inspect /proc mounts, systemd units, and cron for implants."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Rootkit_LDPRELOAD_Hook_Artifact",
 		"Userland Rootkit LD_PRELOAD Hook Artifact (YARA)",
 		"YARA rule matched userland rootkit artifacts hooking libc via dynamic linker interposition.",
 		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1014", TechniqueName: "Rootkit"}},
 		[]string{"Inspect /etc/ld.so.preload and audit preloaded libraries.", "Reboot from trusted media for forensics."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Rootkit_Diamorphine_Reptile_Strings",
 		"Kernel Rootkit Strings (Diamorphine/Reptile) (YARA)",
 		"YARA rule matched known kernel rootkit control strings.",
 		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1014", TechniqueName: "Rootkit"}},
 		[]string{"Audit loaded kernel modules and inspect /lib/modules for malicious .ko files.", "Reboot into trusted live media."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Malware_Cryptominer_Stratum_Pool",
 		"Cryptominer Stratum Pool Configuration (YARA)",
 		"YARA rule matched cryptocurrency mining pool endpoints or miner configuration.",
 		[]MITREMapping{{Tactic: "Impact", Technique: "T1496", TechniqueName: "Resource Hijacking"}},
 		[]string{"Terminate the miner process and remove its persistence.", "Block mining pool domains at the perimeter."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Dropper_Remote_Pipe_Shell_Execution",
 		"Remote Pipe-to-Shell Dropper (YARA)",
 		"YARA rule matched a dropper that fetches remote code and pipes it to a shell.",
 		[]MITREMapping{{Tactic: "Execution", Technique: "T1059.004", TechniqueName: "Unix Shell"}, {Tactic: "Command and Control", Technique: "T1105", TechniqueName: "Ingress Tool Transfer"}},
 		[]string{"Verify whether the remote URL is a trusted installer.", "Inspect the URL content offline before executing."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	m("Linux_Ransomware_Python_Locker",
 		"Python Ransomware Locker (YARA)",
 		"YARA rule matched a Python ransomware locker encrypting files and generating ransom notes.",
 		[]MITREMapping{{Tactic: "Impact", Technique: "T1486", TechniqueName: "Data Encrypted for Impact"}},
 		[]string{"Quarantine the script and verify whether files were encrypted.", "Check for recovery keys in temporary locations."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Malware_Data_Exfiltration_Client",
 		"Data Exfiltration Client (YARA)",
 		"YARA rule matched a data exfiltration client crawling and exfiltrating files over the network.",
 		[]MITREMapping{{Tactic: "Exfiltration", Technique: "T1041", TechniqueName: "Exfiltration Over C2 Channel"}},
 		[]string{"Inspect firewall logs for the exfiltration destination and quarantine the client script."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Malware_Data_Exfiltration_Server",
 		"Data Exfiltration Collection Server (YARA)",
 		"YARA rule matched a C2 listener reconstructing exfiltrated directory trees.",
 		[]MITREMapping{{Tactic: "Command and Control", Technique: "T1071.001", TechniqueName: "Web Protocols"}},
 		[]string{"Terminate the listener and block its port; inspect dumped data for compromised clients."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	m("Linux_Backdoor_Reverse_Shell_OneLiner",
 		"Reverse Shell One-Liner Backdoor (YARA)",
 		"YARA rule matched a reverse shell one-liner backdoor.",
 		[]MITREMapping{{Tactic: "Execution", Technique: "T1059.004", TechniqueName: "Unix Shell"}},
 		[]string{"Quarantine the script and inspect network connections for the C2 endpoint."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Backdoor_Encrypted_Reverse_Shell",
 		"Encrypted Reverse Shell Backdoor (YARA)",
 		"YARA rule matched an encrypted (TLS-wrapped) reverse shell backdoor.",
 		[]MITREMapping{{Tactic: "Command and Control", Technique: "T1573.002", TechniqueName: "Asymmetric Cryptography"}},
 		[]string{"Inspect TLS egress logs for the destination host and block the endpoint."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Script_PowerShell_Encoded_Execution",
 		"Encoded PowerShell Command Execution (YARA)",
 		"YARA rule matched PowerShell Core invocation with Base64 encoded payload flags (-EncodedCommand).",
 		[]MITREMapping{{Tactic: "Execution", Technique: "T1059.001", TechniqueName: "PowerShell"}, {Tactic: "Defense Evasion", Technique: "T1027", TechniqueName: "Obfuscated Files or Information"}},
 		[]string{"Decode the Base64 command payload using `echo <base64> | base64 -d | iconv -f utf-16le`.", "Identify child processes and network connections spawned by PowerShell.", "Quarantine the invoking script."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthContextual)
 
 	m("Linux_Script_Cloud_Exfiltration_Tool",
 		"Automated Cloud Storage Exfiltration Tool (YARA)",
 		"YARA rule matched automated cloud storage synchronization/upload commands targeting sensitive local directories or archives.",
 		[]MITREMapping{{Tactic: "Exfiltration", Technique: "T1567.002", TechniqueName: "Exfiltration to Cloud Storage"}, {Tactic: "Collection", Technique: "T1005", TechniqueName: "Data from Local System"}},
 		[]string{"Review the destination cloud storage credentials and remote endpoints in the script.", "Check egress firewall logs for high-volume uploads to cloud providers.", "Revoke compromised cloud access tokens."},
-		ConfidenceMedium)
+		ConfidenceMedium,
+		StrengthContextual)
 
 	m("Linux_Persistence_Linker_Audit_Hijack",
 		"Dynamic Linker Hook Hijack (LD_PRELOAD / LD_AUDIT) (YARA)",
 		"YARA rule matched a dynamic linker hook value referencing a volatile or non-standard library directory, a relative path, or ld.so preload/audit configuration.",
 		[]MITREMapping{{Tactic: "Persistence", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}, {Tactic: "Defense Evasion", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}},
 		[]string{"Inspect /etc/ld.so.preload, /etc/ld.so.audit, and environment configurations for rogue library paths.", "Verify integrity and package ownership of preloaded or audit libraries.", "Remove unauthorized LD_PRELOAD / LD_AUDIT entries."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Linux_Persistence_PAM_Exec_Suspicious",
 		"Suspicious PAM Authentication Hook (pam_exec) (YARA)",
 		"YARA rule matched PAM configuration directing authentication hooks to volatile or unprivileged paths.",
 		[]MITREMapping{{Tactic: "Persistence", Technique: "T1556.004", TechniqueName: "Pluggable Authentication Modules"}, {Tactic: "Credential Access", Technique: "T1556", TechniqueName: "Modify Authentication Process"}},
 		[]string{"Inspect the referenced script in PAM configuration for unauthorized commands.", "Verify package ownership of the PAM directive.", "Quarantine rogue scripts and remove the pam_exec directive."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthCorroborated)
 
 	// Phase 5: Linux System Visibility Expansion
 	m("Process_Environ_LDPreload",
@@ -901,7 +947,8 @@ func registerScannerRules() {
 		"The process was launched with an LD_PRELOAD value adjudicated as anomalous (volatile directory, non-absolute path, missing library, or a library outside the standard linker directories) — the classic userland rootkit preload pattern used to intercept libc calls in every child process.",
 		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}},
 		[]string{"Inspect the preloaded library file path and verify package ownership.", "Terminate the injected process and investigate the parent process that spawned it.", "Audit /etc/ld.so.preload and shell startup files."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Process_Environ_AntiForensic",
 		"Anti-Forensic History Tampering in Process Environment",
@@ -915,7 +962,8 @@ func registerScannerRules() {
 		"The process runtime environment contains indicators of known offensive C2 frameworks or anonymous proxy configurations.",
 		[]MITREMapping{{Tactic: "Command and Control", Technique: "T1071.001", TechniqueName: "Web Protocols"}},
 		[]string{"Identify the process binary and established network sockets.", "Isolate the host from the network and dump memory if required for forensics.", "Terminate the process and trace how it was executed."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Kernel_eBPF_Persistent_Probe",
 		"Suspicious or Unmapped eBPF / Kernel Trace Hook",
@@ -943,7 +991,8 @@ func registerScannerRules() {
 		"A system executable in a standard system directory has a cryptographic checksum that does not match the package manager's signed/recorded database, indicating binary tampering or trojanization.",
 		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1036.005", TechniqueName: "Match Legitimate Name"}, {Tactic: "Persistence", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}},
 		[]string{"Immediately quarantine the compromised binary.", "Reinstall the package using trusted repositories (`apt-get install --reinstall <package>`).", "Initiate incident response to investigate how root-level filesystem modification occurred."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Persistence_ELF_RPATH_Hijack",
 		"ELF Library Search Path Hijack (DT_RPATH / DT_RUNPATH)",
@@ -964,7 +1013,8 @@ func registerScannerRules() {
 		"A container daemon socket (e.g., docker.sock or containerd.sock) is mounted inside a running container, providing containerized processes direct root-level execution privileges on the underlying host system.",
 		[]MITREMapping{{Tactic: "Privilege Escalation", Technique: "T1611", TechniqueName: "Escape to Host"}, {Tactic: "Execution", Technique: "T1610", TechniqueName: "Deploy Container"}},
 		[]string{"Remove Docker/Containerd socket mounts from container run configurations.", "Use Docker-in-Docker (dind) rootless mode or sysbox if container orchestration is required.", "Audit processes launched on the host during the container execution timeframe."},
-		ConfidenceHigh)
+		ConfidenceHigh,
+		StrengthCorroborated)
 
 	m("Process_Environ_LDAudit",
 		"Process Environment Injected with LD_AUDIT Hook",

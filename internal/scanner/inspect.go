@@ -306,6 +306,8 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 	var hasPentestDowngrade bool
 	var hasPackageDowngrade bool
 	var originalYaraSeverities []string
+	var hasExplicitAlertOrCritical bool
+	var yaraDeclaredStrength report.EvidenceStrength
 
 	for _, ym := range yaraMatches {
 		if isAllowlisted && ym.Severity < report.SeverityAlert {
@@ -339,6 +341,21 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 				sUpper := strings.ToUpper(strings.TrimSpace(sVal))
 				if sUpper == "ALERT" || sUpper == "CRITICAL" {
 					isExplicitAlertOrCritical = true
+					hasExplicitAlertOrCritical = true
+				}
+			}
+			if esVal, ok := ym.Metadata["evidence_strength"].(string); ok {
+				switch strings.ToUpper(strings.TrimSpace(esVal)) {
+				case "DIRECT", "STRENGTHDIRECT":
+					yaraDeclaredStrength = report.StrengthDirect
+				case "CORROBORATED", "STRENGTHCORROBORATED":
+					if yaraDeclaredStrength != report.StrengthDirect {
+						yaraDeclaredStrength = report.StrengthCorroborated
+					}
+				case "CONTEXTUAL", "STRENGTHCONTEXTUAL":
+					if yaraDeclaredStrength == "" {
+						yaraDeclaredStrength = report.StrengthContextual
+					}
 				}
 			}
 		}
@@ -417,6 +434,14 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		}
 
 		f := report.NewFinding("filesystem", highestSeverity, virtPath, reason, primaryRule)
+		if hashMatch != nil && hashMatch.IsHashMatch {
+			f.EvidenceStrength = report.StrengthDirect
+		} else if hasExplicitAlertOrCritical && yaraDeclaredStrength == "" {
+			yaraDeclaredStrength = report.StrengthDirect
+		}
+		if yaraDeclaredStrength != "" {
+			f.EvidenceStrength = yaraDeclaredStrength
+		}
 		f.Hashes["MD5"] = hashRes.Hashes.MD5
 		f.Hashes["SHA1"] = hashRes.Hashes.SHA1
 		f.Hashes["SHA256"] = hashRes.Hashes.SHA256

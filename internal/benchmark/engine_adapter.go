@@ -207,11 +207,12 @@ func (a *EngineAdapter) ScanCase(c BenchmarkCorpusCase, pkgDB pkgdb.PackageDB) (
 		contentStr := string(data)
 		if strings.Contains(contentStr, "ExecStart=/tmp/") || strings.Contains(contentStr, "ExecStart=/var/tmp/") || strings.Contains(contentStr, "ExecStart=/dev/shm/") {
 			f := &report.Finding{
-				Path:       path,
-				RuleName:   "Persistence_Service_Volatile_Path",
-				Reason:     "Systemd service unit executes executable from volatile/temporary directory",
-				Severity:   report.SeverityAlert,
-				Confidence: report.ConfidenceHigh,
+				Path:             path,
+				RuleName:         "Persistence_Service_Volatile_Path",
+				Reason:           "Systemd service unit executes executable from volatile/temporary directory",
+				Severity:         report.SeverityAlert,
+				Confidence:       report.ConfidenceHigh,
+				EvidenceStrength: report.StrengthDirect,
 			}
 			report.DetermineVerdict(f, pkgDB, isExec, false, false, nil)
 			report.PopulateFindingDetails(f)
@@ -224,11 +225,12 @@ func (a *EngineAdapter) ScanCase(c BenchmarkCorpusCase, pkgDB pkgdb.PackageDB) (
 		if strings.Contains(contentStr, "ssh-rsa") || strings.Contains(contentStr, "ssh-ed25519") {
 			if strings.Contains(contentStr, "backdoor") || strings.Contains(contentStr, "attacker") || !strings.Contains(path, "/usr/lib") {
 				f := &report.Finding{
-					Path:       path,
-					RuleName:   "SSH_Unauthorized_Key_Injection",
-					Reason:     "Unauthorized SSH public key configured in authorized_keys",
-					Severity:   report.SeverityAlert,
-					Confidence: report.ConfidenceHigh,
+					Path:             path,
+					RuleName:         "SSH_Unauthorized_Key_Injection",
+					Reason:           "Unauthorized SSH public key configured in authorized_keys",
+					Severity:         report.SeverityAlert,
+					Confidence:       report.ConfidenceHigh,
+					EvidenceStrength: report.StrengthDirect,
 				}
 				report.DetermineVerdict(f, pkgDB, isExec, false, false, nil)
 				report.PopulateFindingDetails(f)
@@ -263,11 +265,12 @@ func (a *EngineAdapter) ScanCase(c BenchmarkCorpusCase, pkgDB pkgdb.PackageDB) (
 	// 7. IOC signature match
 	if c.Subcategory == "ioc_matches" || strings.Contains(string(data), "MALICIOUS_THREAT_SIGNATURE_PAYLOAD_C2") {
 		f := &report.Finding{
-			Path:       path,
-			RuleName:   "IOC_Hash_Match",
-			Reason:     "Cryptographic threat intelligence IOC hash match (Severity: ALERT)",
-			Severity:   report.SeverityAlert,
-			Confidence: report.ConfidenceHigh,
+			Path:             path,
+			RuleName:         "IOC_Hash_Match",
+			Reason:           "Cryptographic threat intelligence IOC hash match (Severity: ALERT)",
+			Severity:         report.SeverityAlert,
+			Confidence:       report.ConfidenceHigh,
+			EvidenceStrength: report.StrengthDirect,
 		}
 		report.DetermineVerdict(f, pkgDB, isExec, false, false, nil)
 		report.PopulateFindingDetails(f)

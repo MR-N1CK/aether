@@ -592,6 +592,17 @@ func isVolatileOrWebOrPersistencePath(cleaned string, cfg *config.Config) bool {
 		return true
 	}
 
+	// User config/data and third-party application paths
+	if strings.HasPrefix(cleaned, "/opt/") || cleaned == "/opt" ||
+		strings.HasPrefix(cleaned, "/usr/local/") || cleaned == "/usr/local" ||
+		strings.HasPrefix(cleaned, "/home/") || cleaned == "/home" ||
+		strings.HasPrefix(cleaned, "/root/") || cleaned == "/root" ||
+		strings.Contains(cleaned, "/.config/") || strings.HasSuffix(cleaned, "/.config") ||
+		strings.Contains(cleaned, "/.local/") || strings.HasSuffix(cleaned, "/.local") ||
+		strings.Contains(cleaned, "/.") {
+		return true
+	}
+
 	// Check configured temp directories if any
 	if cfg != nil && len(cfg.Scan.TempDirs) > 0 {
 		for _, td := range cfg.Scan.TempDirs {
@@ -711,8 +722,14 @@ func hasScriptAttackToken(data []byte) bool {
 // - Text-like files (printable ASCII + whitespace >= 85% in first 4KB) are always inspected, catching
 //   shebang-less Python, Bash, Perl, PHP, Ruby, etc.
 // - Binary files outside volatile/web paths are skipped.
-// - Files inside volatile/web/persistence paths that contain active script attack tokens are inspected even if non-text.
-func isScriptOrTextCandidate(path string, data []byte, cfg *config.Config) bool {
+// isScriptOrTextCandidate checks if the file has characteristics of an interpretable script,
+// configuration file, or text payload rather than a binary asset (image, media, archive, database, compiled binary).
+// - Files with shebang are always inspected.
+// - Files with any execute bit (+x) that carry script attack primitives are always inspected regardless of text-likeness.
+// - Media / archive files outside volatile/web/user-app paths are rejected immediately by extension without token scanning.
+// - Text-like files (printable ASCII + whitespace >= 85% in first 4KB) are always inspected.
+// - Files inside volatile/web/user-app/persistence paths that contain active script attack tokens are inspected even if non-text.
+func isScriptOrTextCandidate(path string, data []byte, cfg *config.Config, modeOpt ...os.FileMode) bool {
 	if len(data) == 0 || IsELF(data) || bytes.HasPrefix(data, []byte("!<arch>\n")) {
 		return false
 	}
@@ -722,21 +739,36 @@ func isScriptOrTextCandidate(path string, data []byte, cfg *config.Config) bool 
 		return true
 	}
 
+	// Determine execute bit (+x)
+	isExec := false
+	if len(modeOpt) > 0 {
+		isExec = (modeOpt[0] & 0111) != 0
+	} else if fi, err := os.Stat(path); err == nil {
+		isExec = (fi.Mode() & 0111) != 0
+	}
+
+	// 2. Always inspect executable files carrying active attack tokens regardless of text-likeness.
+	// Bash and shells strip NUL bytes during script execution, so an executable script padded
+	// with NUL bytes (>15%) must never evade inspection.
+	if isExec && hasScriptAttackToken(data) {
+		return true
+	}
+
 	cleaned := filepath.Clean(path)
 	inVolatileOrWeb := isVolatileOrWebOrPersistencePath(cleaned, cfg)
 
-	// 2. Fast rejection of known static media/archive assets outside volatile/web paths
+	// 3. Fast rejection of known static media/archive assets outside volatile/web paths
 	if !inVolatileOrWeb && isMediaOrArchiveExt(cleaned) {
 		return false
 	}
 
-	// 3. Fast text-likeness ratio: printable ASCII + whitespace >= 85% in first 4KB.
+	// 4. Fast text-likeness ratio: printable ASCII + whitespace >= 85% in first 4KB.
 	// Closes shebang-less script bypasses (Python socket shells, Bash, Perl, PHP).
 	if isTextLikeness(data) {
 		return true
 	}
 
-	// 4. For non-text or binary-like files: only inspect if inside volatile, web, or persistence
+	// 5. For non-text or binary-like files: only inspect if inside volatile, web, or persistence
 	// paths AND carrying high-specificity attack tokens (e.g. dropped script inside .dat/.bin, or embedded payload).
 	if inVolatileOrWeb && hasScriptAttackToken(data) {
 		return true
@@ -750,8 +782,8 @@ func isScriptOrTextCandidate(path string, data []byte, cfg *config.Config) bool 
 // webshells, droppers, ransomware encryptors, and data exfiltration routines.
 // Files larger than 2MB are evaluated in sliding overlapping chunks (1MB window, 64KB overlap)
 // to prevent middle-of-file evasion attacks while maintaining strictly bounded memory usage.
-func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageDB, cfg *config.Config) []*HeuristicMatch {
-	if !isScriptOrTextCandidate(path, data, cfg) {
+func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageDB, cfg *config.Config, modeOpt ...os.FileMode) []*HeuristicMatch {
+	if !isScriptOrTextCandidate(path, data, cfg, modeOpt...) {
 		return nil
 	}
 

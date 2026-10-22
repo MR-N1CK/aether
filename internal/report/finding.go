@@ -225,6 +225,10 @@ func PopulateFindingDetails(f *Finding) {
 	}
 
 	// Legacy substring fallback for unregistered / custom names.
+	// Unregistered rules default to ConfidenceMedium (contextual and unproven).
+	if f.Confidence == "" {
+		f.Confidence = ConfidenceMedium
+	}
 	if f.Title == "" {
 		if f.RuleName != "" {
 			f.Title = strings.ReplaceAll(f.RuleName, "_", " ")
@@ -237,7 +241,6 @@ func PopulateFindingDetails(f *Finding) {
 
 	switch {
 	case strings.Contains(rule, "multi_vector") || strings.Contains(rule, "multi_persistence"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Multi-Vector Persistence Payload"
 		f.Why = "The same executable or hidden directory payload is wired into multiple independent persistence hooks (e.g. systemd, cron, shell profiles, or SSH), indicating an intentional multi-stage persistence setup."
 		f.MITRE = []MITREMapping{
@@ -251,7 +254,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "suspicious_private_key") || strings.Contains(rule, "private_key_location"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Private Key Material in Suspicious Location"
 		f.Why = "Cryptographic private key headers (OpenSSH/PEM/RSA/EC) were identified in an unowned, temporary, or hidden directory outside standard SSH/SSL configuration paths."
 		f.MITRE = []MITREMapping{
@@ -264,7 +266,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "redteam") || strings.Contains(rule, "persistence_framework") || strings.Contains(rule, "ghostshell") || strings.Contains(rule, "kali_master"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Red-Team Stealth Implant & Persistence Framework"
 		f.Why = "The script contains signatures of an automated red-team persistence framework (such as GhostShell/Kali-Master), including stealth procfs process hiding, fake systemd/cron hooks, and persistent reverse shell listeners."
 		f.MITRE = []MITREMapping{
@@ -279,7 +280,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "proc_hiding") || strings.Contains(rule, "process_hiding"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Stealth Process Hiding via Procfs Manipulation"
 		f.Why = "The file mounts a tmpfs layer over /proc/<PID> entries to conceal malicious background processes and backdoors from tools like ps, top, and lsof."
 		f.MITRE = []MITREMapping{
@@ -292,7 +292,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "ransomware") || strings.Contains(rule, "ransom") || strings.Contains(rule, "locker"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Ransomware File Encryptor & Locker"
 		f.Why = "The script performs automated recursive filesystem encryption (Fernet/AES), locks target files (.locked/.enc), destroys original copies, and generates ransom demand notes."
 		f.MITRE = []MITREMapping{
@@ -306,7 +305,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "exfiltration") || strings.Contains(rule, "exfil") || strings.Contains(rule, "stealer"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Automated Data Exfiltration / File Stealer"
 		f.Why = "The script recursively crawls directories, compresses and encodes document data, and exfiltrates files outbound over network sockets to a remote C2 server."
 		f.MITRE = []MITREMapping{
@@ -320,7 +318,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "exfil_server") || strings.Contains(rule, "c2_server"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "C2 Data Exfiltration Collection Server"
 		f.Why = "The script configures a listening network server to receive, decompress, and reconstruct exfiltrated directory trees and stolen credentials."
 		f.MITRE = []MITREMapping{
@@ -333,7 +330,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "interactive_reverse_shell"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Interactive Reverse Shell Socket Redirection"
 		f.Why = "Process standard input (stdin) or output (stdout) is redirected to an active network socket, establishing an interactive shell session with an external host."
 		f.MITRE = []MITREMapping{
@@ -347,7 +343,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "container_dangerous_capability") || strings.Contains(rule, "capability_overprivilege"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Container Process with Dangerous Host Breakout Capabilities"
 		f.Why = "A container process runs with elevated Linux capabilities (e.g. CAP_SYS_ADMIN, CAP_SYS_PTRACE, CAP_DAC_READ_SEARCH), allowing potential container breakout and host compromise."
 		f.MITRE = []MITREMapping{
@@ -361,7 +356,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "reverse_shell") || strings.Contains(rule, "revshell") || strings.Contains(rule, "netcat") || strings.Contains(rule, "socat") || strings.Contains(rule, "openssl"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Interactive Reverse Shell Script / Backdoor"
 		f.Why = "The file contains automated network socket redirection commands (/dev/tcp, openssl s_client, netcat -e, socat, or inline sockets) designed to connect outbound and grant an interactive remote command shell."
 		f.MITRE = []MITREMapping{
@@ -376,7 +370,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "download_and_execute") || strings.Contains(rule, "dropper"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Remote Download and Pipe Execution Dropper"
 		f.Why = "The script downloads arbitrary code over HTTP/HTTPS and pipes it directly into an interpreter (e.g., curl | bash), which is a common staging pattern for malware droppers."
 		f.MITRE = []MITREMapping{
@@ -389,7 +382,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "webshell") || strings.Contains(rule, "eval"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Possible Web Shell / Dynamic Code Execution"
 		f.Why = "Matching YARA signatures or heuristics detected dynamic code execution patterns (eval, base64 payload decoding, system command wrappers) typical of backdoor web shells."
 		f.MITRE = []MITREMapping{
@@ -414,7 +406,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "memfd") || strings.Contains(rule, "deleted_binary"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Memory Execution / Unlinked Binary"
 		f.Why = "A running process executable has been unlinked from disk or executed entirely out of an anonymous in-memory file descriptor (memfd_create)."
 		f.MITRE = []MITREMapping{
@@ -427,7 +418,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "uid0") || strings.Contains(rule, "extra_uid0"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Rogue Non-Root UID 0 Account"
 		f.Why = "A non-root user account in /etc/passwd has been assigned UID 0, giving it unconstrained root administrative privileges."
 		f.MITRE = []MITREMapping{
@@ -441,7 +431,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "rootkit") || strings.Contains(rule, "diamorphine"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Kernel Rootkit / LKM Module Artifacts"
 		f.Why = "Kernel module strings or symbol hooks associated with known Linux rootkits (e.g., Diamorphine/Reptile) were detected."
 		f.MITRE = []MITREMapping{
@@ -455,7 +444,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "ioc") || strings.Contains(strings.ToLower(f.Reason), "ioc match"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Cryptographic Threat Intelligence IOC Match"
 		f.Why = "The file content or cryptographic SHA-256 hash matches a known high-confidence threat indicator of compromise (IOC)."
 		f.MITRE = []MITREMapping{
@@ -468,7 +456,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "ssh") || strings.Contains(rule, "authorized_key"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Unauthorized SSH Key Injection / Backdoor"
 		f.Why = "An unauthorized public key has been appended to an administrative or user authorized_keys file for persistent remote access."
 		f.MITRE = []MITREMapping{
@@ -518,7 +505,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "kernel_thread_masquerade"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Process Masquerading as Kernel Thread"
 		f.Why = "A user-space process with bracketed naming convention (e.g., [kworker/...]) is running with user-space memory mappings, masquerading as a Linux kernel thread to evade detection."
 		f.MITRE = []MITREMapping{
@@ -530,7 +516,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "system_daemon_masquerade"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Process Masquerading as System Daemon"
 		f.Why = "A process name matches a standard system daemon (e.g. sshd, cron) but its executable is located in a non-standard path outside /usr, /bin, or /sbin."
 		f.MITRE = []MITREMapping{
@@ -564,7 +549,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "deleted_binary_suspicious_location"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Deleted Binary Running from Temporary/Suspicious Path"
 		f.Why = "A running process executable was deleted from a temporary or volatile directory (/tmp, /var/tmp, /dev/shm), typical of dropper malware executing memory payloads then unlinking on-disk binaries."
 		f.MITRE = []MITREMapping{
@@ -577,7 +561,6 @@ func PopulateFindingDetails(f *Finding) {
 		}
 
 	case strings.Contains(rule, "root_user_writable_exe") || strings.Contains(rule, "root_world_writable") || strings.Contains(rule, "root_nonroot_owned"):
-		f.Confidence = ConfidenceHigh
 		f.Title = "Root Process Running Non-Root or Writable Executable"
 		f.Why = "A process running as root (UID 0) is executing a binary owned by a non-root user or located in a user-writable directory, presenting high local privilege escalation risk."
 		f.MITRE = []MITREMapping{

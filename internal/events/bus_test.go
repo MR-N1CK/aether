@@ -187,6 +187,15 @@ func TestComputeVerdict(t *testing.T) {
 	if v, reason := events.ComputeVerdict([]report.Finding{contextualFinding}, 1, 0, 0, 0); v != events.VerdictSuspicious {
 		t.Errorf("expected SUSPICIOUS for contextual alert, got %s (reason: %s)", v, reason)
 	}
+
+	// Regression: Alert with StrengthContextual paired with ConfidenceHigh must yield SUSPICIOUS, not COMPROMISED.
+	contextualHighFinding := report.NewFinding("test", report.SeverityAlert, "/path/script.sh", "contextual pattern", "Fake_Contextual_Rule")
+	contextualHighFinding.EvidenceStrength = report.StrengthContextual
+	contextualHighFinding.Confidence = report.ConfidenceHigh
+	contextualHighFinding.Metadata["confidence"] = "high"
+	if v, reason := events.ComputeVerdict([]report.Finding{contextualHighFinding}, 1, 0, 0, 0); v != events.VerdictSuspicious {
+		t.Errorf("expected SUSPICIOUS for contextual alert even with ConfidenceHigh, got %s (reason: %s)", v, reason)
+	}
 }
 
 func TestCoverageStats_DenominatorAndPercentage(t *testing.T) {

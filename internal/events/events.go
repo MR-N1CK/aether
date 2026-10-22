@@ -379,10 +379,6 @@ func ComputeVerdict(findings []report.Finding, alerts, warnings, notices, notice
 				isHC = true
 			} else if hc, ok := f.Metadata["high_confidence"].(bool); ok && hc {
 				isHC = true
-			} else if conf, ok := f.Metadata["confidence"].(string); ok && strings.EqualFold(conf, "high") {
-				isHC = true
-			} else if f.Confidence == report.ConfidenceHigh {
-				isHC = true
 			} else if ioc, ok := f.Metadata["is_ioc_match"].(bool); ok && ioc {
 				isHC = true
 			} else if strongCount, ok := f.Metadata["distinct_strong_classes"].(int); ok && strongCount >= 2 {

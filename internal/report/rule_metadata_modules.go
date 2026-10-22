@@ -616,12 +616,47 @@ func registerKernelRules() {
 		ConfidenceHigh,
 		StrengthDirect)
 
+	m("Kernel_Modprobe_Install_Command",
+		"Suspicious Command in Modprobe Install Hook",
+		"A modprobe configuration file under /etc/modprobe.d contains an install directive that executes an arbitrary or suspicious command when a kernel module is loaded.",
+		[]MITREMapping{{Tactic: "Persistence", Technique: "T1547.006", TechniqueName: "Kernel Modules and Extensions"}},
+		[]string{"Inspect the flagged modprobe configuration file under /etc/modprobe.d.", "Verify whether the command is part of an official vendor package.", "Remove or neutralize unauthorized install/softdep commands."},
+		ConfidenceHigh,
+		StrengthContextual)
+
 	m("Kernel_Modprobe_Install_Command_Legacy",
 		"Modprobe Install Command (Legacy Alias)",
 		"Legacy alias for Kernel_Modprobe_Install_Command.",
 		[]MITREMapping{{Tactic: "Persistence", Technique: "T1547.006", TechniqueName: "Kernel Modules and Extensions"}},
 		[]string{"Inspect modprobe configuration under /etc/modprobe.d and /lib/modprobe.d."},
 		ConfidenceMedium)
+
+	m("Kernel_Taint_Forced_Module",
+		"Kernel Tainted by Force-Loaded or Force-Unloaded Module",
+		"The Linux kernel taint flags indicate that a kernel module was forcibly loaded (insmod -f) or forcibly unloaded (rmmod -f), bypassing module version and symbol safety checks.",
+		[]MITREMapping{
+			{Tactic: "Persistence", Technique: "T1547.006", TechniqueName: "Kernel Modules and Extensions"},
+			{Tactic: "Defense Evasion", Technique: "T1014", TechniqueName: "Rootkit"},
+		},
+		[]string{"Inspect loaded kernel modules using `lsmod` and audit recently loaded .ko files.", "Verify kernel logs (dmesg) to identify which module triggered the forced taint flag.", "Ensure only verified, signed vendor modules are loaded."},
+		ConfidenceMedium,
+		StrengthContextual)
+
+	m("Kernel_Taint_OutOfTree",
+		"Kernel Tainted by Out-of-Tree or Proprietary Module",
+		"The Linux kernel reports taint flags corresponding to out-of-tree (DKMS), proprietary (e.g. Nvidia, VirtualBox), or unsigned kernel modules.",
+		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1547.006", TechniqueName: "Kernel Modules and Extensions"}},
+		[]string{"Review loaded third-party drivers (Nvidia, VirtualBox, ZFS, wireguard).", "Verify module signatures and ensure DKMS builds match installed packages."},
+		ConfidenceLow,
+		StrengthContextual)
+
+	m("Kernel_Taint_Active",
+		"Linux Kernel Taint Flags Active",
+		"Active taint flags were detected in /proc/sys/kernel/tainted, indicating non-standard kernel runtime state, hardware machine check events, or kernel warnings.",
+		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1547.006", TechniqueName: "Kernel Modules and Extensions"}},
+		[]string{"Inspect /proc/sys/kernel/tainted bitmask against documented kernel flags.", "Review dmesg output for kernel oops, machine check exceptions, or hardware warnings."},
+		ConfidenceLow,
+		StrengthContextual)
 
 	m("Kernel_Taint_Active_Legacy",
 		"Kernel Taint Flags Active (Legacy Alias)",

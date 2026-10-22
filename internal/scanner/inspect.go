@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -135,7 +136,7 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 	hSUID := CheckSuspiciousSUID(virtPath, mode, s.cfg)
 	hWorldWritable := CheckWorldWritableInEtc(virtPath, mode, s.cfg)
 	hKey := CheckSuspiciousPrivateKeyMaterial(virtPath, inspectData, s.pkgDB, s.cfg)
-	hScripts := CheckAllSuspiciousScriptContent(virtPath, inspectData, s.pkgDB, s.cfg)
+	hScripts := CheckAllSuspiciousScriptContent(virtPath, inspectData, s.pkgDB, s.cfg, os.FileMode(mode))
 	hEntropyELF := CheckHighEntropyELF(virtPath, inspectData, s.cfg)
 	hEntropyScript := CheckHighEntropyScript(virtPath, inspectData, s.cfg)
 	hDecodes, decodeLayers, decodeYaraMatches := DecodeAndRescanWithYARA(ctx, virtPath, inspectData, s.pkgDB, s.cfg, s.memoryBudget, yScanner)

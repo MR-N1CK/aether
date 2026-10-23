@@ -839,6 +839,124 @@ func registerScannerRules() {
 		[]string{"Increase --yara-max-filesize if deep content inspection of large files is required."},
 		ConfidenceLow)
 
+	// Static ELF Behavioral & Capability Analysis Rules
+	m("ELF_Behavioral_ReverseShell_Combo",
+		"Compiled Reverse Shell Binary (Static Behavioral Capability)",
+		"Static analysis of the unmanaged ELF binary identified the programmatic signature of a reverse shell: socket networking imports (socket, connect) combined with standard I/O redirection (dup2/dup3) and process execution (execve/system).",
+		[]MITREMapping{
+			{Tactic: "Execution", Technique: "T1059.004", TechniqueName: "Unix Shell"},
+			{Tactic: "Command and Control", Technique: "T1071.001", TechniqueName: "Web Protocols"},
+		},
+		[]string{
+			"Terminate any active processes executing this binary (`kill -9 <pid>`).",
+			"Quarantine the binary immediately and preserve a copy for sandbox reverse engineering.",
+			"Inspect network connections to identify the remote C2 IP and port.",
+			"Check cron, systemd, and shell profiles for autostart persistence launching this binary.",
+		},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("ELF_Behavioral_C2_Listener_Combo",
+		"Compiled C2 / Bind Shell Listener Binary (Static Behavioral Capability)",
+		"Static analysis of the unmanaged ELF binary identified a remote listener capability: socket binding and listening imports (bind, listen/accept) combined with standard I/O redirection (dup2/dup3) and process execution.",
+		[]MITREMapping{
+			{Tactic: "Command and Control", Technique: "T1071.001", TechniqueName: "Web Protocols"},
+			{Tactic: "Execution", Technique: "T1059.004", TechniqueName: "Unix Shell"},
+		},
+		[]string{
+			"Identify the listening socket port using `ss -tlpn` or `lsof -i`.",
+			"Terminate the listener process immediately and firewall the listening port.",
+			"Quarantine the binary and review authentication logs for incoming connections.",
+		},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("ELF_Behavioral_ProcessInjection_Combo",
+		"Process Memory Injection Binary (Static Behavioral Capability)",
+		"Static analysis of the unmanaged ELF binary identified cross-process memory manipulation capabilities: ptrace or process_vm_writev system call imports combined with memory protection modifications (mprotect/mmap).",
+		[]MITREMapping{
+			{Tactic: "Defense Evasion", Technique: "T1055", TechniqueName: "Process Injection"},
+			{Tactic: "Privilege Escalation", Technique: "T1055.008", TechniqueName: "Ptrace System Calls"},
+		},
+		[]string{
+			"Audit running system processes for foreign injected memory regions (`/proc/<pid>/maps`).",
+			"Terminate the injecting binary and audit ptrace system call events via auditd.",
+			"Verify kernel hardening parameter `kernel.yama.ptrace_scope` is set to 1 or 2.",
+		},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("ELF_Behavioral_FilelessDropper_Combo",
+		"In-Memory Fileless Dropper Binary (Static Behavioral Capability)",
+		"Static analysis of the unmanaged ELF binary identified anonymous in-memory execution capability: memfd_create system call imports combined with direct descriptor execution (fexecve/execveat).",
+		[]MITREMapping{
+			{Tactic: "Defense Evasion", Technique: "T1620", TechniqueName: "Reflective Code Loading"},
+			{Tactic: "Execution", Technique: "T1059", TechniqueName: "Command and Scripting Interpreter"},
+		},
+		[]string{
+			"Inspect `/proc/*/exe` symlinks for memory-only `/memfd:` executions.",
+			"Dump the in-memory executable from `/proc/<pid>/exe` before killing the process.",
+			"Quarantine the dropper binary and review upstream download sources.",
+		},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("ELF_Packed_UPX",
+		"Packed / Obfuscated ELF Binary (UPX)",
+		"The ELF binary embeds UPX packer markers (UPX! magic header or UPX0/UPX1 section headers), compressing and obfuscating executable logic to conceal capabilities and evade signature detection.",
+		[]MITREMapping{
+			{Tactic: "Defense Evasion", Technique: "T1027.002", TechniqueName: "Software Packing"},
+		},
+		[]string{
+			"Unpack the binary statically (`upx -d <file> -o <unpacked>`) in an isolated analysis environment.",
+			"Scan the unpacked payload with Aether to reveal underlying capabilities and strings.",
+			"Quarantine the packed file and identify how it arrived on the host.",
+		},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("ELF_Section_RWX_Anomaly",
+		"ELF Segment Marked Simultaneously Writable and Executable (RWX Anomaly)",
+		"An ELF program segment (PT_LOAD or PT_GNU_STACK) is marked with simultaneous Read, Write, and Execute (RWX) permissions, violating W^X memory hygiene. This pattern is characteristic of self-modifying code, polymorphic decryptors, shellcode injectors, or custom packers.",
+		[]MITREMapping{
+			{Tactic: "Defense Evasion", Technique: "T1027", TechniqueName: "Obfuscated Files or Information"},
+			{Tactic: "Privilege Escalation", Technique: "T1055", TechniqueName: "Process Injection"},
+		},
+		[]string{
+			"Quarantine the binary and inspect its disassembly around entry point for decryption loops.",
+			"Confirm whether the binary was generated by a custom toolchain or malicious packer.",
+			"Ensure SELinux or AppArmor mprotect enforcement is active.",
+		},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("ELF_High_Entropy_Code_Section",
+		"High Shannon Entropy in Executable Code Section (Packed / Encrypted Code)",
+		"An executable code section (such as .text) has Shannon entropy exceeding 7.20 / 8.00 bits per byte. Normal compiled machine code exhibits entropy between 5.6 and 6.4; entropy above 7.20 indicates heavily encrypted or compressed shellcode payload blocks.",
+		[]MITREMapping{
+			{Tactic: "Defense Evasion", Technique: "T1027", TechniqueName: "Obfuscated Files or Information"},
+		},
+		[]string{
+			"Treat as an encrypted payload stager or encrypted implant.",
+			"Quarantine the binary and search for companion decryption keys or stagers.",
+			"Review process execution history for invocation arguments.",
+		},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("ELF_AntiAnalysis_Corrupted_Header",
+		"Corrupted or Stripped Section Header Table (Anti-Analysis Trick)",
+		"The ELF binary has an out-of-bounds or corrupted section header table offset while retaining valid program headers, an evasive technique designed to crash disassemblers and static analysis tools while allowing kernel execution.",
+		[]MITREMapping{
+			{Tactic: "Defense Evasion", Technique: "T1622", TechniqueName: "Debugger Evasion"},
+		},
+		[]string{
+			"Analyze the binary using memory dump analysis or program-header-only parsers.",
+			"Quarantine the binary and search for other anti-forensic artifacts on the system.",
+		},
+		ConfidenceHigh,
+		StrengthCorroborated)
+
 	// Canonical YARA rule names shipped in embedded_rules.go
 	m("Linux_Webshell_PHP_Generic_Backdoor",
 		"PHP Web Shell — Generic Backdoor (YARA)",

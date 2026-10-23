@@ -91,3 +91,31 @@ func TestTheme_ASCII(t *testing.T) {
 	}
 }
 
+func TestTheme_GradientText(t *testing.T) {
+	thColor := theme.NewTheme(false)
+	rendered := thColor.RenderGradientText("AETHER", "#0284C7", "#38BDF8", "#F8FAFC")
+	if !strings.Contains(rendered, "A") || !strings.Contains(rendered, "R") {
+		t.Errorf("expected gradient text to contain runes, got: %q", rendered)
+	}
+
+	thNoColor := theme.NewTheme(true)
+	plain := thNoColor.RenderGradientText("AETHER", "#0284C7", "#38BDF8")
+	if plain != "AETHER" {
+		t.Errorf("expected unmodified string in NoColor mode, got: %q", plain)
+	}
+}
+
+func TestTheme_ThreatScoreMeter(t *testing.T) {
+	thColor := theme.NewTheme(false)
+	meterAlert := thColor.RenderThreatScoreMeter(90, 10)
+	if !strings.Contains(meterAlert, "90/100") || !strings.Contains(meterAlert, "█") {
+		t.Errorf("expected 90/100 with fill block in meter, got: %q", meterAlert)
+	}
+
+	thASCII := theme.NewTheme(false, true)
+	meterASCII := thASCII.RenderThreatScoreMeter(50, 10)
+	if !strings.Contains(meterASCII, "50/100") || !strings.Contains(meterASCII, "#") {
+		t.Errorf("expected 50/100 with # block in ASCII meter, got: %q", meterASCII)
+	}
+}
+

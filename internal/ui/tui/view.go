@@ -415,11 +415,26 @@ func (m Model) renderInspectorDock(sel *report.Finding, width int) string {
 
 	report.PopulateFindingDetails(sel)
 
-	// Line 1: Header with Glyph, Severity Badge, Title, and Rule Name
-	header := fmt.Sprintf("%s FORENSIC DOCK: %s %s  •  Rule: %s",
+	// Line 1: Header with Glyph, Severity Badge, Title, Score Meter, and Rule Name
+	score := findingScore(*sel)
+	if score <= 0 {
+		switch sel.Severity {
+		case report.SeverityAlert, report.SeverityCritical:
+			score = 90
+		case report.SeverityWarning, report.SeverityHigh:
+			score = 70
+		case report.SeverityNotice, report.SeverityMedium:
+			score = 35
+		default:
+			score = 10
+		}
+	}
+	scoreMeter := m.theme.RenderThreatScoreMeter(score, 10)
+	header := fmt.Sprintf("%s FORENSIC DOCK: %s %s  %s  •  Rule: %s",
 		theme.GlyphBrand,
 		m.theme.SeverityBadge(sel.Severity),
 		m.theme.InspectorTitle.Render(sel.Title),
+		scoreMeter,
 		sel.RuleName,
 	)
 	b.WriteString(header + "\n")
@@ -484,7 +499,8 @@ func (m Model) renderBrandHeader(width int, statusText string) string {
 	if m.theme.ASCII {
 		brandPrefix = "* "
 	}
-	title := m.theme.BrandTitle.Render(brandPrefix+"A E T H E R") + "  " + m.theme.BrandTagline.Render(":: DEFENSIVE LINUX THREAT HUNTING ENGINE")
+	gradientLogo := m.theme.RenderGradientText(brandPrefix+"A E T H E R", "#0284C7", "#38BDF8", "#F8FAFC")
+	title := gradientLogo + "  " + m.theme.BrandTagline.Render(":: DEFENSIVE LINUX THREAT HUNTING ENGINE")
 
 	targetPath := "Root Filesystem (/)"
 	if len(m.paths) > 0 {
@@ -961,7 +977,11 @@ func (m Model) renderFeedInner(width, maxVisible int, compact bool) (string, int
 		ts := f.Timestamp.Format("15:04:05")
 		prefix := "  "
 		if i == m.selectedIndex {
-			prefix = m.theme.BrandTagline.Render("▶ ")
+			if m.theme.ASCII {
+				prefix = m.theme.ActiveRail.Render("> ")
+			} else {
+				prefix = m.theme.ActiveRail.Render(theme.GlyphActiveRail + " ")
+			}
 		}
 
 		pathStr := formatPathCol(f.Path, pathWidth)

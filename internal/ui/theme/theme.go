@@ -37,6 +37,7 @@ const (
 	GlyphWarn        = "◆"
 	GlyphNotice      = "◇"
 	GlyphClean       = "■"
+	GlyphActiveRail  = "▌"
 	GlyphKernel      = "⏣"
 	GlyphNetwork     = "⬡"
 	GlyphProcess     = "⚙"
@@ -59,12 +60,16 @@ var ASCIIBorder = lipgloss.Border{
 	BottomRight: "+",
 }
 
-// Palette definitions - Master-tier Obsidian Studio Palette
+// Palette definitions - Master-tier Obsidian Studio 4-Tier Elevation Ladder
 var (
-	ColorObsidian  = lipgloss.Color("#080B11") // Deep void obsidian
-	ColorSurface   = lipgloss.Color("#0F141C") // Surface card background
+	ColorObsidian  = lipgloss.Color("#05070B") // Deepest void obsidian (tier 0 root container)
+	ColorVoid      = lipgloss.Color("#05070B") // Tier 0: Root void canvas
+	ColorSurface   = lipgloss.Color("#0A0E15") // Tier 1: Panels and standard card background
+	ColorRaised    = lipgloss.Color("#10151F") // Tier 2: Focused panels, headers, floating cards
+	ColorOverlay   = lipgloss.Color("#161C27") // Tier 3: Modals, active selections, dropdowns
 	ColorBorder    = lipgloss.Color("#1E293B") // Subtle slate hairline border
-	ColorBorderLit = lipgloss.Color("#38BDF8") // Focused sky cyan border
+	ColorBorderLit = lipgloss.Color("#38BDF8") // Focused sky cyan border & luminous rail
+	ColorActiveRail= lipgloss.Color("#38BDF8") // Luminous active pane rail
 	ColorTextPrim  = lipgloss.Color("#F8FAFC") // Crisp platinum white text
 	ColorTextSec   = lipgloss.Color("#E2E8F0") // Soft titanium slate text
 	ColorTextMute  = lipgloss.Color("#64748B") // Refined deep slate gray
@@ -158,6 +163,7 @@ type Theme struct {
 	ModuleRowPending    lipgloss.Style
 	TabBadgeActive      lipgloss.Style
 	TabBadgeInactive    lipgloss.Style
+	ActiveRail          lipgloss.Style
 }
 
 // DetectNoColor returns true if NO_COLOR environment variable is set per no-color.org.
@@ -244,6 +250,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 		t.ModuleRowPending = lipgloss.NewStyle()
 		t.TabBadgeActive = lipgloss.NewStyle().Bold(true)
 		t.TabBadgeInactive = lipgloss.NewStyle()
+		t.ActiveRail = lipgloss.NewStyle().Bold(true)
 		return t
 	}
 
@@ -285,10 +292,14 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 		Background(ColorSurface).
 		Padding(0, 1)
 
+	t.ActiveRail = lipgloss.NewStyle().
+		Foreground(ColorActiveRail).
+		Bold(true)
+
 	t.CardActive = lipgloss.NewStyle().
 		Border(border).
 		BorderForeground(ColorBorderLit).
-		Background(ColorSurface).
+		Background(ColorRaised).
 		Padding(0, 1)
 
 	t.StatusBar = lipgloss.NewStyle().
@@ -301,7 +312,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 
 	t.FindingRowSelected = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#1E293B")).
+		Background(ColorRaised).
 		Bold(true)
 
 	t.FindingTimestamp = lipgloss.NewStyle().
@@ -319,8 +330,8 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 
 	t.ModalBox = lipgloss.NewStyle().
 		Border(border).
-		BorderForeground(ColorAccent).
-		Background(ColorSurface).
+		BorderForeground(ColorBorderLit).
+		Background(ColorOverlay).
 		Padding(1, 2)
 
 	t.ModalHeader = lipgloss.NewStyle().
@@ -427,7 +438,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 	t.CommandPalette = lipgloss.NewStyle().
 		Border(border).
 		BorderForeground(ColorBorderLit).
-		Background(ColorSurface).
+		Background(ColorOverlay).
 		Padding(1, 2)
 
 	t.PillAlert = lipgloss.NewStyle().
@@ -482,7 +493,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 	t.InspectorBox = lipgloss.NewStyle().
 		Border(border).
 		BorderForeground(ColorBorderLit).
-		Background(ColorSurface).
+		Background(ColorRaised).
 		Padding(0, 1)
 
 	t.InspectorTitle = lipgloss.NewStyle().
@@ -762,5 +773,120 @@ func (t *Theme) IconTime() string {
 		return "[TIME]"
 	}
 	return "◷"
+}
+
+// RenderGradientText applies a smooth linear RGB truecolor gradient across the runes of text.
+// If the theme is monochrome or ASCII, it returns the text unmodified or styled with BrandTitle.
+func (t *Theme) RenderGradientText(text string, hexColors ...string) string {
+	if t.NoColor || len(hexColors) == 0 {
+		return text
+	}
+	if len(hexColors) == 1 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(hexColors[0])).Bold(true).Render(text)
+	}
+
+	runes := []rune(text)
+	totalRunes := len(runes)
+	if totalRunes == 0 {
+		return ""
+	}
+	if totalRunes == 1 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(hexColors[0])).Bold(true).Render(text)
+	}
+
+	type rgb struct{ r, g, b float64 }
+	parseHex := func(h string) rgb {
+		h = strings.TrimPrefix(h, "#")
+		if len(h) == 3 {
+			h = string([]byte{h[0], h[0], h[1], h[1], h[2], h[2]})
+		}
+		var r, g, b uint8
+		fmt.Sscanf(h, "%02x%02x%02x", &r, &g, &b)
+		return rgb{float64(r), float64(g), float64(b)}
+	}
+
+	stops := make([]rgb, len(hexColors))
+	for i, hc := range hexColors {
+		stops[i] = parseHex(hc)
+	}
+
+	var out strings.Builder
+	numSegments := len(stops) - 1
+
+	for i, r := range runes {
+		pos := float64(i) / float64(totalRunes-1)
+		scaled := pos * float64(numSegments)
+		segIndex := int(scaled)
+		if segIndex >= numSegments {
+			segIndex = numSegments - 1
+		}
+		tVal := scaled - float64(segIndex)
+
+		c0 := stops[segIndex]
+		c1 := stops[segIndex+1]
+
+		currR := int(c0.r + tVal*(c1.r-c0.r))
+		currG := int(c0.g + tVal*(c1.g-c0.g))
+		currB := int(c0.b + tVal*(c1.b-c0.b))
+
+		hex := fmt.Sprintf("#%02x%02x%02x", currR, currG, currB)
+		charStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Bold(true)
+		out.WriteString(charStyle.Render(string(r)))
+	}
+
+	return out.String()
+}
+
+// RenderThreatScoreMeter renders a high-density score meter e.g. [████████░░] 85/100
+// with color matched to severity threshold.
+func (t *Theme) RenderThreatScoreMeter(score int, barWidth int) string {
+	if barWidth <= 0 {
+		barWidth = 10
+	}
+	if score < 0 {
+		score = 0
+	}
+	if score > 100 {
+		score = 100
+	}
+
+	var color lipgloss.TerminalColor
+	switch {
+	case score >= 85:
+		color = ColorAlert
+	case score >= 50:
+		color = ColorWarning
+	case score >= 20:
+		color = ColorNotice
+	default:
+		color = ColorInfo
+	}
+
+	filled := (score * barWidth) / 100
+	if filled == 0 && score > 0 {
+		filled = 1
+	}
+	empty := barWidth - filled
+	if empty < 0 {
+		empty = 0
+	}
+
+	fillChar := "█"
+	emptyChar := "░"
+	if t.ASCII {
+		fillChar = "#"
+		emptyChar = "-"
+	}
+
+	meterBar := strings.Repeat(fillChar, filled)
+	if !t.NoColor {
+		meterBar = lipgloss.NewStyle().Foreground(color).Render(meterBar)
+	}
+	emptyBar := strings.Repeat(emptyChar, empty)
+	if !t.NoColor {
+		emptyBar = lipgloss.NewStyle().Foreground(ColorTextMute).Render(emptyBar)
+	}
+
+	return fmt.Sprintf("[%s%s] %d/100", meterBar, emptyBar, score)
 }
 

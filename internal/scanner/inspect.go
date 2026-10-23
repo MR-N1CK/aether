@@ -141,9 +141,9 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 	hEntropyScript := CheckHighEntropyScript(virtPath, inspectData, s.cfg)
 	hDecodes, decodeLayers, decodeYaraMatches := DecodeAndRescanWithYARA(ctx, virtPath, inspectData, s.pkgDB, s.cfg, s.memoryBudget, yScanner)
 	hTrojanPkg := CheckTrojanedPackageBinary(virtPath, hashRes.Hashes.MD5, s.pkgDB, s.cfg)
-	hELFRPath := CheckSuspiciousELFRPath(virtPath, inspectData, uint32(mode), s.cfg)
+	hELFMatches := AnalyzeELFExecutable(virtPath, inspectData, uint32(mode), s.pkgDB, s.cfg)
 
-	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil || hKey != nil || len(hScripts) > 0 || hEntropyELF != nil || hEntropyScript != nil || len(hDecodes) > 0 || hTrojanPkg != nil || hELFRPath != nil || len(decodeYaraMatches) > 0 {
+	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil || hKey != nil || len(hScripts) > 0 || hEntropyELF != nil || hEntropyScript != nil || len(hDecodes) > 0 || hTrojanPkg != nil || len(hELFMatches) > 0 || len(decodeYaraMatches) > 0 {
 		hasOtherSignal = true
 	}
 
@@ -160,7 +160,7 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		hEntropyScript = nil
 		hDecodes = nil
 		hTrojanPkg = nil
-		hELFRPath = nil
+		hELFMatches = nil
 		decodeYaraMatches = nil
 		pathMatch = nil // Suppress path heuristics if known-good hash matches or oversize
 	}
@@ -282,7 +282,16 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		}
 	}
 
-	for _, hm := range []*HeuristicMatch{hELF, hHidden, hSUID, hWorldWritable, hKey, hEntropyELF, hEntropyScript, hTrojanPkg, hELFRPath} {
+	for _, hm := range []*HeuristicMatch{hELF, hHidden, hSUID, hWorldWritable, hKey, hEntropyELF, hEntropyScript, hTrojanPkg} {
+		if hm != nil {
+			matchedReasons = append(matchedReasons, hm.Reason)
+			matchedRules = append(matchedRules, hm.Name)
+			ruleSeverities[hm.Name] = hm.Severity.String()
+			totalScore += hm.Score
+			updateSeverity(hm.Severity)
+		}
+	}
+	for _, hm := range hELFMatches {
 		if hm != nil {
 			matchedReasons = append(matchedReasons, hm.Reason)
 			matchedRules = append(matchedRules, hm.Name)
@@ -429,6 +438,12 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 	if len(matchedReasons) > 0 {
 		reason := strings.Join(matchedReasons, " | ")
 		primaryRule := matchedRules[0]
+		for _, r := range matchedRules {
+			if ruleSeverities[r] == highestSeverity.String() {
+				primaryRule = r
+				break
+			}
+		}
 		var contributing []string
 		if len(matchedRules) > 1 {
 			contributing = matchedRules[1:]

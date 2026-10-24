@@ -132,10 +132,10 @@ func TestRefreshIntelFeed_RedirectChainIntoHTTPSOk(t *testing.T) {
 
 func TestRefreshIntelFeed_SanitizeFeedName(t *testing.T) {
 	cases := map[string]string{
-		"/feeds/a b/c.md5?x=1":       "c.md5",
-		"/":                          "feed.txt",
-		"/../etc/passwd":             "passwd", // path.Base collapses traversal
-		"/feed":                      "feed",
+		"/feeds/a b/c.md5?x=1":                 "c.md5",
+		"/":                                    "feed.txt",
+		"/../etc/passwd":                       "passwd", // path.Base collapses traversal
+		"/feed":                                "feed",
 		"/" + strings.Repeat("a", 70) + "MARK": strings.Repeat("a", 60) + "MARK", // tail-64 kept
 	}
 	for in, want := range cases {

@@ -138,4 +138,3 @@ func TestOpenRegularReadOnly_SymlinkRejection(t *testing.T) {
 		t.Errorf("expected errors.Is(err, ErrIsSymlink), got: %v", err)
 	}
 }
-

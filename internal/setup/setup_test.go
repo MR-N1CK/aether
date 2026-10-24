@@ -210,4 +210,3 @@ func TestExtractRulesFromZip_ArchiveSecurity(t *testing.T) {
 		}
 	})
 }
-

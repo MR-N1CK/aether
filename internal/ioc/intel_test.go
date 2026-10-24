@@ -251,4 +251,3 @@ func longestCommonSubstring(s1, s2 string) int {
 	}
 	return maxLen
 }
-

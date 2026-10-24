@@ -268,6 +268,8 @@ type ScanConfig struct {
 	DemoRules                  bool          `yaml:"demo_rules"`
 	RulesDir                   string        `yaml:"rules_dir"`
 	FPFilterFiles              []string      `yaml:"fp_filter_files"` // false-positive filter YAML files (Loki-style rule+path suppressions)
+	BaselineFile               string        `yaml:"baseline_file"`   // delta mode: classify findings against this baseline snapshot
+	BaselineOut                string        `yaml:"baseline_out"`    // write a baseline snapshot from this scan's findings
 	TrustRulesDir              bool          `yaml:"trust_rules_dir"`
 	TrustInstalledPentestTools bool          `yaml:"trust_installed_pentest_tools"`
 	YaraMaxFileSize            int64         `yaml:"yara_max_filesize"`

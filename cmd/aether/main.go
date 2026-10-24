@@ -78,6 +78,8 @@ type scanCmdFlags struct {
 	oneFileSystem              bool
 	rulesDir                   string
 	fpFilters                  []string
+	baselineFile               string
+	baselineOut                string
 	trustRulesDir              bool
 	trustInstalledPentestTools bool
 	yaraMaxFileSize            int64
@@ -89,6 +91,14 @@ type scanCmdFlags struct {
 
 func isTerminal() bool {
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
+}
+
+func mustHostname() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	return h
 }
 
 func attachScanFlags(cmd *cobra.Command, sFlags *scanCmdFlags) {
@@ -110,6 +120,8 @@ func attachScanFlags(cmd *cobra.Command, sFlags *scanCmdFlags) {
 	cmd.Flags().StringVar(&sFlags.allowlist, "allowlist", "", "Path to trusted SHA256 allowlist file")
 	cmd.Flags().BoolVar(&sFlags.oneFileSystem, "one-file-system", false, "Do not cross filesystem mount boundaries (default on for --full)")
 	cmd.Flags().StringVar(&sFlags.rulesDir, "rules-dir", "", "Custom directory containing YARA rules (*.yar, *.yara)")
+	cmd.Flags().StringVar(&sFlags.baselineFile, "baseline", "", "Baseline snapshot file: classify findings as UNCHANGED since the baseline or NEW (delta hunting mode)")
+	cmd.Flags().StringVar(&sFlags.baselineOut, "baseline-out", "", "Write a baseline snapshot of this scan's findings to the given JSON file")
 	cmd.Flags().StringSliceVar(&sFlags.fpFilters, "fp-filters", nil, "False-positive filter YAML file(s): downgrade known-benign rule hits by rule+path with an auditable note (repeatable)")
 	cmd.Flags().BoolVar(&sFlags.trustRulesDir, "trust-rules-dir", false, "Explicitly trust rules directory without ownership/permission checks (development/testing only)")
 	cmd.Flags().BoolVar(&sFlags.trustInstalledPentestTools, "trust-installed-pentest-tools", false, "Downgrade YARA findings in well-known pentest tool directories to INFO (opt-in for pentest workstations/VMs; keep disabled for suspect endpoints)")
@@ -215,6 +227,12 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 	if cmd.Flags().Changed("fp-filters") {
 		cfg.Scan.FPFilterFiles = sFlags.fpFilters
 	}
+	if cmd.Flags().Changed("baseline") {
+		cfg.Scan.BaselineFile = sFlags.baselineFile
+	}
+	if cmd.Flags().Changed("baseline-out") {
+		cfg.Scan.BaselineOut = sFlags.baselineOut
+	}
 	if cmd.Flags().Changed("trust-rules-dir") {
 		cfg.Scan.TrustRulesDir = sFlags.trustRulesDir
 	}
@@ -238,6 +256,14 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 	}
 	if cmd.Flags().Changed("hash-oversize-max") {
 		cfg.Scan.HashOversizeMax = sFlags.hashOversizeMax
+	}
+
+	// Delta hunting: validate the baseline snapshot before anything runs so
+	// a broken baseline fails fast with a clear error.
+	if cfg.Scan.BaselineFile != "" {
+		if _, err := scanner.LoadBaseline(cfg.Scan.BaselineFile); err != nil {
+			return fmt.Errorf("--baseline: %w", err)
+		}
 	}
 
 	// 5. Apply niceness early at startup before worker pool starts
@@ -318,6 +344,13 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 
 		_ = consumer.Consume(ctx, plainSub)
 		scanErr := <-scanErrChan
+		if cfg.Scan.BaselineOut != "" && scanErr == nil {
+			if err := scanner.SaveBaseline(cfg.Scan.BaselineOut, reporter.Findings(), mustHostname(), mode, cfg.Scan.Paths); err != nil {
+				fmt.Fprintf(outWriter, "  [!] Baseline snapshot failed: %v\n", err)
+			} else {
+				fmt.Fprintf(outWriter, "  ✓ Baseline snapshot written: %s (%d findings)\n", cfg.Scan.BaselineOut, len(reporter.Findings()))
+			}
+		}
 		if cfg.Scan.HTMLOut != "" {
 			greenStyle := lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true)
 			boldStyle := lipgloss.NewStyle().Bold(true)
@@ -350,6 +383,13 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 	}()
 
 	tuiErr := tui.Run(ctx, scanCancel, uiSub, th, gFlags.noAnim, mode, cfg.Scan.Threads, cfg.Scan.Paths, cfg.Scan.HTMLOut)
+	if cfg.Scan.BaselineOut != "" && tuiErr == nil {
+		if err := scanner.SaveBaseline(cfg.Scan.BaselineOut, reporter.Findings(), mustHostname(), mode, cfg.Scan.Paths); err != nil {
+			fmt.Fprintf(os.Stderr, "  [!] Baseline snapshot failed: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "  ✓ Baseline snapshot written: %s (%d findings)\n", cfg.Scan.BaselineOut, len(reporter.Findings()))
+		}
+	}
 	if cfg.Scan.HTMLOut != "" {
 		greenStyle := lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true)
 		boldStyle := lipgloss.NewStyle().Bold(true)

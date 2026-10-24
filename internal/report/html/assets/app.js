@@ -504,9 +504,12 @@
       tr.setAttribute('role', 'button');
       tr.setAttribute('aria-label', 'View details for finding in ' + (f.path || f.rule_name));
 
-      // Severity column
+      // Severity column (+ NEW chip in delta hunting mode)
       var tdSev = document.createElement('td');
       tdSev.appendChild(createBadge(f.severity));
+      if (f.metadata && f.metadata.baseline_state === 'new') {
+        tdSev.appendChild(el('span', 'chip-new', 'NEW'));
+      }
       tr.appendChild(tdSev);
 
       // Module column

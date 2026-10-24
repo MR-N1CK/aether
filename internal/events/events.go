@@ -231,6 +231,9 @@ type OversizeFile struct {
 // CoverageStats tracks scan totals and skipped items for forensic transparency.
 type CoverageStats struct {
 	FilesScanned        int64          `json:"files_scanned"`
+	BaselineNew         int            `json:"baseline_new,omitempty"`
+	BaselineUnchanged   int            `json:"baseline_unchanged,omitempty"`
+	BaselineResolved    int            `json:"baseline_resolved,omitempty"`
 	SkippedOversize     int64          `json:"skipped_oversize"`
 	SkippedPermission   int64          `json:"skipped_permission"`
 	SkippedVanished     int64          `json:"skipped_vanished"`

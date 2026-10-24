@@ -47,6 +47,7 @@ type Scanner struct {
 	iocEngine      ioc.Engine
 	pkgDB          pkgdb.PackageDB
 	fpFilters      *FPFilterSet
+	baseline       *BaselineFile
 	yaraEngine     yara.Engine
 	modules        []modules.Module
 	accumulator    *findingAccumulator
@@ -556,6 +557,24 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 		logger.Info("loaded false-positive filters", slog.Int("filters", fpSet.Count()), slog.Any("sources", fpSet.Sources()))
 	}
 
+	// Baseline snapshot for delta hunting: findings are classified as
+	// UNCHANGED (known state) or NEW (the triage delta).
+	var baselineSnap *BaselineFile
+	if cfg.Scan.BaselineFile != "" {
+		bf, bErr := LoadBaseline(cfg.Scan.BaselineFile)
+		if bErr != nil {
+			// executeScan validates the baseline before we get here; a load
+			// failure now means a race (file replaced mid-startup) — run the
+			// scan without delta classification rather than aborting.
+			logger.Warn("baseline became unreadable; continuing without delta classification", slog.Any("error", bErr))
+		} else {
+			baselineSnap = bf
+			logger.Info("delta hunting mode: baseline loaded",
+				slog.String("created_at", bf.CreatedAt.Format(time.RFC3339)),
+				slog.Int("entries", len(bf.Entries)))
+		}
+	}
+
 	rootFS := ""
 	cleanRoot := filepath.Clean(cfg.Scan.Root)
 	if cleanRoot != "" && cleanRoot != "/" {
@@ -571,6 +590,7 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 		bus:          bus,
 		iocEngine:    iocEng,
 		fpFilters:    fpSet,
+		baseline:     baselineSnap,
 		pkgDB:        pkgdb.New(rootFS),
 		modules:      defaultMods,
 		accumulator:  newFindingAccumulator(cfg),
@@ -1214,6 +1234,7 @@ func (s *Scanner) Run(ctx context.Context) error {
 	}
 	var acknowledgedWarnings []report.Finding
 	var acknowledgedCount int64
+	var baselineResolved int
 
 	// Acknowledgment must run BEFORE cross-domain correlation: the correlator
 	// excludes acknowledged/suppressed findings, so an operator-dismissed
@@ -1232,6 +1253,40 @@ func (s *Scanner) Run(ctx context.Context) error {
 				}
 			}
 		}
+	}
+
+	// Delta hunting classification: mark every finding UNCHANGED or NEW
+	// against the loaded baseline. Unchanged WARNING/NOTICE findings (and
+	// never ALERT/IOC) drop to INFO — known state, recorded not re-triaged.
+	baselineNew, baselineUnchanged := 0, 0
+	if s.baseline != nil {
+		for i := range allEmitted {
+			f := &allEmitted[i]
+			state := s.baseline.Classify(f)
+			if f.Metadata == nil {
+				f.Metadata = map[string]interface{}{}
+			}
+			f.Metadata["baseline_state"] = state
+			if state == BaselineStateUnchanged {
+				baselineUnchanged++
+				if f.Severity != report.SeverityAlert &&
+					f.Metadata["is_ioc_match"] != true &&
+					!strings.Contains(strings.ToUpper(f.RuleName), "IOC") {
+					f.Severity = report.SeverityInfo
+					f.Reason += fmt.Sprintf(" | Baseline: unchanged since %s", s.baseline.CreatedAt.Format("2006-01-02 15:04"))
+					if f.EvidenceRecord != nil {
+						f.EvidenceRecord.ConfidenceRationale = "Present and unchanged in the baseline snapshot from " + s.baseline.CreatedAt.Format("2006-01-02 15:04") + "."
+					}
+				}
+			} else {
+				baselineNew++
+			}
+		}
+		baselineResolved = len(s.baseline.ResolvedDiff(allEmitted))
+		s.logger.Info("baseline delta",
+			slog.Int("unchanged", baselineUnchanged),
+			slog.Int("new", baselineNew),
+			slog.Int("resolved", baselineResolved))
 	}
 
 	allEmitted = report.CorrelateFindings(allEmitted)
@@ -1278,6 +1333,9 @@ func (s *Scanner) Run(ctx context.Context) error {
 
 	coverage := events.CoverageStats{
 		FilesScanned:        filesScanned.Load(),
+		BaselineNew:         baselineNew,
+		BaselineUnchanged:   baselineUnchanged,
+		BaselineResolved:    baselineResolved,
 		SkippedOversize:     skippedOversize.Load(),
 		SkippedPermission:   skippedPermission.Load(),
 		SkippedVanished:     skippedVanished.Load(),

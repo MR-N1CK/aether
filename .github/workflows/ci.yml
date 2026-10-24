@@ -13,10 +13,21 @@ env:
   GO_VERSION: '1.26'
 
 jobs:
-  # Core gate: build, vet, format, full unit suite, race detector.
+  # Core gate: build, vet, format, full unit suite, race detector — across
+  # the distributions Aether targets (Ubuntu LTS, Debian stable) and arches.
   test:
-    name: Build & Test (pure Go)
-    runs-on: ubuntu-latest
+    name: Build & Test (${{ matrix.os }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          - os: ubuntu-24.04
+            arch: x86_64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +55,31 @@ jobs:
 
       - name: Race detector (short)
         run: go test -race -short ./internal/scanner/ ./internal/modules/... ./internal/report/...
+
+  # Debian 12 compatibility inside a container (no hosted Debian runner).
+  debian:
+    name: Build & Test (debian-12, container)
+    runs-on: ubuntu-latest
+    container:
+      image: debian:12-slim
+    timeout-minutes: 25
+    steps:
+      - name: Install prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build & vet
+        run: go build ./... && go vet ./...
+
+      - name: Unit tests
+        run: go test ./... -timeout 20m
 
   # Detection accuracy contract: zero false positives on benign corpus,
   # >= 95% recall on malicious corpus, determinism, regression locks.

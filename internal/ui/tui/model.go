@@ -76,6 +76,8 @@ type Model struct {
 	lastAlertAt    time.Time
 	detailOpenedAt time.Time
 	finishedAt     time.Time
+	lastActivity   time.Time
+	worstFinding   *report.Finding
 
 	// Scan metrics
 	startTime     time.Time
@@ -252,15 +254,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var spCmd tea.Cmd
 		m.spinner, spCmd = m.spinner.Update(msg)
-		// Keep 60 FPS for ~3s after finish so the verdict reveal shimmer
-		// plays in full (the "hold" window), then settle to the 1s idle
-		// heartbeat.
-		if m.scanFinished && time.Since(m.finishedAt) > 3*time.Second && (diff <= 0.05 && diff >= -0.05) && time.Now().After(m.toastUntil) {
-			// Scan is finished and display settled: reduce from 60 FPS to 1s idle heartbeat
+		// Frame pacing:
+		// - finished + settled -> 1s idle heartbeat
+		// - mid-scan quiet stretch (no events for 2s) -> 8 FPS power saver;
+		//   the activity timestamp wakes the loop on the next event
+		// - otherwise -> 60 FPS flight deck
+		switch {
+		case m.scanFinished && time.Since(m.finishedAt) > 3*time.Second && (diff <= 0.05 && diff >= -0.05) && time.Now().After(m.toastUntil):
 			cmds = append(cmds, spCmd, tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
 				return frameTickMsg(t)
 			}))
-		} else {
+		case !m.scanFinished && !m.lastActivity.IsZero() && time.Since(m.lastActivity) > 2*time.Second && (diff <= 0.05 && diff >= -0.05):
+			cmds = append(cmds, spCmd, tea.Tick(125*time.Millisecond, func(t time.Time) tea.Msg {
+				return frameTickMsg(t)
+			}))
+		default:
 			cmds = append(cmds, spCmd, m.tick60FPS())
 		}
 
@@ -313,12 +321,20 @@ func (m *Model) handleScanEvent(e events.Event) {
 
 	case events.FileScanned:
 		m.filesScanned++
+		m.lastActivity = time.Now()
 
 	case events.FindingRaised:
 		m.findings = append(m.findings, ev.Finding)
 		m.findingsDirty = true
+		m.lastActivity = time.Now()
 		if ev.Finding.Severity == report.SeverityAlert || ev.Finding.Severity == report.SeverityCritical {
 			m.lastAlertAt = time.Now()
+		}
+		// Worst-finding pin: keep the highest-severity detection visible in
+		// the HUD at all times so the operator never loses the peak signal.
+		if m.worstFinding == nil || severityRank(ev.Finding.Severity) > severityRank(m.worstFinding.Severity) {
+			f := ev.Finding
+			m.worstFinding = &f
 		}
 		if mod, exists := m.activeModules[ev.Finding.Module]; exists {
 			mod.Findings++
@@ -326,6 +342,7 @@ func (m *Model) handleScanEvent(e events.Event) {
 
 	case events.Progress:
 		m.filesScanned = ev.CurrentFiles
+		m.lastActivity = time.Now()
 		m.filesPerSec = ev.FilesPerSec
 		m.velocitySamples = append(m.velocitySamples, ev.FilesPerSec)
 		if len(m.velocitySamples) > 24 {

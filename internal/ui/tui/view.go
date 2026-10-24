@@ -177,7 +177,16 @@ func (m Model) renderDashboard() string {
 		statText = fmt.Sprintf("%s   %s", gauge, statText)
 	}
 
-	telemetryContent := tabBar + "\n\n" + statText
+	// Worst-finding pin: the peak-severity detection stays visible in the
+	// telemetry band for the whole scan.
+	pinLine := ""
+	if m.worstFinding != nil {
+		pin := fmt.Sprintf("PEAK %s  %s", m.theme.SeverityBadge(m.worstFinding.Severity), m.worstFinding.RuleName)
+		p := runewidth.Truncate(m.worstFinding.Path, 44, "…")
+		pinLine = "\n" + m.theme.FindingTimestamp.Render(pin+"  "+p)
+	}
+
+	telemetryContent := tabBar + "\n\n" + statText + pinLine
 	b.WriteString(m.theme.CardBox.Width(cardWidth).Render(telemetryContent) + "\n\n")
 
 	// 3. Center Section: Adaptive Flight Deck vs Compact Stacked

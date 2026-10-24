@@ -36,6 +36,31 @@ func IsELF(header []byte) bool {
 	return len(header) >= 4 && bytes.Equal(header[:4], []byte{0x7f, 'E', 'L', 'F'})
 }
 
+// isBinaryContainer reports whether the buffer starts with a non-ELF
+// executable container magic: PE/COFF (MZ), Mach-O, or Java class files.
+func isBinaryContainer(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	if bytes.HasPrefix(data, []byte("MZ")) { // PE image (DOS header)
+		return true
+	}
+	if bytes.HasPrefix(data, []byte{0xca, 0xfe, 0xba, 0xbe}) || // Mach-O fat / Java class
+		bytes.HasPrefix(data, []byte{0xfe, 0xed, 0xfa, 0xce}) || // Mach-O 32
+		bytes.HasPrefix(data, []byte{0xfe, 0xed, 0xfa, 0xcf}) || // Mach-O 64
+		bytes.HasPrefix(data, []byte{0xcf, 0xfa, 0xed, 0xfe}) || // Mach-O 64 LE
+		bytes.HasPrefix(data, []byte{0xce, 0xfa, 0xed, 0xfe}) { // Mach-O 32 LE
+		return true
+	}
+	if bytes.HasPrefix(data, []byte{0x7f, 'P', 'K', 0x03, 0x04}) && len(data) > 26 {
+		// jar/apk/zip archives: check for META-INF — cheap probe of the
+		// local header name field is unreliable, so only treat as binary
+		// container when it is also tagged executable or named .jar.
+		return false
+	}
+	return false
+}
+
 // CheckELFInTempOrDev checks for ELF binaries located in volatile/temporary/shared memory
 // locations (/tmp, /var/tmp, /dev/shm) or regular files in /dev.
 //
@@ -563,6 +588,7 @@ func isMediaOrArchiveExt(path string) bool {
 		".woff", ".woff2", ".ttf", ".eot", ".otf",
 		".mp3", ".mp4", ".wav", ".ogg", ".avi", ".mkv", ".flac", ".m4a", ".aac",
 		".zip", ".gz", ".tar", ".bz2", ".xz", ".7z", ".zst", ".deb", ".rpm", ".iso",
+		".jar", ".apk", ".war", ".ear", ".whl", ".gem", ".nupkg", ".vsix",
 		".db", ".sqlite", ".sqlite3", ".mdb", ".idx",
 		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx":
 		return true
@@ -738,6 +764,14 @@ func hasScriptAttackToken(data []byte) bool {
 // - Files inside volatile/web/user-app/persistence paths that contain active script attack tokens are inspected even if non-text.
 func isScriptOrTextCandidate(path string, data []byte, cfg *config.Config, modeOpt ...os.FileMode) bool {
 	if len(data) == 0 || IsELF(data) || bytes.HasPrefix(data, []byte("!<arch>\n")) {
+		return false
+	}
+
+	// Non-ELF binary container formats must never reach the text heuristics:
+	// PE images (MZ), Mach-O (32/64/fat), and Java class files start with
+	// enough printable bytes that a .NET DLL can otherwise parse as "text"
+	// and trip script signatures on embedded resource strings.
+	if isBinaryContainer(data) {
 		return false
 	}
 

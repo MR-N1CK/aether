@@ -955,7 +955,7 @@ func registerScannerRules() {
 			"Quarantine the binary and search for other anti-forensic artifacts on the system.",
 		},
 		ConfidenceHigh,
-		StrengthCorroborated)
+		StrengthContextual)
 
 	m("ELF_Static_Go_Capability_Profile",
 		"Static Go Binary — Recovered Behavioral Capability Profile",

@@ -607,6 +607,20 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 			report.DetermineVerdict(&f, s.pkgDB, (mode&0111) != 0, isDoc, isTestFixture, nil)
 		}
 
+		// Operator false-positive filters: a known-benign rule hit on a
+		// filtered path downgrades to INFO with an auditable note. The
+		// finding stays visible — suppression is never silent.
+		if flt := s.fpFilters.Match(primaryRule, virtPath, reason); flt != nil {
+			f.Severity = report.SeverityInfo
+			f.Verdict = report.VerdictSafe
+			f.Confidence = report.ConfidenceLow
+			f.Reason = fmt.Sprintf("%s | FP filter: %s", f.Reason, flt.Note)
+			if f.EvidenceRecord != nil {
+				f.EvidenceRecord.ConfidenceRationale = "Suppressed by operator false-positive filter: " + flt.Note
+			}
+			f.Metadata["fp_filtered"] = true
+		}
+
 		// Keep per-rule attribution consistent with the adjudicated finding: when the
 		// verdict engine demotes the finding (contextual/package/pentest downgrades),
 		// per-rule severities that exceeded the effective severity clamp down with it,

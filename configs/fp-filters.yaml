@@ -1,0 +1,34 @@
+# Aether False-Positive Filters
+# ============================================================================
+# Loki/THOR-style operator tuning: a known-benign signature hit is downgraded
+# to an informational, visibly-marked finding instead of polluting the alert
+# counters. Suppression is NEVER silent — the finding keeps its rule name and
+# carries the note below so an auditor can review every suppression.
+#
+# Usage:
+#   aether scan --fp-filters configs/fp-filters.yaml /path
+#   (or fp_filter_files: [configs/fp-filters.yaml] in the config file)
+#
+# Fields:
+#   rule                exact rule name to suppress (required)
+#   path                directory ("/dir" = dir + subtree), glob, or
+#                       "/dir/**" subtree-only (required)
+#   description_contains optional substring the finding reason must contain
+#   note                auditable justification, shown in output (required)
+#
+# The built-in verdict engine already handles the common cases structurally:
+# /opt vendor trees, node_modules, Electron resources, shell histories, and
+# non-executable config/log files demote string-level evidence automatically.
+# Use this file only for residual site-specific suppressions.
+# ============================================================================
+
+version: 1
+filters: []
+# Example entries:
+#  - rule: "Script_Netcat_Reverse_Shell"
+#    path: "/opt/custom-ide"
+#    note: "In-house IDE bundles network debugging snippets (approved 2026-10)"
+#  - rule: "High_Entropy_Script"
+#    path: "/srv/assets/**"
+#    description_contains: "packed web bundle"
+#    note: "Minified web bundles are high-entropy by design"

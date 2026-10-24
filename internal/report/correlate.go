@@ -82,6 +82,16 @@ func DetermineFindingDomain(f *Finding) CorroboratingDomain {
 	}
 }
 
+// isAggregateFinding reports whether the finding is a directory-level
+// grouping artifact (multiple files rolled up under a parent directory)
+// rather than a single concrete artifact. Aggregates carry no single path a
+// process, socket, or unit could corroborate, so they never participate in
+// cross-domain elevation — elevating "/usr/bin" because some unit references
+// some file beneath it is the classic legitimate-daemon false positive.
+func isAggregateFinding(f *Finding) bool {
+	return f.Count > 1 || len(f.Paths) > 1
+}
+
 // isTriageDismissed reports whether the operator has explicitly suppressed or
 // acknowledged the finding. Dismissed findings are excluded from correlation
 // entirely: they neither corroborate other findings nor get escalated, so an
@@ -113,7 +123,7 @@ func CorrelateFindings(findings []Finding) []Finding {
 	for i := range findings {
 		f := &findings[i]
 
-		if isTriageDismissed(f) {
+		if isTriageDismissed(f) || isAggregateFinding(f) {
 			continue
 		}
 
@@ -347,7 +357,7 @@ func CorrelateFindings(findings []Finding) []Finding {
 		if len(signals) == 0 {
 			continue
 		}
-		if isTriageDismissed(f) {
+		if isTriageDismissed(f) || isAggregateFinding(f) {
 			continue
 		}
 

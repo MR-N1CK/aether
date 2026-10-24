@@ -267,6 +267,7 @@ type ScanConfig struct {
 	// YARA Configuration
 	DemoRules                  bool          `yaml:"demo_rules"`
 	RulesDir                   string        `yaml:"rules_dir"`
+	FPFilterFiles              []string      `yaml:"fp_filter_files"` // false-positive filter YAML files (Loki-style rule+path suppressions)
 	TrustRulesDir              bool          `yaml:"trust_rules_dir"`
 	TrustInstalledPentestTools bool          `yaml:"trust_installed_pentest_tools"`
 	YaraMaxFileSize            int64         `yaml:"yara_max_filesize"`

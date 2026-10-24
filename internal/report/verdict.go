@@ -12,6 +12,24 @@ import (
 func ClassifyContextProfile(path string, isExec bool, pkgOwned bool) string {
 	lower := strings.ToLower(filepath.ToSlash(path))
 
+	// Third-party application & vendor trees. /opt is vendor add-on software
+	// by FHS convention (Electron IDEs, browser components, JVM runtimes);
+	// node_modules bundles, webapps, and shipped docs embed network debugging
+	// snippets, shell one-liners in test fixtures, and security-tooling
+	// strings as a matter of course. String-level evidence from these trees
+	// is demoted pending runtime corroboration; hash IOCs never are.
+	inVendorTree := strings.HasPrefix(lower, "/opt/") ||
+		strings.Contains(lower, "/node_modules/") ||
+		strings.Contains(lower, "/resources/app") ||
+		strings.HasPrefix(lower, "/usr/share/nodejs/") ||
+		strings.HasPrefix(lower, "/usr/lib/node_modules/") ||
+		strings.HasPrefix(lower, "/usr/share/webapps/") ||
+		strings.HasPrefix(lower, "/usr/share/doc/") ||
+		strings.Contains(lower, "/vendor/")
+	if inVendorTree {
+		return "vendor_app_tree"
+	}
+
 	// Documentation & Metadata: .dist-info, .egg-info, METADATA, PKG-INFO, markdown, rst, text docs, readme
 	if !isExec {
 		base := filepath.Base(lower)
@@ -33,7 +51,9 @@ func ClassifyContextProfile(path string, isExec bool, pkgOwned bool) string {
 		isHistory := strings.HasSuffix(base, "_history") || base == ".sh_history" ||
 			strings.HasSuffix(base, ".history") || base == "histfile"
 		isLog := strings.HasSuffix(lower, ".log")
-		if !inVolatile && (isHistory || isLog) {
+		isConf := strings.HasSuffix(lower, ".conf") || strings.HasSuffix(lower, ".cfg") ||
+			strings.HasSuffix(lower, ".ini")
+		if !inVolatile && (isHistory || isLog || isConf) {
 			return "historical_artifact"
 		}
 	}
@@ -50,6 +70,18 @@ func ClassifyContextProfile(path string, isExec bool, pkgOwned bool) string {
 	}
 
 	return "standard"
+}
+
+// isCryptographicMatch reports whether the finding's evidence is a hash IOC
+// match — cryptographic certainty that no path context can soften.
+func isCryptographicMatch(f *Finding) bool {
+	if v, ok := f.Metadata["is_ioc_match"].(bool); ok && v {
+		return true
+	}
+	if v, ok := f.Metadata["hash_match"].(bool); ok && v {
+		return true
+	}
+	return strings.Contains(strings.ToLower(f.RuleName), "ioc") || strings.Contains(strings.ToLower(f.RuleName), "hash")
 }
 
 // EvaluateEvidenceStrength categorizes the intrinsic weight of detection evidence.
@@ -217,6 +249,18 @@ func DetermineVerdict(f *Finding, pkgDB pkgdb.PackageDB, isExec bool, isDoc bool
 			f.Confidence = ConfidenceLow
 			rationale = "Path-based operational anomaly within private container mount namespace."
 		}
+
+	case contextProfile == "vendor_app_tree" &&
+		(evidenceStrength == StrengthDirect || evidenceStrength == StrengthCorroborated) &&
+		!isCryptographicMatch(f):
+		// String-level signatures (script one-liners, YARA strings) inside
+		// third-party application trees are demoted pending corroboration:
+		// embedded tooling, docs, and test fixtures are the common cause.
+		// Cryptographic IOC hash matches keep full strength everywhere.
+		verdict = VerdictSuspicious
+		f.Severity = SeverityWarning
+		f.Confidence = ConfidenceMedium
+		rationale = "Direct content signature inside a third-party application or vendor tree; demoted pending independent corroboration (embedded network tooling, documentation, and test fixtures are the common benign cause)."
 
 	case evidenceStrength == StrengthDirect:
 		if pkgOwned {

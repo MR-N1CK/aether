@@ -238,3 +238,79 @@ func TestDetermineVerdict_Matrix(t *testing.T) {
 		})
 	}
 }
+
+// TestVendorAppTreeDemotion locks the legitimate-software false-positive
+// fixes from the live triage: string-level signatures inside third-party
+// vendor trees (/opt apps, node_modules, Electron resources) demote to
+// SUSPICIOUS while hostile paths and cryptographic IOC matches keep full
+// MALICIOUS strength.
+func TestVendorAppTreeDemotion(t *testing.T) {
+	newFinding := func(rule, path string, exec bool) report.Finding {
+		mode := uint32(0o644)
+		if exec {
+			mode = 0o755
+		}
+		f := report.NewFinding("filesystem", report.SeverityAlert, path, "matched reverse shell one-liner", rule)
+		f.Metadata = map[string]interface{}{}
+		_ = mode
+		return f
+	}
+
+	cases := []struct {
+		name     string
+		rule     string
+		path     string
+		exec     bool
+		ioc      bool
+		expected report.Verdict
+	}{
+		{"electron app js", "Script_Netcat_Reverse_Shell", "/opt/antigravity-ide/resources/app/out/jetskiAgent/main.js", false, false, report.VerdictSuspicious},
+		{"node_modules bundle", "Script_Netcat_Reverse_Shell", "/opt/app/resources/app/node_modules/mermaid/dist/index.js", false, false, report.VerdictSuspicious},
+		{"vendor elf string family", "Linux_Botnet_XorDDoS_ELF", "/opt/ide/IDE-binary", true, false, report.VerdictSuspicious},
+		{"corroborated in vendor tree", "ELF_AntiAnalysis_Corrupted_Header", "/opt/android-studio/jbr/lib/server/libjvm.so", true, false, report.VerdictSuspicious},
+		{"hostile path stays malicious", "Script_Netcat_Reverse_Shell", "/tmp/.cache/nc-clone.sh", true, false, report.VerdictMalicious},
+		{"home dropped script stays malicious", "Script_Netcat_Reverse_Shell", "/home/dev/.config/rev.sh", true, false, report.VerdictMalicious},
+		{"hash IOC in vendor tree stays malicious", "Script_Netcat_Reverse_Shell", "/opt/app/resources/payload.bin", true, true, report.VerdictMalicious},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFinding(tc.rule, tc.path, tc.exec)
+			if tc.ioc {
+				f.Metadata["is_ioc_match"] = true
+			}
+			verdict := report.DetermineVerdict(&f, nil, tc.exec, false, false, nil)
+			if verdict != tc.expected {
+				t.Errorf("expected %v, got %v (rationale: %s)", tc.expected, verdict, f.ConfidenceRationale)
+			}
+			if tc.expected == report.VerdictMalicious && f.Severity != report.SeverityAlert {
+				t.Errorf("expected ALERT severity for malicious, got %v", f.Severity)
+			}
+			if tc.expected == report.VerdictSuspicious && f.Severity != report.SeverityWarning {
+				t.Errorf("expected WARNING severity for demoted vendor finding, got %v", f.Severity)
+			}
+		})
+	}
+}
+
+func TestClassifyContextProfile_VendorAndConf(t *testing.T) {
+	cases := []struct {
+		path     string
+		exec     bool
+		expected string
+	}{
+		{"/opt/anything/resources/app/x.js", false, "vendor_app_tree"},
+		{"/opt/vendor-binary", true, "vendor_app_tree"},
+		{"/srv/app/node_modules/pkg/index.js", false, "vendor_app_tree"},
+		{"/usr/share/doc/pkg/examples/nc-test.txt", false, "vendor_app_tree"},
+		{"/etc/netsniff-ng/oui.conf", false, "historical_artifact"},
+		{"/etc/ld.so.preload", false, "standard"},
+		{"/tmp/payload.conf", false, "standard"},
+	}
+	for _, tc := range cases {
+		got := report.ClassifyContextProfile(tc.path, tc.exec, false)
+		if got != tc.expected {
+			t.Errorf("ClassifyContextProfile(%q, exec=%v) = %q, want %q", tc.path, tc.exec, got, tc.expected)
+		}
+	}
+}

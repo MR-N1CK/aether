@@ -210,3 +210,45 @@ func TestCorrelateFindings_DocMetadataPreserved(t *testing.T) {
 		t.Errorf("doc metadata must remain VerdictSafe, got %v", f.Verdict)
 	}
 }
+
+// TestCorrelateSkipsAggregateFindings locks the legitimate-daemon false
+// positive: a directory-level aggregate finding ("/usr/bin" grouping key)
+// must never be elevated to MALICIOUS by cross-domain corroboration, because
+// some persistence entry always references some file under /usr/bin.
+func TestCorrelateSkipsAggregateFindings(t *testing.T) {
+	agg := report.Finding{
+		Module: "filesystem", Severity: report.SeverityWarning,
+		Path: "/usr/bin", RuleName: "ELF_AntiAnalysis_Corrupted_Header",
+		Count: 3, Paths: []string{"/usr/bin/upx-ucl", "/usr/bin/tool-a", "/usr/bin/tool-b"},
+	}
+	pers := report.Finding{
+		Module: "persistence", Severity: report.SeverityNotice,
+		Path: "/etc/systemd/system/sniffer.service", RuleName: "Systemd_Unit_Exec_Unknown_Binary",
+	}
+	out := report.CorrelateFindings([]report.Finding{agg, pers})
+	for _, f := range out {
+		if f.RuleName == agg.RuleName && f.Verdict == report.VerdictMalicious {
+			t.Fatalf("aggregate finding elevated to MALICIOUS: %+v", f)
+		}
+	}
+
+	// Control: a concrete single-file finding correlated across domains still elevates.
+	concrete := report.Finding{
+		Module: "filesystem", Severity: report.SeverityWarning,
+		Path: "/tmp/.cache/implant", RuleName: "ELF_Behavioral_ReverseShell_Combo",
+	}
+	proc := report.Finding{
+		Module: "process", Severity: report.SeverityWarning,
+		Path: "/tmp/.cache/implant", RuleName: "Process_Memfd_Execution", Metadata: map[string]interface{}{"pid": 4242},
+	}
+	out2 := report.CorrelateFindings([]report.Finding{concrete, proc})
+	elevated := false
+	for _, f := range out2 {
+		if f.RuleName == concrete.RuleName && f.Verdict == report.VerdictMalicious {
+			elevated = true
+		}
+	}
+	if !elevated {
+		t.Fatal("concrete cross-domain threat failed to elevate to MALICIOUS — correlation over-suppressed")
+	}
+}

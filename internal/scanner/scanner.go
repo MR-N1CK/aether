@@ -46,6 +46,7 @@ type Scanner struct {
 	bus            *events.EventBus
 	iocEngine      ioc.Engine
 	pkgDB          pkgdb.PackageDB
+	fpFilters      *FPFilterSet
 	yaraEngine     yara.Engine
 	modules        []modules.Module
 	accumulator    *findingAccumulator
@@ -544,6 +545,17 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 		iocEng = &ioc.RealEngine{}
 	}
 
+	// False-positive filters: operator-provided rule+path suppressions. A
+	// malformed filter file disables suppression (fail-closed: findings stay
+	// visible) rather than aborting the scan.
+	fpSet, fpErr := LoadFPFilters(cfg.Scan.FPFilterFiles)
+	if fpErr != nil {
+		logger.Warn("disabling false-positive filters due to load error", slog.Any("error", fpErr))
+		fpSet = nil
+	} else if fpSet.Count() > 0 {
+		logger.Info("loaded false-positive filters", slog.Int("filters", fpSet.Count()), slog.Any("sources", fpSet.Sources()))
+	}
+
 	rootFS := ""
 	cleanRoot := filepath.Clean(cfg.Scan.Root)
 	if cleanRoot != "" && cleanRoot != "/" {
@@ -558,6 +570,7 @@ func NewScanner(cfg *config.Config, bus *events.EventBus, rep report.Reporter, l
 		reporter:     rep,
 		bus:          bus,
 		iocEngine:    iocEng,
+		fpFilters:    fpSet,
 		pkgDB:        pkgdb.New(rootFS),
 		modules:      defaultMods,
 		accumulator:  newFindingAccumulator(cfg),

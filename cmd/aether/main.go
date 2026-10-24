@@ -77,6 +77,7 @@ type scanCmdFlags struct {
 	allowlist                  string
 	oneFileSystem              bool
 	rulesDir                   string
+	fpFilters                  []string
 	trustRulesDir              bool
 	trustInstalledPentestTools bool
 	yaraMaxFileSize            int64
@@ -109,6 +110,7 @@ func attachScanFlags(cmd *cobra.Command, sFlags *scanCmdFlags) {
 	cmd.Flags().StringVar(&sFlags.allowlist, "allowlist", "", "Path to trusted SHA256 allowlist file")
 	cmd.Flags().BoolVar(&sFlags.oneFileSystem, "one-file-system", false, "Do not cross filesystem mount boundaries (default on for --full)")
 	cmd.Flags().StringVar(&sFlags.rulesDir, "rules-dir", "", "Custom directory containing YARA rules (*.yar, *.yara)")
+	cmd.Flags().StringSliceVar(&sFlags.fpFilters, "fp-filters", nil, "False-positive filter YAML file(s): downgrade known-benign rule hits by rule+path with an auditable note (repeatable)")
 	cmd.Flags().BoolVar(&sFlags.trustRulesDir, "trust-rules-dir", false, "Explicitly trust rules directory without ownership/permission checks (development/testing only)")
 	cmd.Flags().BoolVar(&sFlags.trustInstalledPentestTools, "trust-installed-pentest-tools", false, "Downgrade YARA findings in well-known pentest tool directories to INFO (opt-in for pentest workstations/VMs; keep disabled for suspect endpoints)")
 	cmd.Flags().Int64Var(&sFlags.yaraMaxFileSize, "yara-max-filesize", config.DefaultYaraMaxFileSize, "Maximum file size in bytes for in-memory YARA scanning (default: 20MB); files above this are stream-hashed but skip YARA")
@@ -209,6 +211,9 @@ func executeScan(cmd *cobra.Command, args []string, gFlags *globalFlags, sFlags 
 	}
 	if cmd.Flags().Changed("rules-dir") {
 		cfg.Scan.RulesDir = sFlags.rulesDir
+	}
+	if cmd.Flags().Changed("fp-filters") {
+		cfg.Scan.FPFilterFiles = sFlags.fpFilters
 	}
 	if cmd.Flags().Changed("trust-rules-dir") {
 		cfg.Scan.TrustRulesDir = sFlags.trustRulesDir

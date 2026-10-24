@@ -68,6 +68,15 @@ type Model struct {
 	splashFrame int
 	maxSplash   int
 
+	// Live motion state: animFrame advances at 60 FPS while the scan runs
+	// (disabled by --no-anim), driving module activity sweeps and the
+	// new-alert tab pulse. lastAlertAt timestamps the latest ALERT-class
+	// finding so attention motion can decay after ~1.5s.
+	animFrame      int
+	lastAlertAt    time.Time
+	detailOpenedAt time.Time
+	finishedAt     time.Time
+
 	// Scan metrics
 	startTime     time.Time
 	elapsed       time.Duration
@@ -93,19 +102,19 @@ type Model struct {
 	finishEvent  *events.ScanFinished
 
 	// Enhanced UX & Animation state
-	smoothFilesScanned float64
-	velocitySamples    []float64
-	activeTab          int
-	dashboardTab       int
+	smoothFilesScanned   float64
+	velocitySamples      []float64
+	activeTab            int
+	dashboardTab         int
 	modalScrollY         int
 	showPalette          bool
 	paletteQuery         string
 	paletteSelectedIndex int
 	confirmQuit          bool
-	toastMessage       string
-	toastUntil         time.Time
-	findingsDirty      bool
-	htmlReportPath     string
+	toastMessage         string
+	toastUntil           time.Time
+	findingsDirty        bool
+	htmlReportPath       string
 
 	// UI components
 	spinner spinner.Model
@@ -223,6 +232,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case frameTickMsg:
+		if !m.noAnim && m.state != stateSplash {
+			m.animFrame++
+		}
 		if m.findingsDirty {
 			m.recomputeVisible()
 			m.findingsDirty = false
@@ -240,7 +252,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var spCmd tea.Cmd
 		m.spinner, spCmd = m.spinner.Update(msg)
-		if m.scanFinished && (diff <= 0.05 && diff >= -0.05) && time.Now().After(m.toastUntil) {
+		// Keep 60 FPS for ~3s after finish so the verdict reveal shimmer
+		// plays in full (the "hold" window), then settle to the 1s idle
+		// heartbeat.
+		if m.scanFinished && time.Since(m.finishedAt) > 3*time.Second && (diff <= 0.05 && diff >= -0.05) && time.Now().After(m.toastUntil) {
 			// Scan is finished and display settled: reduce from 60 FPS to 1s idle heartbeat
 			cmds = append(cmds, spCmd, tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
 				return frameTickMsg(t)
@@ -302,6 +317,9 @@ func (m *Model) handleScanEvent(e events.Event) {
 	case events.FindingRaised:
 		m.findings = append(m.findings, ev.Finding)
 		m.findingsDirty = true
+		if ev.Finding.Severity == report.SeverityAlert || ev.Finding.Severity == report.SeverityCritical {
+			m.lastAlertAt = time.Now()
+		}
 		if mod, exists := m.activeModules[ev.Finding.Module]; exists {
 			mod.Findings++
 		}
@@ -316,6 +334,7 @@ func (m *Model) handleScanEvent(e events.Event) {
 
 	case events.ScanFinished:
 		m.scanFinished = true
+		m.finishedAt = time.Now()
 		m.finishEvent = &ev
 		m.filesScanned = ev.FilesScanned
 		m.smoothFilesScanned = float64(ev.FilesScanned)
@@ -650,6 +669,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.state = stateDetail
 			m.activeTab = 0
 			m.modalScrollY = 0
+			m.detailOpenedAt = time.Now()
 		}
 
 	case "/":
@@ -736,7 +756,9 @@ func (m *Model) recomputeVisible() {
 
 	visible := make([]report.Finding, 0, len(m.findings))
 	for _, f := range m.findings {
-		// Category tab filtering (0: All, 1: Threats, 2: Anomalies, 3: Notices, 4: Pipeline)
+		// Category tab filtering (0: All, 1: Threats, 2: Anomalies, 3: Notices,
+		// 4: Live Host = findings from runtime inspection modules — process,
+		// network, persistence, kernel — as opposed to the filesystem sweep).
 		switch m.dashboardTab {
 		case 1:
 			if f.Severity != report.SeverityAlert && f.Severity != report.SeverityCritical {
@@ -748,6 +770,10 @@ func (m *Model) recomputeVisible() {
 			}
 		case 3:
 			if f.Severity != report.SeverityNotice && f.Severity != report.SeverityLow && f.Severity != report.SeverityInfo {
+				continue
+			}
+		case 4:
+			if f.Module == "filesystem" || f.Module == "" {
 				continue
 			}
 		}
@@ -970,6 +996,7 @@ func (m *Model) executePaletteAction(actionID string) tea.Cmd {
 			m.state = stateDetail
 			m.activeTab = 0
 			m.modalScrollY = 0
+			m.detailOpenedAt = time.Now()
 		}
 	case "next_alert":
 		m.jumpToNextAlert()
@@ -1060,4 +1087,3 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	}
 	return nil
 }
-

@@ -95,7 +95,7 @@ func NewLauncherModel(th *theme.Theme, ver ...string) LauncherModel {
 		{
 			id:          ActionQuick,
 			keyNumber:   "1",
-			icon:        "⚡",
+			icon:        "◆",
 			title:       "Quick Triage Scan",
 			description: "Fast 15-second threat hunt of persistence hooks, active processes, and memory",
 			tag:         "RECOMMENDED",
@@ -103,7 +103,7 @@ func NewLauncherModel(th *theme.Theme, ver ...string) LauncherModel {
 		{
 			id:          ActionFull,
 			keyNumber:   "2",
-			icon:        "🛡️ ",
+			icon:        "▣",
 			title:       "Full System Deep Hunt",
 			description: "Exhaustive scan across the entire root filesystem and all 7 security modules",
 			tag:         "DEEP HUNT",
@@ -111,7 +111,7 @@ func NewLauncherModel(th *theme.Theme, ver ...string) LauncherModel {
 		{
 			id:          ActionCustom,
 			keyNumber:   "3",
-			icon:        "📁",
+			icon:        "▤",
 			title:       "Target Directory / File Scan",
 			description: "Scan any specific folder, download directory, or suspicious file payload",
 			tag:         "CUSTOM PATH",
@@ -119,7 +119,7 @@ func NewLauncherModel(th *theme.Theme, ver ...string) LauncherModel {
 		{
 			id:          ActionSetup,
 			keyNumber:   "4",
-			icon:        "📦",
+			icon:        "▦",
 			title:       "1-Click Rules Setup & Sync",
 			description: "Download verified YARA-Forge Core ruleset and harden directory permissions",
 			tag:         "SETUP",
@@ -127,7 +127,7 @@ func NewLauncherModel(th *theme.Theme, ver ...string) LauncherModel {
 		{
 			id:          ActionOpenReport,
 			keyNumber:   "5",
-			icon:        "🌐",
+			icon:        "◈",
 			title:       "Open Executive HTML Report",
 			description: "View the standalone dark-mode executive threat report with charts & timeline",
 			tag:         "REPORT",
@@ -135,7 +135,7 @@ func NewLauncherModel(th *theme.Theme, ver ...string) LauncherModel {
 		{
 			id:          ActionDemo,
 			keyNumber:   "6",
-			icon:        "🧪",
+			icon:        "◇",
 			title:       "Interactive Threat Simulator",
 			description: "Run a live simulated threat hunt demonstrating detection capabilities",
 			tag:         "SIMULATOR",
@@ -143,7 +143,7 @@ func NewLauncherModel(th *theme.Theme, ver ...string) LauncherModel {
 		{
 			id:          ActionStatus,
 			keyNumber:   "7",
-			icon:        "⚙️ ",
+			icon:        "≡",
 			title:       "Engine Status & Diagnostics",
 			description: "Inspect loaded signature counts, memory budgets, and security parameters",
 			tag:         "DIAGNOSTICS",
@@ -151,7 +151,7 @@ func NewLauncherModel(th *theme.Theme, ver ...string) LauncherModel {
 		{
 			id:          ActionExit,
 			keyNumber:   "q",
-			icon:        "🚪",
+			icon:        "✕",
 			title:       "Exit",
 			description: "Close Aether Command Center",
 			tag:         "",
@@ -345,7 +345,7 @@ func (m LauncherModel) View() string {
 		// Custom Path Input Modal
 		inputBoxContent := fmt.Sprintf(
 			" %s\n\n %s\n %s\n\n %s",
-			titleStyle.Render("📁 TARGET DIRECTORY SCAN"),
+			titleStyle.Render("▤ TARGET DIRECTORY SCAN"),
 			subStyle.Render("Enter a specific folder or file path to hunt for threats:"),
 			m.textInput.View(),
 			subStyle.Render("Press Enter to launch scan  •  Esc to go back"),
@@ -370,9 +370,11 @@ func (m LauncherModel) View() string {
 		isSelected := i == m.cursor
 
 		if isSelected {
-			selector := azureStyle.Render("▶ ")
+			// Luminous rail + gradient title: the selected card glows.
+			selector := lipgloss.NewStyle().Foreground(theme.ColorBorderLit).Bold(true).Render("▌") + azureStyle.Render("▶ ")
 			keyBadge := lipgloss.NewStyle().Background(theme.ColorAccent).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(item.keyNumber)
-			itemTitle := lipgloss.NewStyle().Foreground(theme.ColorTextPrim).Bold(true).Render(item.title)
+			gradTheme := theme.NewTheme(false)
+			itemTitle := gradTheme.RenderGradientText(item.title, "#38BDF8", "#F8FAFC")
 			var tagBadge string
 			if item.tag != "" {
 				tagBadge = " " + lipgloss.NewStyle().Background(theme.ColorIndigo).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(item.tag)

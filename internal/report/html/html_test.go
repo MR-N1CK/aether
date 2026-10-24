@@ -1041,10 +1041,10 @@ func TestHTMLReport_StackedCoverageSVG(t *testing.T) {
 	if !strings.Contains(svg, `class="coverage-bar-svg"`) {
 		t.Errorf("expected coverage-bar-svg class, got: %s", svg)
 	}
-	if !strings.Contains(svg, `#10b981`) { // Inspected (emerald)
-		t.Errorf("expected emerald fill for inspected files")
+	if !strings.Contains(svg, `#34d399`) { // Inspected (emerald)
+		t.Errorf("expected mint fill for inspected files")
 	}
-	if !strings.Contains(svg, `#f59e0b`) { // Perm Denied (amber)
+	if !strings.Contains(svg, `#fbbf24`) { // Perm Denied (amber)
 		t.Errorf("expected amber fill for perm denied")
 	}
 	if !strings.Contains(svg, `#8b5cf6`) { // Oversize (purple)
@@ -1133,4 +1133,3 @@ func TestHTMLReport_PrintStylesheet(t *testing.T) {
 		}
 	}
 }
-

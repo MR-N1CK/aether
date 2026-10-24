@@ -50,16 +50,16 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 
 	switch ass.Posture {
 	case realworld.PostureHighRisk:
-		riskColor = lipgloss.Color("#EF4444")
+		riskColor = lipgloss.Color("#F43F5E")
 		postureTitle = fmt.Sprintf("HIGH RISK — %d Active Threat Alert(s) Detected", ev.Alerts)
 	case realworld.PostureAttentionRequired:
-		riskColor = lipgloss.Color("#F59E0B")
+		riskColor = lipgloss.Color("#FBBF24")
 		postureTitle = fmt.Sprintf("ATTENTION REQUIRED — %d Warning(s) & %d Notice(s) Detected", ev.Warnings, ev.Notices)
 	case realworld.PostureLimitedVisibility:
 		riskColor = lipgloss.Color("#38BDF8")
 		postureTitle = "LIMITED VISIBILITY — Subsystems Uninspected Due to Permissions"
 	default:
-		riskColor = lipgloss.Color("#10B981")
+		riskColor = lipgloss.Color("#34D399")
 		postureTitle = "SAFE & HEALTHY — Zero Threats or Anomalies Identified"
 	}
 
@@ -172,7 +172,7 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 	meterStyled := lipgloss.NewStyle().Foreground(riskColor).Render(barFilled) +
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#334155")).Render(barEmpty)
 
-	badgeAlert := lipgloss.NewStyle().Background(lipgloss.Color("#E11D48")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Alerts", ev.Alerts))
+	badgeAlert := lipgloss.NewStyle().Background(lipgloss.Color("#F43F5E")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Alerts", ev.Alerts))
 	badgeWarn := lipgloss.NewStyle().Background(lipgloss.Color("#D97706")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Warnings", ev.Warnings))
 	badgeNotice := lipgloss.NewStyle().Background(lipgloss.Color("#0284C7")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Notices", ev.Notices))
 	badgeInfo := lipgloss.NewStyle().Background(lipgloss.Color("#334155")).Foreground(lipgloss.Color("#FFFFFF")).Padding(0, 1).Render(fmt.Sprintf("%d Infos", ev.Infos))

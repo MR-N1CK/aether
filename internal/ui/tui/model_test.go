@@ -455,4 +455,3 @@ func TestDashboardTabsAndYankKeybindings(t *testing.T) {
 		t.Errorf("expected toast message after pressing c")
 	}
 }
-

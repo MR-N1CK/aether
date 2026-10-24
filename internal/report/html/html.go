@@ -259,8 +259,8 @@ func RenderStackedCoverageSVG(cov events.CoverageStats, width, height int) strin
 		count int64
 		color string
 	}{
-		{"Inspected", inspected, "#10b981"},
-		{"Permission Denied", perm, "#f59e0b"},
+		{"Inspected", inspected, "#34d399"},
+		{"Permission Denied", perm, "#fbbf24"},
 		{"Oversize", oversize, "#8b5cf6"},
 		{"Excluded / Other", excluded, "#64748b"},
 	}
@@ -295,8 +295,8 @@ func renderDonutSVG(alerts, warnings, notices, infos int, verdict events.Verdict
 	buf.WriteString(`<svg class="donut-svg" width="140" height="140" viewBox="0 0 160 160" aria-label="Severity Distribution Donut Chart">` + "\n")
 
 	if total == 0 {
-		buf.WriteString(`  <circle cx="80" cy="80" r="52" fill="none" stroke="#10b981" stroke-width="14" stroke-opacity="0.8"/>` + "\n")
-		buf.WriteString(`  <text class="donut-center-text" x="80" y="74" text-anchor="middle" font-size="22" font-weight="800" fill="#10b981">0</text>` + "\n")
+		buf.WriteString(`  <circle cx="80" cy="80" r="52" fill="none" stroke="#34d399" stroke-width="14" stroke-opacity="0.8"/>` + "\n")
+		buf.WriteString(`  <text class="donut-center-text" x="80" y="74" text-anchor="middle" font-size="22" font-weight="800" fill="#34d399">0</text>` + "\n")
 		buf.WriteString(`  <text class="donut-center-muted" x="80" y="92" text-anchor="middle" font-size="9" font-weight="700" letter-spacing="1">CLEAN</text>` + "\n")
 		buf.WriteString(`</svg>`)
 		return buf.String()
@@ -309,10 +309,10 @@ func renderDonutSVG(alerts, warnings, notices, infos int, verdict events.Verdict
 		count int
 		color string
 	}{
-		{alerts, "#ef4444"},
-		{warnings, "#f59e0b"},
+		{alerts, "#f43f5e"},
+		{warnings, "#fbbf24"},
 		{notices, "#38bdf8"},
-		{infos, "#9ca3af"},
+		{infos, "#94a3b8"},
 	}
 
 	offset := 0.0
@@ -328,14 +328,14 @@ func renderDonutSVG(alerts, warnings, notices, infos int, verdict events.Verdict
 		offset += length
 	}
 
-	verdictColor := "#10b981"
+	verdictColor := "#34d399"
 	verdictLabel := "CLEAN"
 	switch verdict {
 	case events.VerdictCompromised:
-		verdictColor = "#ef4444"
+		verdictColor = "#f43f5e"
 		verdictLabel = "ALERT"
 	case events.VerdictSuspicious:
-		verdictColor = "#f59e0b"
+		verdictColor = "#fbbf24"
 		verdictLabel = "SUSPECT"
 	}
 
@@ -1236,7 +1236,7 @@ const htmlReportCSS = `
   --sev-info-border: #38BDF8;
   --sev-info-text: #BAE6FD;
 
-  --verdict-clean-border: #10B981;
+  --verdict-clean-border: #34d399;
   --verdict-clean-bg: rgba(16, 185, 129, 0.12);
   --verdict-clean-text: #34D399;
 
@@ -1504,7 +1504,7 @@ code, pre {
   fill: #f3f4f6;
 }
 .donut-center-muted {
-  fill: #9ca3af;
+  fill: #94a3b8;
 }
 [data-theme="light"] .donut-track {
   stroke: #e5e7eb;
@@ -1536,7 +1536,7 @@ code, pre {
 }
 .kill-node-hit {
   fill: rgba(239, 68, 68, 0.16);
-  stroke: #ef4444;
+  stroke: #f43f5e;
   stroke-width: 1.5;
 }
 .kill-intensity-low {
@@ -1545,11 +1545,11 @@ code, pre {
 }
 .kill-intensity-mid {
   fill: rgba(245, 158, 11, 0.16);
-  stroke: #f59e0b;
+  stroke: #fbbf24;
 }
 .kill-intensity-hot {
   fill: rgba(239, 68, 68, 0.2);
-  stroke: #ef4444;
+  stroke: #f43f5e;
 }
 .kill-node-none {
   fill: transparent;
@@ -1573,7 +1573,7 @@ code, pre {
   font-family: var(--font-mono, monospace);
 }
 .kill-abbr {
-  fill: #9ca3af;
+  fill: #94a3b8;
   font-size: 7.5px;
   font-weight: 700;
   letter-spacing: 0.5px;
@@ -1601,7 +1601,7 @@ code, pre {
   stroke: #b91c1c;
 }
 [data-theme="light"] .kill-node-none {
-  stroke: #9ca3af;
+  stroke: #94a3b8;
 }
 [data-theme="light"] .kill-arrow,
 [data-theme="light"] .kill-arrow-head {
@@ -1619,7 +1619,7 @@ code, pre {
 }
 [data-theme="light"] .kill-stage-none .kill-count,
 [data-theme="light"] .kill-stage-none .kill-abbr {
-  fill: #9ca3af;
+  fill: #94a3b8;
 }
 .search-highlight {
   background-color: rgba(245, 158, 11, 0.35);
@@ -2093,7 +2093,7 @@ code, pre {
 .badge-verd {
   background: rgba(245, 158, 11, 0.15);
   color: #fcd34d;
-  border: 1px solid #f59e0b;
+  border: 1px solid #fbbf24;
 }
 
 .threat-callout {
@@ -2145,7 +2145,7 @@ code, pre {
 .btn-copied {
   background: #064e3b !important;
   color: #34d399 !important;
-  border-color: #10b981 !important;
+  border-color: #34d399 !important;
 }
 
 .code-block {
@@ -2314,8 +2314,8 @@ code, pre {
   border-radius: 50%;
   display: inline-block;
 }
-.cov-dot-inspected { background-color: #10b981; }
-.cov-dot-permission { background-color: #f59e0b; }
+.cov-dot-inspected { background-color: #34d399; }
+.cov-dot-permission { background-color: #fbbf24; }
 .cov-dot-oversize { background-color: #8b5cf6; }
 .cov-dot-excluded { background-color: #64748b; }
 
@@ -2397,6 +2397,134 @@ code, pre {
 }
 .timing-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .timing-val { font-size: 13px; font-family: var(--font-mono); color: var(--text-main); }
+
+/* ============================================================
+   MOTION & GLOW SYSTEM — "Obsidian Luminous"
+   Design contract: glow encodes severity and attention semantics
+   only, never decoration. Entries decelerate on arrival
+   (ease-out physics); hover states are fast; ambient loops are
+   slow and dim. Every effect degrades under prefers-reduced-motion
+   and prints flat. One element stays subtly alive at rest (the
+   header sheen) so the report reads as a live instrument.
+   ============================================================ */
+:root {
+  --glow-alert:  0 0 16px rgba(244, 63, 94, 0.35), 0 0 44px rgba(244, 63, 94, 0.12);
+  --glow-warn:   0 0 16px rgba(251, 191, 36, 0.32), 0 0 44px rgba(251, 191, 36, 0.10);
+  --glow-safe:   0 0 16px rgba(52, 211, 153, 0.28), 0 0 44px rgba(52, 211, 153, 0.09);
+  --glow-notice: 0 0 14px rgba(56, 189, 248, 0.26), 0 0 36px rgba(56, 189, 248, 0.09);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* --- 1. Buttons: layered surface, luminous hover, press physics --- */
+.btn {
+  background: linear-gradient(180deg, rgba(56,189,248,0.06), rgba(56,189,248,0) 55%), var(--bg-surface);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 2px 6px rgba(0,0,0,0.35);
+  transition: transform 0.16s var(--ease-out-soft), box-shadow 0.18s ease-out, border-color 0.18s ease-out, background-color 0.18s ease-out;
+}
+.btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, 0.65);
+  box-shadow: var(--glow-notice);
+}
+.btn:active { transform: translateY(0) scale(0.97); box-shadow: 0 1px 2px rgba(0,0,0,0.4); transition-duration: 0.06s; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; box-shadow: var(--glow-notice); }
+
+/* Severity filter pills: the active filter carries its severity glow. */
+.btn-pill { transition: transform 0.15s var(--ease-out-soft), box-shadow 0.18s ease-out, border-color 0.18s ease-out, background-color 0.15s ease-out; }
+.btn-pill:hover { transform: translateY(-1px); }
+.btn-pill.active[data-sev="ALERT"]   { box-shadow: var(--glow-alert); }
+.btn-pill.active[data-sev="WARNING"] { box-shadow: var(--glow-warn); }
+.btn-pill.active[data-sev="NOTICE"]  { box-shadow: var(--glow-notice); }
+.btn-pill.active[data-sev="INFO"]    { box-shadow: 0 0 10px rgba(148,163,184,0.25); }
+
+/* --- 2. Posture aura: the verdict breathes at its severity --- */
+.posture-card.posture-high-risk { box-shadow: var(--glow-alert); animation: aura-alert 3.4s ease-in-out infinite; }
+.posture-card.posture-attention { box-shadow: var(--glow-warn);  animation: aura-warn  3.8s ease-in-out infinite; }
+.posture-card.posture-limited-visibility { box-shadow: var(--glow-notice); animation: aura-notice 4.2s ease-in-out infinite; }
+.posture-card.posture-safe { box-shadow: var(--glow-safe); }
+@keyframes aura-alert  { 0%, 100% { box-shadow: 0 0 14px rgba(244,63,94,0.28), 0 0 36px rgba(244,63,94,0.10); } 50% { box-shadow: 0 0 22px rgba(244,63,94,0.46), 0 0 60px rgba(244,63,94,0.16); } }
+@keyframes aura-warn   { 0%, 100% { box-shadow: 0 0 14px rgba(251,191,36,0.24), 0 0 36px rgba(251,191,36,0.08); } 50% { box-shadow: 0 0 20px rgba(251,191,36,0.42), 0 0 56px rgba(251,191,36,0.13); } }
+@keyframes aura-notice { 0%, 100% { box-shadow: 0 0 12px rgba(56,189,248,0.20), 0 0 32px rgba(56,189,248,0.07); } 50% { box-shadow: 0 0 18px rgba(56,189,248,0.36), 0 0 48px rgba(56,189,248,0.11); } }
+
+/* --- 3. Neon text glow on severity markers (color + glow, never glow alone) --- */
+.sev-alert, .sev-alert *  { text-shadow: 0 0 10px rgba(244, 63, 94, 0.55); }
+.sev-warning, .sev-warning * { text-shadow: 0 0 10px rgba(251, 191, 36, 0.50); }
+.sev-notice, .sev-notice * { text-shadow: 0 0 9px rgba(56, 189, 248, 0.45); }
+.sev-info, .sev-info *    { text-shadow: 0 0 7px rgba(148, 163, 184, 0.35); }
+
+/* --- 4. Entrance choreography: 3D tilt-in, staggered by a beat --- */
+.executive-metrics-grid .card,
+.coverage-section .card { animation: card-in 0.55s var(--ease-out-soft) backwards; }
+.executive-metrics-grid .card:nth-child(1) { animation-delay: 0.05s; }
+.executive-metrics-grid .card:nth-child(2) { animation-delay: 0.12s; }
+.executive-metrics-grid .card:nth-child(3) { animation-delay: 0.19s; }
+@keyframes card-in {
+  from { opacity: 0; transform: perspective(900px) rotateX(9deg) translateY(16px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+.card { transition: transform 0.18s var(--ease-out-soft), box-shadow 0.2s ease-out, border-color 0.2s ease-out; }
+.card:hover { transform: translateY(-2px); border-color: rgba(56, 189, 248, 0.40); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), var(--glow-notice); }
+
+/* --- 5. Donut: dimensional spin-in + ambient instrument glow --- */
+.donut-svg { animation: donut-in 0.85s var(--ease-out-soft) backwards; filter: drop-shadow(0 0 12px rgba(56, 189, 248, 0.12)); }
+@keyframes donut-in { from { opacity: 0; transform: rotate(-14deg) scale(0.92); } to { opacity: 1; transform: none; } }
+
+/* --- 6. Kill-chain: nodes pop in, staggered left to right --- */
+.killchain-svg circle,
+.killchain-svg path { animation: node-pop 0.45s var(--ease-out-soft) backwards; }
+.killchain-svg > g:nth-child(1) * { animation-delay: 0.10s; }
+.killchain-svg > g:nth-child(2) * { animation-delay: 0.16s; }
+.killchain-svg > g:nth-child(3) * { animation-delay: 0.22s; }
+.killchain-svg > g:nth-child(4) * { animation-delay: 0.28s; }
+.killchain-svg > g:nth-child(5) * { animation-delay: 0.34s; }
+.killchain-svg > g:nth-child(6) * { animation-delay: 0.40s; }
+@keyframes node-pop { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+.killchain-svg { transform-origin: center; }
+
+/* --- 7. Findings table: hover luminous rail --- */
+.data-table tbody tr { transition: background-color 0.12s ease-out; }
+.data-table tbody tr:hover { background-color: rgba(56, 189, 248, 0.05); }
+.data-table tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 0 #38bdf8; }
+
+/* --- 8. Detail drawer: slide-and-settle entrance --- */
+.drawer { animation: drawer-in 0.30s var(--ease-out-soft); }
+@keyframes drawer-in { from { transform: translateX(28px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* --- 9. Header: the living sheen (single ambient element) --- */
+.logo-wrap { position: relative; overflow: hidden; }
+.logo-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 42%, rgba(56, 189, 248, 0.07) 50%, transparent 58%);
+  transform: translateX(-120%);
+  animation: header-sheen 7s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes header-sheen { 0%, 55% { transform: translateX(-120%); } 85%, 100% { transform: translateX(120%); } }
+.aether-logo { filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.25)); }
+
+/* --- 10. MITRE technique chips: raised interaction --- */
+.btn-tech-chip { transition: transform 0.14s var(--ease-out-soft), box-shadow 0.16s ease-out, border-color 0.16s ease-out; }
+.btn-tech-chip:hover { transform: translateY(-1px); box-shadow: var(--glow-notice); }
+
+/* --- 11. Global motion guards ------------------------------------ */
+/* Reduced motion: static final frame for every entrance and loop. */
+@media (prefers-reduced-motion: reduce) {
+  .executive-metrics-grid .card, .coverage-section .card, .donut-svg,
+  .killchain-svg circle, .killchain-svg path, .drawer, .posture-card,
+  .logo-wrap::after { animation: none !important; }
+  .btn, .btn-pill, .card, .btn-tech-chip, .data-table tbody tr { transition: none !important; }
+  .btn:hover, .card:hover, .btn-pill:hover, .btn-tech-chip:hover { transform: none !important; }
+}
+/* Print: flat, glowless, and stable for paper/PDF. */
+@media print {
+  .btn, .btn-pill, .card, .btn-tech-chip, .data-table tbody tr { transition: none !important; transform: none !important; }
+  .posture-card, .btn:hover, .card:hover, .aether-logo, .donut-svg,
+  .sev-alert, .sev-alert *, .sev-warning, .sev-warning *,
+  .sev-notice, .sev-notice *, .sev-info, .sev-info * { box-shadow: none !important; text-shadow: none !important; filter: none !important; animation: none !important; }
+  .logo-wrap::after { display: none !important; }
+}
 `
 
 // Pure Vanilla JavaScript for Findings Table Interaction & Detail Drawer
@@ -2458,7 +2586,7 @@ const htmlReportJS = `
     document.documentElement.setAttribute('data-theme', t);
     localStorage.setItem('aether-theme', t);
     if (themeIcon) {
-      themeIcon.textContent = (t === 'light') ? '🌙' : '☀️';
+      themeIcon.textContent = (t === 'light') ? '◐' : '◑';
     }
   }
 

@@ -56,9 +56,9 @@ func RenderScanHeader(w io.Writer, ev events.ScanStarted, th *theme.Theme) {
 	if th.NoColor {
 		fmt.Fprintf(w, "+-------------------------------------------------------------------------+\n")
 		fmt.Fprintf(w, "| AETHER - Linux Threat Hunt & Defensive Security Scanner                 |\n")
-		fmt.Fprintf(w, "| Version: %-15s Mode: %-10s Target: %-25s |\n", verStr, ev.Mode, targetStr)
-		fmt.Fprintf(w, "| Host:    %-15s OS: %s/%s CPU Cores: %-20d |\n", host, runtime.GOOS, runtime.GOARCH, ev.Threads)
-		fmt.Fprintf(w, "| Privs:   %-40s Threads: %-12d |\n", privStr, ev.Threads)
+		fmt.Fprintf(w, "| Version: %-12s Mode: %-10s Target: %-24s |\n", verStr, ev.Mode, targetStr)
+		fmt.Fprintf(w, "| Host: %-15s OS: %-13s CPUs: %-3d Workers: %-12d |\n", host, runtime.GOOS+"/"+runtime.GOARCH, runtime.NumCPU(), ev.Threads)
+		fmt.Fprintf(w, "| Privs: %-42s Threads: %-12d |\n", privStr, ev.Threads)
 		fmt.Fprintf(w, "+-------------------------------------------------------------------------+\n\n")
 		return
 	}
@@ -98,7 +98,7 @@ func RenderScanHeader(w io.Writer, ev events.ScanStarted, th *theme.Theme) {
 	row1 := fmt.Sprintf("%s %-20s  %s %-20s  %s %d cores",
 		keyStyle.Render("Host:"), valStyle.Render(host),
 		keyStyle.Render("Kernel:"), valStyle.Render(runtime.GOARCH),
-		keyStyle.Render("CPU:"), ev.Threads,
+		keyStyle.Render("CPU:"), runtime.NumCPU(),
 	)
 
 	row2 := fmt.Sprintf("%s %-20s  %s %-20s  %s %s",

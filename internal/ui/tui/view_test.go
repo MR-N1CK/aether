@@ -391,7 +391,7 @@ func TestRenderTabBar(t *testing.T) {
 	}
 
 	tabBar := m.renderTabBar(120)
-	for _, want := range []string{"1: ALL (3)", "2: THREATS (1)", "3: ANOMALIES (1)", "4: NOTICES (1)", "5: PIPELINE (2)"} {
+	for _, want := range []string{"1: ALL (3)", "2: THREATS (1)", "3: ANOMALIES (1)", "4: NOTICES (1)", "5: LIVE HOST (0)"} {
 		if !strings.Contains(tabBar, want) {
 			t.Errorf("expected tab bar to contain %q, got: %s", want, tabBar)
 		}
@@ -401,7 +401,7 @@ func TestRenderTabBar(t *testing.T) {
 func TestRenderModuleMatrixPane(t *testing.T) {
 	th := theme.NewTheme(true)
 	m := Model{
-		theme: th,
+		theme:       th,
 		moduleOrder: []string{"process", "network"},
 		activeModules: map[string]*ModuleStatus{
 			"process": {Name: "process", Running: true, Findings: 2},
@@ -498,4 +498,3 @@ func TestFlightDeckDashboard_WideAndCompact(t *testing.T) {
 		t.Errorf("expected compact view to contain horizontal Active Modules row, got: %s", compactView)
 	}
 }
-

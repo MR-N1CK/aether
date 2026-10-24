@@ -252,15 +252,15 @@ func (m Model) renderDashboard() string {
 		sortLabel = "arrival"
 	}
 	footerText := fmt.Sprintf("%s Tabs   %s Nav   %s Dossier   %s Filter   %s Sort:%s   %s Yank   %s Shortcuts   %s Quit",
-		m.theme.KeyHint.Render("[1-5]"),
-		m.theme.KeyHint.Render("[j/k]"),
-		m.theme.KeyHint.Render("[Enter]"),
-		m.theme.KeyHint.Render("[/]"),
-		m.theme.KeyHint.Render("[s]"),
+		m.theme.KeyCap.Render("[1-5]"),
+		m.theme.KeyCap.Render("[j/k]"),
+		m.theme.KeyCap.Render("[Enter]"),
+		m.theme.KeyCap.Render("[/]"),
+		m.theme.KeyCap.Render("[s]"),
 		sortLabel,
-		m.theme.KeyHint.Render("[p/y/c]"),
-		m.theme.KeyHint.Render("[?]"),
-		m.theme.KeyHint.Render("[q]"),
+		m.theme.KeyCap.Render("[p/y/c]"),
+		m.theme.KeyCap.Render("[?]"),
+		m.theme.KeyCap.Render("[q]"),
 	)
 	if m.isFiltering {
 		footerText = fmt.Sprintf("Search Filter: %s█  (Press [Enter] to apply, [Esc] to cancel)", m.filterQuery)
@@ -280,8 +280,11 @@ func (m Model) renderDashboard() string {
 
 // renderTabBar renders the interactive 1-5 filter tabs.
 func (m Model) renderTabBar(width int) string {
-	alerts, warns, notes := 0, 0, 0
+	alerts, warns, notes, live := 0, 0, 0, 0
 	for _, f := range m.findings {
+		if f.Module != "filesystem" && f.Module != "" {
+			live++
+		}
 		switch f.Severity {
 		case report.SeverityAlert, report.SeverityCritical:
 			alerts++
@@ -300,12 +303,17 @@ func (m Model) renderTabBar(width int) string {
 		{1, fmt.Sprintf("2: THREATS (%d)", alerts)},
 		{2, fmt.Sprintf("3: ANOMALIES (%d)", warns)},
 		{3, fmt.Sprintf("4: NOTICES (%d)", notes)},
-		{4, fmt.Sprintf("5: PIPELINE (%d)", len(m.activeModules))},
+		{4, fmt.Sprintf("5: LIVE HOST (%d)", live)},
 	}
 
+	alertPulse := !m.noAnim && time.Since(m.lastAlertAt) < 1500*time.Millisecond
 	var tabItems []string
 	for _, tab := range tabs {
-		if m.dashboardTab == tab.id {
+		if tab.id == 1 && alertPulse && (m.animFrame/4)%2 == 0 {
+			// New ALERT-class finding: draw the eye with a brief rose flash
+			// on the THREATS tab, decaying after 1.5s.
+			tabItems = append(tabItems, m.theme.BadgeAlert.Render(tab.label))
+		} else if m.dashboardTab == tab.id {
 			tabItems = append(tabItems, m.theme.TabBadgeActive.Render(tab.label))
 		} else {
 			tabItems = append(tabItems, m.theme.TabBadgeInactive.Render(tab.label))
@@ -313,6 +321,32 @@ func (m Model) renderTabBar(width int) string {
 	}
 
 	return strings.Join(tabItems, " ")
+}
+
+// runningSweepBar renders a 4-cell indeterminate activity indicator from
+// fractional vertical sub-blocks: a bright comet sweeping over a dim track,
+// advancing at 60 FPS. With animations disabled it degrades to a static
+// low-shade track.
+func runningSweepBar(frame int, noAnim bool) string {
+	if noAnim {
+		return string([]rune{theme.SubBlocks[1], theme.SubBlocks[1], theme.SubBlocks[1], theme.SubBlocks[1]})
+	}
+	pos := frame % 8
+	bar := make([]rune, 4)
+	for i := 0; i < 4; i++ {
+		d := (pos - i*2 + 8) % 8
+		switch {
+		case d == 0:
+			bar[i] = theme.SubBlocks[8]
+		case d == 1:
+			bar[i] = theme.SubBlocks[6]
+		case d == 2:
+			bar[i] = theme.SubBlocks[3]
+		default:
+			bar[i] = theme.SubBlocks[1]
+		}
+	}
+	return string(bar)
 }
 
 // renderModuleMatrixPane renders the execution pipeline matrix for the left pane of the Flight Deck.
@@ -326,7 +360,7 @@ func (m Model) renderModuleMatrixPane(width, height int) string {
 		if yara.IsCompiledIn() {
 			msg = "Loading YARA-X rules..."
 		}
-		b.WriteString(m.theme.ModuleRowPending.Render(m.spinner.View() + " " + msg) + "\n")
+		b.WriteString(m.theme.ModuleRowPending.Render(m.spinner.View()+" "+msg) + "\n")
 	} else {
 		innerWidth := width - 4
 		if innerWidth < 20 {
@@ -346,7 +380,7 @@ func (m Model) renderModuleMatrixPane(width, height int) string {
 				icon = m.spinner.View()
 				rowStyle = m.theme.ModuleRowRunning
 				hitsStr = fmt.Sprintf("%2dh", mod.Findings)
-				durStr = "..."
+				durStr = runningSweepBar(m.animFrame, m.noAnim)
 			} else if mod.Finished {
 				if mod.Status == "NOT IMPLEMENTED" {
 					icon = m.theme.IconSkip()
@@ -1203,16 +1237,23 @@ func (m Model) renderDetailModal() string {
 	}
 
 	footer := fmt.Sprintf("%s Tab   %s Scroll   %s Path   %s Hash   %s Cmd   %s Close",
-		m.theme.KeyHint.Render("[Tab/1-4]"),
-		m.theme.KeyHint.Render("[j/k]"),
-		m.theme.KeyHint.Render("[y]"),
-		m.theme.KeyHint.Render("[h]"),
-		m.theme.KeyHint.Render("[c]"),
-		m.theme.KeyHint.Render("[Esc]"),
+		m.theme.KeyCap.Render("[Tab/1-4]"),
+		m.theme.KeyCap.Render("[j/k]"),
+		m.theme.KeyCap.Render("[y]"),
+		m.theme.KeyCap.Render("[h]"),
+		m.theme.KeyCap.Render("[c]"),
+		m.theme.KeyCap.Render("[Esc]"),
 	)
 	b.WriteString(m.theme.FindingTimestamp.Render(footer))
 
-	box := m.theme.ModalBox.Width(modalWidth).Render(b.String())
+	// Focus ramp: for the first ~160ms after opening, the dossier carries
+	// the luminous rail border before settling to the standard overlay
+	// border — a perceptible landing transition instead of an instant snap.
+	modal := m.theme.ModalBox.Width(modalWidth)
+	if !m.noAnim && time.Since(m.detailOpenedAt) < 160*time.Millisecond {
+		modal = modal.BorderForeground(theme.ColorBorderLit)
+	}
+	box := modal.Render(b.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
@@ -1269,7 +1310,7 @@ func (m Model) renderCommandPalette() string {
 			paddedKey := runewidth.FillRight(act.Key, 14)
 			line := fmt.Sprintf("  %s %s — %s", m.theme.KeyHint.Render(paddedKey), act.Title, act.Description)
 			if i == m.paletteSelectedIndex {
-				b.WriteString(m.theme.FindingRowSelected.Render("▶ " + line) + "\n")
+				b.WriteString(m.theme.FindingRowSelected.Render("▶ "+line) + "\n")
 			} else {
 				b.WriteString("  " + line + "\n")
 			}
@@ -1283,6 +1324,38 @@ func (m Model) renderCommandPalette() string {
 
 	box := m.theme.CommandPalette.Width(w).Render(b.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+// verdictShimmer renders the verdict headline as a breathing gradient: the
+// severity color rising toward white-hot and back, one full breath every
+// ~1.1s at 60 FPS during the post-finish hold window, then freezing on a
+// static gradient. Degraded to plain text under NoColor.
+func (m Model) verdictShimmer(text, sevHex string) string {
+	if m.theme.NoColor {
+		return text
+	}
+	phase := 0.0
+	if !m.noAnim {
+		f := m.animFrame % 66
+		if f >= 33 {
+			f = 65 - f
+		}
+		phase = float64(f) / 32.0
+	}
+	lerpHex := func(a, b string, t float64) string {
+		parse := func(h string) (int, int, int) {
+			h = strings.TrimPrefix(h, "#")
+			var r, g, bl uint8
+			fmt.Sscanf(h, "%02x%02x%02x", &r, &g, &bl)
+			return int(r), int(g), int(bl)
+		}
+		ar, ag, ab := parse(a)
+		br, bg, bb := parse(b)
+		mix := func(x, y int) int { return int(float64(x)*(1-t) + float64(y)*t) }
+		return fmt.Sprintf("#%02x%02x%02x", mix(ar, br), mix(ag, bg), mix(ab, bb))
+	}
+	mid := lerpHex(sevHex, "#FFFFFF", phase*0.7)
+	return m.theme.RenderGradientText(text, sevHex, mid, "#FFFFFF")
 }
 
 func (m Model) renderFinished() string {
@@ -1336,17 +1409,17 @@ func (m Model) renderFinished() string {
 	case verdict == events.VerdictCompromised || alerts > 0:
 		riskGauge := m.renderRiskGauge(cardWidth, alerts, warnings)
 		verdictBanner = m.theme.VerdictCompromised.Width(cardWidth).Render(
-			fmt.Sprintf("%s VERDICT: SYSTEM COMPROMISED%s\nActive threats or high-confidence compromise indicators detected (%d MALICIOUS ALERT(S)).\n%s", m.theme.IconAlert(), coverageSuffix, alerts, riskGauge),
+			fmt.Sprintf("%s %s\nActive threats or high-confidence compromise indicators detected (%d MALICIOUS ALERT(S)).\n%s", m.theme.IconAlert(), m.verdictShimmer("VERDICT: SYSTEM COMPROMISED", string(theme.ColorAlert))+coverageSuffix, alerts, riskGauge),
 		)
 	case verdict == events.VerdictSuspicious || warnings > 0 || notices > 0:
 		riskGauge := m.renderRiskGauge(cardWidth, alerts, warnings)
 		verdictBanner = m.theme.VerdictSuspicious.Width(cardWidth).Render(
-			fmt.Sprintf("%s VERDICT: SUSPICIOUS ANOMALIES IDENTIFIED%s\nSecurity anomalies or unverified persistence hooks detected (%d Warnings, %d Notices).\n%s", m.theme.IconWarn(), coverageSuffix, warnings, notices, riskGauge),
+			fmt.Sprintf("%s %s\nSecurity anomalies or unverified persistence hooks detected (%d Warnings, %d Notices).\n%s", m.theme.IconWarn(), m.verdictShimmer("VERDICT: SUSPICIOUS ANOMALIES IDENTIFIED", string(theme.ColorWarning))+coverageSuffix, warnings, notices, riskGauge),
 		)
 	default:
 		riskGauge := m.renderRiskGauge(cardWidth, 0, 0)
 		verdictBanner = m.theme.VerdictClean.Width(cardWidth).Render(
-			fmt.Sprintf("%s VERDICT: SYSTEM CLEAN & SECURE%s\nNo known indicators of compromise, backdoors, webshells, or anomalous artifacts identified.\n%s", m.theme.IconClean(), coverageSuffix, riskGauge),
+			fmt.Sprintf("%s %s\nNo known indicators of compromise, backdoors, webshells, or anomalous artifacts identified.\n%s", m.theme.IconClean(), m.verdictShimmer("VERDICT: SYSTEM CLEAN & SECURE", report.PaletteSafeHex)+coverageSuffix, riskGauge),
 		)
 	}
 	b.WriteString(verdictBanner + "\n")
@@ -1413,13 +1486,19 @@ func (m Model) renderFinished() string {
 		yCov := m.finishEvent.YARACoverage
 		rulesCount := 0
 		filesCount := int64(0)
+		fingerprint := ""
 		if yCov != nil {
 			rulesCount = yCov.RulesLoaded
 			filesCount = yCov.FilesScanned
+			fingerprint = yCov.RulesetFingerprint
+		}
+		engineLine := fmt.Sprintf("Detection Engine: YARA-X ACTIVE (%d Rules Loaded  •  %d Files Evaluated)", rulesCount, filesCount)
+		if fingerprint != "" {
+			engineLine += fmt.Sprintf("  •  Ruleset %s", fingerprint)
 		}
 		stats.WriteString(fmt.Sprintf("\n  %s %s\n",
 			m.theme.FindingTimestamp.Render(m.theme.IconBolt()),
-			m.theme.FindingTimestamp.Render(fmt.Sprintf("Detection Engine: YARA-X ACTIVE (%d Rules Loaded  •  %d Files Evaluated)", rulesCount, filesCount)),
+			m.theme.FindingTimestamp.Render(engineLine),
 		))
 	} else {
 		stats.WriteString(fmt.Sprintf("\n  %s %s\n",
@@ -1575,7 +1654,7 @@ func (m Model) renderTopRulesBars(cardWidth int, topRules []report.RuleSummary) 
 		return ""
 	}
 	var sb strings.Builder
-	title := "🏷️ Top Detections:"
+	title := "◆ Top Detections:"
 	if m.theme.ASCII {
 		title = "[TOP] Top Detections:"
 	}

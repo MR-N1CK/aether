@@ -118,4 +118,3 @@ func TestTheme_ThreatScoreMeter(t *testing.T) {
 		t.Errorf("expected 50/100 with # block in ASCII meter, got: %q", meterASCII)
 	}
 }
-

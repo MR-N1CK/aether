@@ -63,11 +63,12 @@ func alnumRune(r rune) bool {
 
 // QueryFilter defines parsed structured search filters combined with free-text query.
 // Supports:
-//   sev:<val>  / severity:<val>  (alert, warning, notice, info)
-//   mod:<val>  / module:<val>    (persistence, process, network, users, kernel, filesystem, etc.)
-//   path:<val>                   (substring match on target path)
-//   rule:<val>                   (substring match on detection rule name)
-//   <terms>                      (fuzzy subsequence matching across finding haystack)
+//
+//	sev:<val>  / severity:<val>  (alert, warning, notice, info)
+//	mod:<val>  / module:<val>    (persistence, process, network, users, kernel, filesystem, etc.)
+//	path:<val>                   (substring match on target path)
+//	rule:<val>                   (substring match on detection rule name)
+//	<terms>                      (fuzzy subsequence matching across finding haystack)
 type QueryFilter struct {
 	Severity string
 	Module   string

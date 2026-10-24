@@ -62,26 +62,30 @@ var ASCIIBorder = lipgloss.Border{
 
 // Palette definitions - Master-tier Obsidian Studio 4-Tier Elevation Ladder
 var (
-	ColorObsidian  = lipgloss.Color("#05070B") // Deepest void obsidian (tier 0 root container)
-	ColorVoid      = lipgloss.Color("#05070B") // Tier 0: Root void canvas
-	ColorSurface   = lipgloss.Color("#0A0E15") // Tier 1: Panels and standard card background
-	ColorRaised    = lipgloss.Color("#10151F") // Tier 2: Focused panels, headers, floating cards
-	ColorOverlay   = lipgloss.Color("#161C27") // Tier 3: Modals, active selections, dropdowns
-	ColorBorder    = lipgloss.Color("#1E293B") // Subtle slate hairline border
-	ColorBorderLit = lipgloss.Color("#38BDF8") // Focused sky cyan border & luminous rail
-	ColorActiveRail= lipgloss.Color("#38BDF8") // Luminous active pane rail
-	ColorTextPrim  = lipgloss.Color("#F8FAFC") // Crisp platinum white text
-	ColorTextSec   = lipgloss.Color("#E2E8F0") // Soft titanium slate text
-	ColorTextMute  = lipgloss.Color("#64748B") // Refined deep slate gray
-	ColorAccent    = lipgloss.Color("#0284C7") // Deep Sky Cyan / Steel
-	ColorIndigo    = lipgloss.Color("#6366F1") // Electric Indigo
-	ColorCyan      = lipgloss.Color("#38BDF8") // Telemetry cyan
+	ColorObsidian   = lipgloss.Color("#05070B") // Deepest void obsidian (tier 0 root container)
+	ColorVoid       = lipgloss.Color("#05070B") // Tier 0: Root void canvas
+	ColorSurface    = lipgloss.Color("#0A0E15") // Tier 1: Panels and standard card background
+	ColorRaised     = lipgloss.Color("#10151F") // Tier 2: Focused panels, headers, floating cards
+	ColorOverlay    = lipgloss.Color("#161C27") // Tier 3: Modals, active selections, dropdowns
+	ColorBorder     = lipgloss.Color("#1E293B") // Subtle slate hairline border
+	ColorBorderLit  = lipgloss.Color("#38BDF8") // Focused sky cyan border & luminous rail
+	ColorActiveRail = lipgloss.Color("#38BDF8") // Luminous active pane rail
+	ColorTextPrim   = lipgloss.Color("#F8FAFC") // Crisp platinum white text
+	ColorTextSec    = lipgloss.Color("#E2E8F0") // Soft titanium slate text
+	ColorTextMute   = lipgloss.Color("#8B9BB4") // Soft slate gray (WCAG AA on obsidian)
+	ColorAccent     = lipgloss.Color("#0284C7") // Deep Sky Cyan / Steel
+	ColorIndigo     = lipgloss.Color("#6366F1") // Electric Indigo
+	ColorCyan       = lipgloss.Color("#38BDF8") // Telemetry cyan
 
-	// Executive severity colors - restrained, distinct, high-contrast
-	ColorInfo    = lipgloss.Color("#38BDF8") // Sky Cyan
-	ColorNotice  = lipgloss.Color("#34D399") // Crisp Mint Emerald
-	ColorWarning = lipgloss.Color("#FBBF24") // Warm Amber
-	ColorAlert   = lipgloss.Color("#F43F5E") // Vivid Rose Crimson
+	// Executive severity colors - restrained, distinct, high-contrast.
+	// Canonical tokens live in internal/report/palette.go and are shared by
+	// the TUI, plain ANSI, and HTML surfaces: sky = NOTICE, mint = SAFE,
+	// slate = INFO.
+	ColorInfo    = lipgloss.Color(report.PaletteInfoHex)    // Slate
+	ColorNotice  = lipgloss.Color(report.PaletteNoticeHex)  // Sky Cyan
+	ColorSafe    = lipgloss.Color(report.PaletteSafeHex)    // Mint Emerald
+	ColorWarning = lipgloss.Color(report.PaletteWarningHex) // Warm Amber
+	ColorAlert   = lipgloss.Color(report.PaletteAlertHex)   // Vivid Rose Crimson
 )
 
 // Theme encapsulates styling configurations respecting terminal capabilities and NO_COLOR.
@@ -132,6 +136,7 @@ type Theme struct {
 	StatValueWarn    lipgloss.Style
 	StatValueAlert   lipgloss.Style
 	KeyHint          lipgloss.Style
+	KeyCap           lipgloss.Style
 	KeyDesc          lipgloss.Style
 	SectionHeader    lipgloss.Style
 	SubSectionHeader lipgloss.Style
@@ -223,6 +228,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 		t.StatValueWarn = lipgloss.NewStyle().Bold(true)
 		t.StatValueAlert = lipgloss.NewStyle().Bold(true)
 		t.KeyHint = lipgloss.NewStyle().Bold(true)
+		t.KeyCap = lipgloss.NewStyle().Bold(true).Padding(0, 1)
 		t.KeyDesc = lipgloss.NewStyle()
 		t.SectionHeader = lipgloss.NewStyle().Bold(true)
 		t.SubSectionHeader = lipgloss.NewStyle().Bold(true)
@@ -403,6 +409,16 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 
 	t.KeyHint = lipgloss.NewStyle().
 		Foreground(ColorCyan).
+		Bold(true)
+
+	// KeyCap: keycap chip for primary footers — raised overlay surface,
+	// cyan ink, hairline border. Reads as a physical key, not text.
+	t.KeyCap = lipgloss.NewStyle().
+		Foreground(ColorCyan).
+		Background(ColorOverlay).
+		Border(lipgloss.NormalBorder(), false, true, false, true).
+		BorderForeground(ColorBorder).
+		Padding(0, 1).
 		Bold(true)
 
 	t.KeyDesc = lipgloss.NewStyle().
@@ -889,4 +905,3 @@ func (t *Theme) RenderThreatScoreMeter(score int, barWidth int) string {
 
 	return fmt.Sprintf("[%s%s] %d/100", meterBar, emptyBar, score)
 }
-

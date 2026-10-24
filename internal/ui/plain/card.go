@@ -102,33 +102,35 @@ func RenderFindingCard(w io.Writer, f report.Finding, th *theme.Theme) {
 	var badgeBg lipgloss.Color
 	var badgeFg lipgloss.Color = lipgloss.Color("#FFFFFF")
 
+	// Canonical palette from internal/report/palette.go — sky means NOTICE,
+	// mint means SAFE, on every surface.
 	switch f.Verdict {
 	case report.VerdictMalicious:
-		borderColor = lipgloss.Color("#F43F5E") // Hyper Crimson
-		badgeBg = lipgloss.Color("#E11D48")
+		borderColor = lipgloss.Color(report.VerdictHex(f.Verdict))
+		badgeBg = lipgloss.Color(report.PaletteAlertDimHex)
 	case report.VerdictSuspicious:
-		borderColor = lipgloss.Color("#FBBF24") // Amber
-		badgeBg = lipgloss.Color("#D97706")
+		borderColor = lipgloss.Color(report.VerdictHex(f.Verdict))
+		badgeBg = lipgloss.Color(report.PaletteWarningDimHex)
 	case report.VerdictSafe:
-		borderColor = lipgloss.Color("#38BDF8") // Sky Cyan
-		badgeBg = lipgloss.Color("#0284C7")
+		borderColor = lipgloss.Color(report.VerdictHex(f.Verdict))
+		badgeBg = lipgloss.Color(report.PaletteSafeDimHex)
 	case report.VerdictUnknown:
-		borderColor = lipgloss.Color("#94A3B8") // Slate
-		badgeBg = lipgloss.Color("#475569")
+		borderColor = lipgloss.Color(report.VerdictHex(f.Verdict))
+		badgeBg = lipgloss.Color(report.PaletteInfoDimHex)
 	default:
 		switch f.Severity {
 		case report.SeverityCritical, report.SeverityAlert:
-			borderColor = lipgloss.Color("#F43F5E")
-			badgeBg = lipgloss.Color("#E11D48")
+			borderColor = lipgloss.Color(report.SeverityHex(f.Severity))
+			badgeBg = lipgloss.Color(report.SeverityDimHex(f.Severity))
 		case report.SeverityHigh, report.SeverityWarning:
-			borderColor = lipgloss.Color("#FBBF24")
-			badgeBg = lipgloss.Color("#D97706")
+			borderColor = lipgloss.Color(report.SeverityHex(f.Severity))
+			badgeBg = lipgloss.Color(report.SeverityDimHex(f.Severity))
 		case report.SeverityMedium, report.SeverityNotice:
-			borderColor = lipgloss.Color("#38BDF8")
-			badgeBg = lipgloss.Color("#0284C7")
+			borderColor = lipgloss.Color(report.SeverityHex(f.Severity))
+			badgeBg = lipgloss.Color(report.SeverityDimHex(f.Severity))
 		default:
-			borderColor = lipgloss.Color("#475569")
-			badgeBg = lipgloss.Color("#334155")
+			borderColor = lipgloss.Color(report.PaletteInfoDimHex)
+			badgeBg = lipgloss.Color(report.PaletteInfoDimHex)
 		}
 	}
 

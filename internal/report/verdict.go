@@ -22,6 +22,20 @@ func ClassifyContextProfile(path string, isExec bool, pkgOwned bool) string {
 			strings.HasSuffix(lower, ".txt") || strings.Contains(lower, "readme") {
 			return "doc_metadata"
 		}
+
+		// Historical artifacts: shell/interpreter command histories and
+		// non-executable log files are passive records. Attack patterns inside
+		// them reflect previously typed or logged activity, not live payloads,
+		// so they must never reach MALICIOUS on content alone. Executable files
+		// (possible masquerading) and volatile staging paths stay "standard".
+		inVolatile := strings.HasPrefix(lower, "/tmp/") || strings.HasPrefix(lower, "/var/tmp/") ||
+			strings.HasPrefix(lower, "/dev/shm/") || strings.HasPrefix(lower, "/run/user/")
+		isHistory := strings.HasSuffix(base, "_history") || base == ".sh_history" ||
+			strings.HasSuffix(base, ".history") || base == "histfile"
+		isLog := strings.HasSuffix(lower, ".log")
+		if !inVolatile && (isHistory || isLog) {
+			return "historical_artifact"
+		}
 	}
 
 	// Package Unit Test Fixtures: /test/, /tests/, test_*.py, *_test.py inside package trees
@@ -149,6 +163,12 @@ func DetermineVerdict(f *Finding, pkgDB pkgdb.PackageDB, isExec bool, isDoc bool
 		f.Severity = SeverityNotice
 		f.Confidence = ConfidenceLow
 		rationale = "Inert documentation or package wheel metadata; not an executable payload."
+
+	case contextProfile == "historical_artifact":
+		verdict = VerdictUnknown
+		f.Severity = SeverityNotice
+		f.Confidence = ConfidenceLow
+		rationale = "Passive history or log record (non-executable); the matched pattern reflects previously recorded commands or logged activity rather than an active payload. Manually review the recorded command if the context is suspicious."
 
 	case contextProfile == "package_test":
 		ruleLower := strings.ToLower(f.RuleName)

@@ -139,7 +139,7 @@ func TestYaraX_Score60CannotAlertAlone(t *testing.T) {
 	}
 }
 
-func TestYaraX_ConfidenceHighRequiredForCompromised(t *testing.T) {
+func TestYaraX_ConfidenceMetaDoesNotBypassVerdictStrength(t *testing.T) {
 	tempDir := t.TempDir()
 	_ = os.Chmod(tempDir, 0755)
 
@@ -185,16 +185,25 @@ func TestYaraX_ConfidenceHighRequiredForCompromised(t *testing.T) {
 		t.Errorf("ALERT without confidence=high must result in SUSPICIOUS, got %s", v1)
 	}
 
-	// 2. With confidence="high"
+	// 2. With confidence="high": rule-declared confidence decorates the
+	// finding but does NOT substitute for evidence strength. Custom
+	// (unregistered) rules default to contextual strength, so even an ALERT
+	// with confidence=high must stay SUSPICIOUS at the scan level — this is
+	// the closed confidence-verdict bypass, locked by
+	// internal/events TestComputeVerdict (regression: contextual alert even
+	// with ConfidenceHigh must yield SUSPICIOUS, not COMPROMISED).
 	m2, _ := scanner.Scan(ScanTarget{Data: []byte("trigger_alert_2")})
 	if len(m2) != 1 || m2[0].Severity != report.SeverityAlert {
 		t.Fatalf("expected ALERT match for m2")
 	}
+	if m2[0].Confidence != "high" {
+		t.Errorf("expected engine to propagate confidence=high meta, got %q", m2[0].Confidence)
+	}
 	f2 := report.NewFinding("yara", m2[0].Severity, "/tmp/f2", "alert", m2[0].RuleName)
 	f2.Metadata["confidence"] = m2[0].Confidence
 	v2, _ := events.ComputeVerdict([]report.Finding{f2}, 1, 0, 0, 0)
-	if v2 != events.VerdictCompromised {
-		t.Errorf("ALERT with confidence=high must result in COMPROMISED, got %s", v2)
+	if v2 != events.VerdictSuspicious {
+		t.Errorf("contextual ALERT with confidence=high must stay SUSPICIOUS (closed bypass), got %s", v2)
 	}
 }
 
@@ -791,9 +800,9 @@ func TestYaraX_EmbeddedCoreLinuxRules_BroadenedVariants(t *testing.T) {
 			payload:  []byte("[Service]\nEnvironment=\"LD_PRELOAD=/opt/libaudit.so\"\n"),
 		},
 		{
-			name:     "ld.so.preload file reference",
+			name:     "ld.so.preload hostile write",
 			ruleName: "Linux_Persistence_Linker_Audit_Hijack",
-			payload:  []byte("# Global dynamic linker preload\n/etc/ld.so.preload\n"),
+			payload:  []byte("#!/bin/sh\necho \"/tmp/ldhook.so\" > /etc/ld.so.preload\n"),
 		},
 		{
 			name:     "PAM exec with seteuid elevated privileges",
@@ -828,6 +837,80 @@ func TestYaraX_EmbeddedCoreLinuxRules_BroadenedVariants(t *testing.T) {
 
 type mockYaraPkgDB struct {
 	owners map[string]string
+}
+
+// TestYaraX_BenignContent_NoHighSeverityMatches locks in false-positive
+// regressions: benign text that shares tokens with real threats (bare
+// ld.so.preload references, router-style dynamic calls, form handlers) must
+// never trigger the tightened high-severity rules.
+func TestYaraX_BenignContent_NoHighSeverityMatches(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	engine := NewYaraXEngine(cfg, nil, false)
+	defer engine.Close()
+
+	if err := engine.LoadRules(nil); err != nil {
+		t.Fatalf("LoadRules failed: %v", err)
+	}
+
+	cov := engine.Coverage()
+	if !cov.CompiledIn {
+		t.Skip("YARA-X engine not compiled in")
+	}
+
+	scanner := engine.NewScanner()
+	defer scanner.Destroy()
+
+	cases := []struct {
+		name      string
+		path      string
+		payload   []byte
+		forbidden []string
+	}{
+		{
+			name:      "hardening checker referencing ld.so.preload",
+			path:      "/usr/local/sbin/audit.sh",
+			payload:   []byte("#!/bin/bash\n# verify no rogue entries in /etc/ld.so.preload\nif [ -s /etc/ld.so.preload ]; then cat /etc/ld.so.preload; fi\n"),
+			forbidden: []string{"Linux_Persistence_Linker_Audit_Hijack"},
+		},
+		{
+			name:      "documentation mentioning ld.so.preload",
+			path:      "/usr/share/doc/hardening/notes.md",
+			payload:   []byte("The dynamic linker reads /etc/ld.so.preload before the library cache.\n"),
+			forbidden: []string{"Linux_Persistence_Linker_Audit_Hijack"},
+		},
+		{
+			name:      "micro-framework dynamic router call",
+			path:      "/var/www/html/index.php",
+			payload:   []byte("<?php $handler = $_POST['route']; $args = $_POST['args']; $handler($args); ?>\n"),
+			forbidden: []string{"Linux_Webshell_PHP_Generic_Backdoor"},
+		},
+		{
+			name:      "standard form handler",
+			path:      "/var/www/html/contact.php",
+			payload:   []byte("<?php\n$name = $_POST['name'];\n$email = $_POST['email'];\nmail('admin@example.com', $name, $email);\necho htmlspecialchars($name);\n?>\n"),
+			forbidden: []string{"Linux_Webshell_PHP_Generic_Backdoor"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			matches, err := scanner.Scan(ScanTarget{
+				Path:     tc.path,
+				Filename: filepath.Base(tc.path),
+				Data:     tc.payload,
+			})
+			if err != nil {
+				t.Fatalf("scan error for %s: %v", tc.name, err)
+			}
+			for _, m := range matches {
+				for _, forbidden := range tc.forbidden {
+					if m.RuleName == forbidden {
+						t.Errorf("false positive: benign content %q triggered %s", tc.name, forbidden)
+					}
+				}
+			}
+		})
+	}
 }
 
 func (m *mockYaraPkgDB) Owner(path string) (string, bool) {

@@ -23,6 +23,12 @@ type HeuristicMatch struct {
 	Score     int
 	Severity  report.Severity
 	Truncated bool
+	// Corroboration lists independent in-file aggravation signals (e.g.
+	// "elf_upx_packed", "elf_high_entropy_code", "elf_volatile_path") that
+	// co-occur with this match. The inspector escalates the finding to
+	// StrengthCorroborated only when at least two independent signals are
+	// present, so a lone static anomaly stays SUSPICIOUS.
+	Corroboration []string
 }
 
 // IsELF returns true if the buffer starts with the 4-byte ELF magic: \x7fELF.
@@ -717,11 +723,12 @@ func hasScriptAttackToken(data []byte) bool {
 
 // isScriptOrTextCandidate checks if the file has characteristics of an interpretable script,
 // configuration file, or text payload rather than a binary asset (image, media, archive, database, compiled binary).
-// - Files with shebang are always inspected.
-// - Media / archive files outside volatile/web paths are rejected immediately by extension without token scanning.
-// - Text-like files (printable ASCII + whitespace >= 85% in first 4KB) are always inspected, catching
-//   shebang-less Python, Bash, Perl, PHP, Ruby, etc.
-// - Binary files outside volatile/web paths are skipped.
+//   - Files with shebang are always inspected.
+//   - Media / archive files outside volatile/web paths are rejected immediately by extension without token scanning.
+//   - Text-like files (printable ASCII + whitespace >= 85% in first 4KB) are always inspected, catching
+//     shebang-less Python, Bash, Perl, PHP, Ruby, etc.
+//   - Binary files outside volatile/web paths are skipped.
+//
 // isScriptOrTextCandidate checks if the file has characteristics of an interpretable script,
 // configuration file, or text payload rather than a binary asset (image, media, archive, database, compiled binary).
 // - Files with shebang are always inspected.

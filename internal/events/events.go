@@ -165,18 +165,19 @@ type KernelCoverageStats struct {
 
 // YARACoverageStats captures metrics and rule compiler health from YARA-X scanning.
 type YARACoverageStats struct {
-	CompiledIn      bool     `json:"compiled_in"`
-	Version         string   `json:"version,omitempty"`
-	RulesLoaded     int      `json:"rules_loaded"`
-	RulesFailed     int      `json:"rules_failed"`
-	FailedFiles     []string `json:"failed_files,omitempty"`
-	FilesScanned    int64    `json:"files_scanned"`
-	RuleFilesSeen   int64    `json:"rule_files_seen"`
-	SkippedOversize int64    `json:"skipped_oversize"`
-	SkippedTimeout  int64    `json:"skipped_timeout"`
-	SkippedError    int64    `json:"skipped_error"`
-	DemoRulesOnly   bool     `json:"demo_rules_only"`
-	NotRunReason    string   `json:"not_run_reason,omitempty"`
+	CompiledIn         bool     `json:"compiled_in"`
+	Version            string   `json:"version,omitempty"`
+	RulesLoaded        int      `json:"rules_loaded"`
+	RulesetFingerprint string   `json:"ruleset_fingerprint,omitempty"`
+	RulesFailed        int      `json:"rules_failed"`
+	FailedFiles        []string `json:"failed_files,omitempty"`
+	FilesScanned       int64    `json:"files_scanned"`
+	RuleFilesSeen      int64    `json:"rule_files_seen"`
+	SkippedOversize    int64    `json:"skipped_oversize"`
+	SkippedTimeout     int64    `json:"skipped_timeout"`
+	SkippedError       int64    `json:"skipped_error"`
+	DemoRulesOnly      bool     `json:"demo_rules_only"`
+	NotRunReason       string   `json:"not_run_reason,omitempty"`
 }
 
 // FileScanned is an ephemeral high-frequency event emitted per inspected file.

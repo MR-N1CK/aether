@@ -438,8 +438,8 @@ func (m *mockPkgDB) Owner(p string) (string, bool) {
 	return pkg, ok
 }
 func (m *mockPkgDB) VerifyDigest(p string, d string) (bool, string, bool) { return true, d, true }
-func (m *mockPkgDB) IsAvailable() bool                                  { return true }
-func (m *mockPkgDB) StatusNote() string                                 { return "mock" }
+func (m *mockPkgDB) IsAvailable() bool                                    { return true }
+func (m *mockPkgDB) StatusNote() string                                   { return "mock" }
 
 func TestAnalyzeELFExecutable_ReverseShell_Combo(t *testing.T) {
 	elfBytes := craftBehavioralELF(t, []string{"socket", "connect", "dup2", "execve"}, false, false, nil, "198.51.100.23:4444")

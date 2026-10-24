@@ -185,10 +185,14 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 
 	// Filter and report findings
 	for _, f := range allFindings {
-		// Allowlist check: if allowlisted, suppress heuristic finding
+		// Allowlist check: the IOC allowlist stores SHA-256 digests, so the
+		// artifact must be hashed before lookup. A bare path never matches a
+		// digest entry; unreadable or non-file targets simply skip suppression.
 		if m.iocEngine != nil {
-			if isAllowlisted, _ := m.iocEngine.IsAllowlisted(f.Path); isAllowlisted {
-				continue
+			if digest := allowlistSHA256(m.rootFS, f.Path); digest != "" {
+				if isAllowlisted, _ := m.iocEngine.IsAllowlisted(digest); isAllowlisted {
+					continue
+				}
 			}
 		}
 

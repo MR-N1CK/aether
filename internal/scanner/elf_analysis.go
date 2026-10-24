@@ -195,10 +195,28 @@ func AnalyzeELFExecutable(path string, data []byte, mode uint32, pkgDB pkgdb.Pac
 		_, isPkgOwned = pkgDB.Owner(cleaned)
 	}
 
+	// Shared aggravation signals: independent hostile indicators co-occurring
+	// in the same file. A single capability combo stays SUSPICIOUS; the
+	// inspector escalates to MALICIOUS only when >= 2 aggravation signals
+	// corroborate it (e.g. packed + volatile path, or entropy + RWX).
+	var aggravations []string
+	addAggravation := func(signal string) {
+		for _, s := range aggravations {
+			if s == signal {
+				return
+			}
+		}
+		aggravations = append(aggravations, signal)
+	}
+	if volatileLibDir(cleaned) {
+		addAggravation("elf_volatile_path")
+	}
+
 	// 2. UPX & Packer Signature Check (runs on raw bytes even if ELF parsing is obfuscated)
 	hasUPXMagic := bytes.Contains(data, []byte("UPX!"))
 	hasUPXSection := bytes.Contains(data, []byte("UPX0")) || bytes.Contains(data, []byte("UPX1")) || bytes.Contains(data, []byte("UPX2")) || bytes.Contains(data, []byte("!UPX"))
 	if hasUPXMagic || hasUPXSection {
+		addAggravation("elf_upx_packed")
 		severity := report.SeverityWarning
 		score := 75
 		if volatileLibDir(cleaned) || !isPkgOwned {
@@ -255,6 +273,7 @@ func AnalyzeELFExecutable(path string, data []byte, mode uint32, pkgDB pkgdb.Pac
 	for _, prog := range ef.Progs {
 		if prog.Type == elf.PT_LOAD {
 			if (prog.Flags & (elf.PF_W | elf.PF_X)) == (elf.PF_W | elf.PF_X) {
+				addAggravation("elf_rwx_segment")
 				severity := report.SeverityWarning
 				score := 75
 				if !isPkgOwned || volatileLibDir(cleaned) {
@@ -271,6 +290,7 @@ func AnalyzeELFExecutable(path string, data []byte, mode uint32, pkgDB pkgdb.Pac
 			}
 		} else if prog.Type == 0x6474e551 { // PT_GNU_STACK
 			if (prog.Flags&elf.PF_X) != 0 && (!isPkgOwned || volatileLibDir(cleaned)) {
+				addAggravation("elf_rwx_segment")
 				matches = append(matches, &HeuristicMatch{
 					Name:     "ELF_Section_RWX_Anomaly",
 					Reason:   fmt.Sprintf("ELF binary %s explicitly marks stack as executable (PT_GNU_STACK PF_X) outside package manager, typical of shellcode execution stagers", cleaned),
@@ -289,12 +309,13 @@ func AnalyzeELFExecutable(path string, data []byte, mode uint32, pkgDB pkgdb.Pac
 				if secData, sErr := sec.Data(); sErr == nil && len(secData) >= 256 {
 					ent := ShannonEntropy(secData)
 					if ent > 7.20 && (!isPkgOwned || volatileLibDir(cleaned)) {
+						addAggravation("elf_high_entropy_code")
 						matches = append(matches, &HeuristicMatch{
-                            Name:     "ELF_High_Entropy_Code_Section",
-                            Reason:   fmt.Sprintf("Executable code section '%s' in %s has abnormally high Shannon entropy (%.2f/8.00; normal compiled code: 5.6-6.4), indicating encrypted machine code, packed stager, or embedded payload", sec.Name, cleaned, ent),
-                            Score:    85,
-                            Severity: report.SeverityAlert,
-                        })
+							Name:     "ELF_High_Entropy_Code_Section",
+							Reason:   fmt.Sprintf("Executable code section '%s' in %s has abnormally high Shannon entropy (%.2f/8.00; normal compiled code: 5.6-6.4), indicating encrypted machine code, packed stager, or embedded payload", sec.Name, cleaned, ent),
+							Score:    85,
+							Severity: report.SeverityAlert,
+						})
 						break
 					}
 				}
@@ -382,40 +403,96 @@ func AnalyzeELFExecutable(path string, data []byte, mode uint32, pkgDB pkgdb.Pac
 				reason += fmt.Sprintf(" [Embedded C2 target: %s]", endpoints)
 			}
 			matches = append(matches, &HeuristicMatch{
-				Name:     "ELF_Behavioral_ReverseShell_Combo",
-				Reason:   reason,
-				Score:    90,
-				Severity: report.SeverityAlert,
+				Name:          "ELF_Behavioral_ReverseShell_Combo",
+				Reason:        reason,
+				Score:         90,
+				Severity:      report.SeverityAlert,
+				Corroboration: aggravations,
 			})
 		}
 
 		// B. C2 Listener / Bind Shell Combination: socket + bind + listen/accept + dup2/dup3 + execve
 		if hasSocket && hasBindListen && hasDup && hasExec {
 			matches = append(matches, &HeuristicMatch{
-				Name:     "ELF_Behavioral_C2_Listener_Combo",
-				Reason:   fmt.Sprintf("Statically detected compiled C2 listener / bind shell capability: unmanaged binary %s imports socket binding/listening (bind, listen/accept), file descriptor redirection (dup2/dup3), and command execution", cleaned),
-				Score:    85,
-				Severity: report.SeverityAlert,
+				Name:          "ELF_Behavioral_C2_Listener_Combo",
+				Reason:        fmt.Sprintf("Statically detected compiled C2 listener / bind shell capability: unmanaged binary %s imports socket binding/listening (bind, listen/accept), file descriptor redirection (dup2/dup3), and command execution", cleaned),
+				Score:         85,
+				Severity:      report.SeverityAlert,
+				Corroboration: aggravations,
 			})
 		}
 
 		// C. Process Injection Combination: ptrace/process_vm + mprotect/mmap + waitpid/kill/fork
 		if hasPtrace && (hasMprotect || hasAny(symMap, "mmap")) && hasAny(symMap, "waitpid", "kill", "fork", "clone") {
 			matches = append(matches, &HeuristicMatch{
-				Name:     "ELF_Behavioral_ProcessInjection_Combo",
-				Reason:   fmt.Sprintf("Statically detected process memory injection capability: unmanaged binary %s imports cross-process memory access (ptrace/process_vm) combined with memory protection modifications (mprotect/mmap) and thread control", cleaned),
-				Score:    90,
-				Severity: report.SeverityAlert,
+				Name:          "ELF_Behavioral_ProcessInjection_Combo",
+				Reason:        fmt.Sprintf("Statically detected process memory injection capability: unmanaged binary %s imports cross-process memory access (ptrace/process_vm) combined with memory protection modifications (mprotect/mmap) and thread control", cleaned),
+				Score:         90,
+				Severity:      report.SeverityAlert,
+				Corroboration: aggravations,
 			})
 		}
 
 		// D. Fileless In-Memory Dropper Combination: memfd_create + fexecve/execveat
 		if hasMemfd && hasAny(symMap, "fexecve", "execveat") {
 			matches = append(matches, &HeuristicMatch{
-				Name:     "ELF_Behavioral_FilelessDropper_Combo",
-				Reason:   fmt.Sprintf("Statically detected fileless in-memory execution capability: unmanaged binary %s imports anonymous in-memory file descriptor allocation (memfd_create) combined with direct descriptor execution (fexecve/execveat)", cleaned),
-				Score:    85,
-				Severity: report.SeverityAlert,
+				Name:          "ELF_Behavioral_FilelessDropper_Combo",
+				Reason:        fmt.Sprintf("Statically detected fileless in-memory execution capability: unmanaged binary %s imports anonymous in-memory file descriptor allocation (memfd_create) combined with direct descriptor execution (fexecve/execveat)", cleaned),
+				Score:         85,
+				Severity:      report.SeverityAlert,
+				Corroboration: aggravations,
+			})
+		}
+
+		// E. Static Go binary capability recovery. Statically linked Go
+		// implants carry no dynsym imports and are invisible to the combos
+		// above; their pclntab still names every linked stdlib capability.
+		// Recovered capabilities are weaker evidence than imports: they
+		// escalate to MALICIOUS only when networking, process execution and
+		// a hostile context (volatile path or memfd) co-occur, and otherwise
+		// surface as a NOTICE/WARNING profile for the analyst.
+		if goProfile := RecoverGoStaticProfile(data, ef); goProfile.IsGo {
+			goNet := goProfile.Has("go_net_client") || goProfile.Has("go_net_server")
+			goExec := goProfile.Has("go_process_exec")
+			goMemfd := goProfile.Has("go_memfd_exec")
+
+			var goSignals []string
+			if goNet {
+				goSignals = append(goSignals, "go_static_network")
+			}
+			if goExec {
+				goSignals = append(goSignals, "go_process_exec")
+			}
+
+			severity := report.SeverityNotice
+			score := 35
+			switch {
+			case goNet && goExec && volatileLibDir(cleaned):
+				severity = report.SeverityWarning
+				score = 70
+				goSignals = append(goSignals, "elf_volatile_path")
+			case goMemfd && (goNet || goExec):
+				severity = report.SeverityWarning
+				score = 70
+				if goMemfd {
+					goSignals = append(goSignals, "go_memfd_exec")
+				}
+			}
+
+			// Dropper-grade combination: network + execution + hostile
+			// context earns corroborated strength (>= 2 signals).
+			var corroboration []string
+			if goNet && goExec && (volatileLibDir(cleaned) || goMemfd) {
+				corroboration = goSignals
+			}
+
+			reason := fmt.Sprintf("Static Go binary %s (module %q, %s) with recovered capability profile: %s", cleaned, goProfile.ModulePath, goProfile.GoVersion, strings.Join(goProfile.Caps, ", "))
+			matches = append(matches, &HeuristicMatch{
+				Name:          "ELF_Static_Go_Capability_Profile",
+				Reason:        reason,
+				Score:         score,
+				Severity:      severity,
+				Corroboration: corroboration,
 			})
 		}
 	}

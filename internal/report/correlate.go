@@ -82,6 +82,23 @@ func DetermineFindingDomain(f *Finding) CorroboratingDomain {
 	}
 }
 
+// isTriageDismissed reports whether the operator has explicitly suppressed or
+// acknowledged the finding. Dismissed findings are excluded from correlation
+// entirely: they neither corroborate other findings nor get escalated, so an
+// acknowledged artifact can never resurface as MALICIOUS through the back door.
+func isTriageDismissed(f *Finding) bool {
+	if f.Metadata == nil {
+		return false
+	}
+	if v, ok := f.Metadata["suppressed"].(bool); ok && v {
+		return true
+	}
+	if v, ok := f.Metadata["acknowledged"].(bool); ok && v {
+		return true
+	}
+	return false
+}
+
 // CorrelateFindings performs a cross-domain correlation pass over accumulated findings.
 // It links static filesystem, running process, network socket, and persistence findings.
 // Findings with >= 2 distinct independent domains are elevated to ALERT (StrengthCorroborated).
@@ -95,6 +112,10 @@ func CorrelateFindings(findings []Finding) []Finding {
 	// 1. Populate Correlation Index
 	for i := range findings {
 		f := &findings[i]
+
+		if isTriageDismissed(f) {
+			continue
+		}
 
 		// Ensure EvidenceRecord is populated
 		if f.EvidenceRecord == nil {
@@ -156,6 +177,9 @@ func CorrelateFindings(findings []Finding) []Finding {
 
 	for i := range findings {
 		f := &findings[i]
+		if isTriageDismissed(f) {
+			continue
+		}
 		domain := DetermineFindingDomain(f)
 		normPath := NormalizeFindingPath(f.Path)
 
@@ -294,6 +318,9 @@ func CorrelateFindings(findings []Finding) []Finding {
 	// 3. Multi-Hop Propagation: propagate Process -> Network signals to linked Filesystem findings
 	for i := range findings {
 		f := &findings[i]
+		if isTriageDismissed(f) {
+			continue
+		}
 		if DetermineFindingDomain(f) == DomainFilesystem {
 			// If f is corroborated by Process P, copy P's Network and Persistence signals to f
 			normPath := NormalizeFindingPath(f.Path)
@@ -320,6 +347,9 @@ func CorrelateFindings(findings []Finding) []Finding {
 		if len(signals) == 0 {
 			continue
 		}
+		if isTriageDismissed(f) {
+			continue
+		}
 
 		// Collect unique domains
 		ownDomain := DetermineFindingDomain(f)
@@ -341,8 +371,9 @@ func CorrelateFindings(findings []Finding) []Finding {
 		isDirect := f.EvidenceRecord != nil && f.EvidenceRecord.EvidenceStrength == StrengthDirect
 		isIncomplete := f.EvidenceRecord != nil && f.EvidenceRecord.EvidenceStrength == StrengthIncomplete
 		isDocMetadata := f.EvidenceRecord != nil && f.EvidenceRecord.ContextProfile == "doc_metadata"
+		isHistorical := f.EvidenceRecord != nil && f.EvidenceRecord.ContextProfile == "historical_artifact"
 
-		if isIncomplete || isDocMetadata {
+		if isIncomplete || isDocMetadata || isHistorical {
 			continue
 		}
 

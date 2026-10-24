@@ -3,6 +3,8 @@
 package yara
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -32,15 +34,16 @@ var defaultGlobals = map[string]any{
 
 // YaraXEngine implements the Engine interface using official YARA-X CGO bindings.
 type YaraXEngine struct {
-	cfg           *config.Config
-	logger        *slog.Logger
-	devRpath      bool
-	rules         *yrx.Rules
-	rulesLoaded   int
-	rulesFailed   int
-	failedFiles   []string
-	demoRulesOnly bool
-	notRunReason  string
+	cfg                *config.Config
+	logger             *slog.Logger
+	devRpath           bool
+	rules              *yrx.Rules
+	rulesLoaded        int
+	rulesFailed        int
+	failedFiles        []string
+	demoRulesOnly      bool
+	notRunReason       string
+	rulesetFingerprint string
 
 	filesScanned    atomic.Int64
 	ruleFilesSeen   atomic.Int64
@@ -90,6 +93,12 @@ func (e *YaraXEngine) LoadRules(rulePaths []string) error {
 		return fmt.Errorf("failed to create YARA-X compiler: %w", err)
 	}
 	defer mainCompiler.Destroy()
+
+	// Ruleset fingerprint: digest over the embedded rules plus every
+	// validated custom rule file, so a report can name the exact detection
+	// state that produced its findings.
+	rulesetHash := sha256.New()
+	rulesetHash.Write([]byte(EmbeddedCoreLinuxRules))
 
 	validCount := 0
 
@@ -146,6 +155,7 @@ func (e *YaraXEngine) LoadRules(rulePaths []string) error {
 			continue
 		}
 		validCount++
+		rulesetHash.Write(content)
 	}
 
 	loadDemo := e.cfg != nil && e.cfg.Scan.DemoRules
@@ -191,6 +201,7 @@ func (e *YaraXEngine) LoadRules(rulePaths []string) error {
 	if e.rules != nil {
 		e.rulesLoaded = e.rules.Count()
 	}
+	e.rulesetFingerprint = hex.EncodeToString(rulesetHash.Sum(nil))[:16]
 
 	if e.logger != nil {
 		e.logger.Info("YARA-X rules loaded",
@@ -243,18 +254,19 @@ func (e *YaraXEngine) Coverage() events.YARACoverageStats {
 	defer e.mu.RUnlock()
 
 	return events.YARACoverageStats{
-		CompiledIn:      true,
-		Version:         "1.21.0",
-		RulesLoaded:     e.rulesLoaded,
-		RulesFailed:     e.rulesFailed,
-		FailedFiles:     e.failedFiles,
-		FilesScanned:    e.filesScanned.Load(),
-		RuleFilesSeen:   e.ruleFilesSeen.Load(),
-		SkippedOversize: e.skippedOversize.Load(),
-		SkippedTimeout:  e.skippedTimeout.Load(),
-		SkippedError:    e.skippedError.Load(),
-		DemoRulesOnly:   e.demoRulesOnly,
-		NotRunReason:    e.notRunReason,
+		CompiledIn:         true,
+		Version:            "1.21.0",
+		RulesetFingerprint: e.rulesetFingerprint,
+		RulesLoaded:        e.rulesLoaded,
+		RulesFailed:        e.rulesFailed,
+		FailedFiles:        e.failedFiles,
+		FilesScanned:       e.filesScanned.Load(),
+		RuleFilesSeen:      e.ruleFilesSeen.Load(),
+		SkippedOversize:    e.skippedOversize.Load(),
+		SkippedTimeout:     e.skippedTimeout.Load(),
+		SkippedError:       e.skippedError.Load(),
+		DemoRulesOnly:      e.demoRulesOnly,
+		NotRunReason:       e.notRunReason,
 	}
 }
 

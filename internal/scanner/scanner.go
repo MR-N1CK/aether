@@ -1199,11 +1199,12 @@ func (s *Scanner) Run(ctx context.Context) error {
 			s.logger.Info("correlated findings with boot-enabled systemd units", slog.Int("findings", annotated))
 		}
 	}
-	allEmitted = report.CorrelateFindings(allEmitted)
-
 	var acknowledgedWarnings []report.Finding
 	var acknowledgedCount int64
 
+	// Acknowledgment must run BEFORE cross-domain correlation: the correlator
+	// excludes acknowledged/suppressed findings, so an operator-dismissed
+	// artifact can never be re-escalated to MALICIOUS by corroboration.
 	if triageEng != nil {
 		for i := range allEmitted {
 			f := &allEmitted[i]
@@ -1219,6 +1220,8 @@ func (s *Scanner) Run(ctx context.Context) error {
 			}
 		}
 	}
+
+	allEmitted = report.CorrelateFindings(allEmitted)
 
 	totalFindings = len(allEmitted)
 	for _, f := range allEmitted {

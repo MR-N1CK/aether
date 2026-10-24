@@ -222,6 +222,7 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 	var matchedReasons []string
 	var matchedRules []string
 	totalScore := 0
+	maxRuleScore := 0
 	highestSeverity := report.SeverityInfo
 	var hasConfidenceHigh bool
 
@@ -247,6 +248,9 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		matchedRules = append(matchedRules, hashMatch.RuleName)
 		ruleSeverities[hashMatch.RuleName] = hashMatch.Severity.String()
 		totalScore += hashMatch.Score
+		if hashMatch.Score > maxRuleScore {
+			maxRuleScore = hashMatch.Score
+		}
 		updateSeverity(hashMatch.Severity)
 	}
 
@@ -255,6 +259,9 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		matchedRules = append(matchedRules, pathMatch.RuleName)
 		ruleSeverities[pathMatch.RuleName] = pathMatch.Severity.String()
 		totalScore += pathMatch.Score
+		if pathMatch.Score > maxRuleScore {
+			maxRuleScore = pathMatch.Score
+		}
 		updateSeverity(pathMatch.Severity)
 	}
 
@@ -265,19 +272,25 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 			matchedRules = append(matchedRules, hs.Name)
 			ruleSeverities[hs.Name] = hs.Severity.String()
 			totalScore += hs.Score
+			if hs.Score > maxRuleScore {
+				maxRuleScore = hs.Score
+			}
 			updateSeverity(hs.Severity)
 			if hs.Truncated {
 				hasTruncatedScript = true
 			}
 		}
 	}
- 
+
 	for _, hd := range hDecodes {
 		if hd != nil {
 			matchedReasons = append(matchedReasons, hd.Reason)
 			matchedRules = append(matchedRules, hd.Name)
 			ruleSeverities[hd.Name] = hd.Severity.String()
 			totalScore += hd.Score
+			if hd.Score > maxRuleScore {
+				maxRuleScore = hd.Score
+			}
 			updateSeverity(hd.Severity)
 		}
 	}
@@ -288,16 +301,35 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 			matchedRules = append(matchedRules, hm.Name)
 			ruleSeverities[hm.Name] = hm.Severity.String()
 			totalScore += hm.Score
+			if hm.Score > maxRuleScore {
+				maxRuleScore = hm.Score
+			}
 			updateSeverity(hm.Severity)
 		}
 	}
+	var elfCorroboration []string
 	for _, hm := range hELFMatches {
 		if hm != nil {
 			matchedReasons = append(matchedReasons, hm.Reason)
 			matchedRules = append(matchedRules, hm.Name)
 			ruleSeverities[hm.Name] = hm.Severity.String()
 			totalScore += hm.Score
+			if hm.Score > maxRuleScore {
+				maxRuleScore = hm.Score
+			}
 			updateSeverity(hm.Severity)
+			for _, sig := range hm.Corroboration {
+				found := false
+				for _, existing := range elfCorroboration {
+					if existing == sig {
+						found = true
+						break
+					}
+				}
+				if !found {
+					elfCorroboration = append(elfCorroboration, sig)
+				}
+			}
 		}
 	}
 
@@ -428,6 +460,9 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		matchedRules = append(matchedRules, ym.RuleName)
 		ruleSeverities[ym.RuleName] = effectiveSev.String()
 		totalScore += effectiveScore
+		if effectiveScore > maxRuleScore {
+			maxRuleScore = effectiveScore
+		}
 		updateSeverity(effectiveSev)
 		if strings.EqualFold(ym.Confidence, "high") {
 			hasConfidenceHigh = true
@@ -461,14 +496,26 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 		f.Hashes["MD5"] = hashRes.Hashes.MD5
 		f.Hashes["SHA1"] = hashRes.Hashes.SHA1
 		f.Hashes["SHA256"] = hashRes.Hashes.SHA256
-		// Normalize the additive score to the documented 0-100 band. Severity already
-		// derives from the highest rule severity, so this only normalizes display data.
-		if totalScore > 100 {
-			totalScore = 100
+		// The displayed score anchors to the strongest single rule; additional
+		// matched rules add a bounded corroboration bonus (not a sum), so a
+		// handful of NOTICEs never presents as score 100. Severity derives from
+		// the highest rule either way.
+		displayScore := maxRuleScore
+		if extra := (len(matchedRules) - 1) * 5; extra > 0 {
+			if extra > 15 {
+				extra = 15
+			}
+			displayScore += extra
 		}
-		f.Metadata["score"] = totalScore
+		if displayScore > 100 {
+			displayScore = 100
+		}
+		f.Metadata["score"] = displayScore
 		f.Metadata["size"] = hashRes.BytesRead
 		f.Metadata["rule_severities"] = ruleSeverities
+		if len(elfCorroboration) > 0 {
+			f.Metadata["elf_corroboration"] = elfCorroboration
+		}
 		if len(decodeLayers) > 0 {
 			f.Metadata["decode_layers"] = decodeLayers
 		}
@@ -479,11 +526,9 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 			if ent := ShannonEntropy(inspectData); ent > 7.2 {
 				f.Metadata["high_entropy"] = true
 				f.Metadata["entropy"] = math.Round(ent*100) / 100
-				totalScore += 10
-				if totalScore > 100 {
-					totalScore = 100
+				if bonus, ok := f.Metadata["score"].(int); ok && bonus+10 <= 100 {
+					f.Metadata["score"] = bonus + 10
 				}
-				f.Metadata["score"] = totalScore
 			}
 		}
 		if hasConfidenceHigh {
@@ -550,7 +595,17 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 			f.EvidenceRecord.ContextProfile = "build_tree"
 		}
 
-		report.DetermineVerdict(&f, s.pkgDB, (mode&0111) != 0, isDoc, isTestFixture, nil)
+		// A static ELF anomaly reaches MALICIOUS only when at least two
+		// independent in-file aggravation signals corroborate it AND the file
+		// is not package-managed; a lone capability combo (e.g. a self-built
+		// network tool in ~/.local/bin) stays SUSPICIOUS for analyst review,
+		// and verified package ownership outranks static anomalies (a distro
+		// shipping an occasional UPX-packed or RWX binary is not a trojan).
+		if len(elfCorroboration) >= 2 && !isPkgOwned {
+			report.DetermineVerdict(&f, s.pkgDB, (mode&0111) != 0, isDoc, isTestFixture, elfCorroboration)
+		} else {
+			report.DetermineVerdict(&f, s.pkgDB, (mode&0111) != 0, isDoc, isTestFixture, nil)
+		}
 
 		// Keep per-rule attribution consistent with the adjudicated finding: when the
 		// verdict engine demotes the finding (contextual/package/pentest downgrades),

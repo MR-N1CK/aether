@@ -195,7 +195,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 		t.HeaderBox = lipgloss.NewStyle().Border(border).Padding(0, 1)
 		t.LogoText = lipgloss.NewStyle().Bold(true)
 		t.SubHeaderText = lipgloss.NewStyle()
-		t.CardBox = lipgloss.NewStyle().Border(border).Padding(0, 1)
+		t.CardBox = lipgloss.NewStyle().Border(border).Padding(1, 1)
 		t.CardActive = lipgloss.NewStyle().Border(thickBorder).Padding(0, 1)
 		t.StatusBar = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true, false, false, false)
 
@@ -244,9 +244,9 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 		t.PillKey = lipgloss.NewStyle().Bold(true)
 		t.TableHead = lipgloss.NewStyle().Bold(true)
 		t.Divider = lipgloss.NewStyle()
-		t.FlightDeckLeftPane = lipgloss.NewStyle().Border(border).Padding(0, 1)
-		t.FlightDeckRightPane = lipgloss.NewStyle().Border(border).Padding(0, 1)
-		t.InspectorBox = lipgloss.NewStyle().Border(border).Padding(0, 1)
+		t.FlightDeckLeftPane = lipgloss.NewStyle().Border(border).Padding(1, 2)
+		t.FlightDeckRightPane = lipgloss.NewStyle().Border(border).Padding(1, 2)
+		t.InspectorBox = lipgloss.NewStyle().Border(border).Padding(1, 2)
 		t.InspectorTitle = lipgloss.NewStyle().Bold(true)
 		t.InspectorTarget = lipgloss.NewStyle().Bold(true)
 		t.InspectorHash = lipgloss.NewStyle()
@@ -501,16 +501,16 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 	t.FlightDeckLeftPane = lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, true, false, false).
 		BorderForeground(ColorBorder).
-		Padding(0, 1)
+		Padding(1, 2)
 
 	t.FlightDeckRightPane = lipgloss.NewStyle().
-		Padding(0, 1)
+		Padding(1, 2)
 
 	t.InspectorBox = lipgloss.NewStyle().
 		Border(border).
 		BorderForeground(ColorBorderLit).
 		Background(ColorRaised).
-		Padding(0, 1)
+		Padding(1, 2)
 
 	t.InspectorTitle = lipgloss.NewStyle().
 		Bold(true).

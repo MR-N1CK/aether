@@ -159,15 +159,16 @@ func (m Model) renderDashboard() string {
 		cardWidth = 68
 	}
 
-	// 1. Permanent Brand Header
-	b.WriteString(m.renderBrandHeader(cardWidth, m.spinner.View()+" SCANNING IN PROGRESS...") + "\n")
+	// 1. Permanent Brand Header — each major band is separated by a full
+	// blank line so the layout reads as distinct instruments, not a wall.
+	b.WriteString(m.renderBrandHeader(cardWidth, m.spinner.View()+" SCANNING IN PROGRESS...") + "\n\n")
 
 	// 2. Telemetry HUD: Tab Bar & Progress Bar
 	tabBar := m.renderTabBar(cardWidth)
 	statText := fmt.Sprintf("Files Inspected: %s", m.formatNumber(int64(m.smoothFilesScanned)))
 	if m.filesPerSec > 0 {
 		spark := m.renderSparkline(m.velocitySamples)
-		statText += fmt.Sprintf("  │  Velocity: %.0f files/sec [%s]", m.filesPerSec, spark)
+		statText += fmt.Sprintf("      Velocity: %.0f files/sec [%s]", m.filesPerSec, spark)
 	}
 
 	barWidth := cardWidth - lipgloss.Width(statText) - 10
@@ -176,8 +177,8 @@ func (m Model) renderDashboard() string {
 		statText = fmt.Sprintf("%s   %s", gauge, statText)
 	}
 
-	telemetryContent := tabBar + "\n" + statText
-	b.WriteString(m.theme.CardBox.Width(cardWidth).Render(telemetryContent) + "\n")
+	telemetryContent := tabBar + "\n\n" + statText
+	b.WriteString(m.theme.CardBox.Width(cardWidth).Render(telemetryContent) + "\n\n")
 
 	// 3. Center Section: Adaptive Flight Deck vs Compact Stacked
 	if cardWidth >= theme.TierStandard { // >= 120 cols: Flight Deck 3-pane layout
@@ -202,12 +203,12 @@ func (m Model) renderDashboard() string {
 		feedHeight := lipgloss.Height(feedBox)
 		matrixBox := m.renderModuleMatrixPane(matrixWidth, feedHeight)
 
-		centerSplit := lipgloss.JoinHorizontal(lipgloss.Top, matrixBox, " ", feedBox)
-		b.WriteString(centerSplit + "\n")
+		centerSplit := lipgloss.JoinHorizontal(lipgloss.Top, matrixBox, "  ", feedBox)
+		b.WriteString(centerSplit + "\n\n")
 
 		// 4. Bottom Forensic Inspector Dock
 		inspectorDock := m.renderInspectorDock(m.SelectedFinding(), cardWidth)
-		b.WriteString(inspectorDock + "\n")
+		b.WriteString(inspectorDock + "\n\n")
 	} else {
 		// Compact / Narrow Stacked Layout (< 120 cols)
 		var modRow strings.Builder
@@ -239,11 +240,11 @@ func (m Model) renderDashboard() string {
 				}
 			}
 		}
-		b.WriteString(m.theme.CardBox.Width(cardWidth).Render(modRow.String()) + "\n")
+		b.WriteString(m.theme.CardBox.Width(cardWidth).Render(modRow.String()) + "\n\n")
 
 		// Findings Feed Table
 		findingsView := m.renderFindingsFeed(cardWidth)
-		b.WriteString(findingsView + "\n")
+		b.WriteString(findingsView + "\n\n")
 	}
 
 	// 5. Status / Keybinding Footer
@@ -471,7 +472,7 @@ func (m Model) renderInspectorDock(sel *report.Finding, width int) string {
 		scoreMeter,
 		sel.RuleName,
 	)
-	b.WriteString(header + "\n")
+	b.WriteString(header + "\n\n")
 
 	// Line 2: Target Path & Provenance Metadata
 	targetLine := fmt.Sprintf("Target: %s", m.theme.InspectorTarget.Render(sel.Path))
@@ -486,9 +487,9 @@ func (m Model) renderInspectorDock(sel *report.Finding, width int) string {
 		metaParts = append(metaParts, fmt.Sprintf("Confidence: %s", sel.Confidence))
 	}
 	if len(metaParts) > 0 {
-		targetLine += "  │  " + m.theme.FindingTimestamp.Render(strings.Join(metaParts, "  •  "))
+		targetLine += "      " + m.theme.FindingTimestamp.Render(strings.Join(metaParts, "   •   "))
 	}
-	b.WriteString(targetLine + "\n")
+	b.WriteString(targetLine + "\n\n")
 
 	// Line 3: Hashes (SHA-256 or MD5)
 	sha256 := sel.Hashes["SHA256"]
@@ -496,7 +497,7 @@ func (m Model) renderInspectorDock(sel *report.Finding, width int) string {
 		sha256 = sel.Hashes["MD5"]
 	}
 	if sha256 != "" {
-		b.WriteString(fmt.Sprintf("Digest: %s\n", m.theme.InspectorHash.Render("SHA-256: "+sha256)))
+		b.WriteString(fmt.Sprintf("Digest: %s\n\n", m.theme.InspectorHash.Render("SHA-256: "+sha256)))
 	}
 
 	// Line 4: Actionable Containment Command & Hotkeys
@@ -992,7 +993,7 @@ func (m Model) renderFeedInner(width, maxVisible int, compact bool) (string, int
 	)
 	b.WriteString(tblHeader + "\n")
 	sepLine := strings.Repeat("─", innerWidth)
-	b.WriteString(m.theme.Divider.Render(sepLine) + "\n")
+	b.WriteString(m.theme.Divider.Render(sepLine) + "\n\n")
 
 	// Vertical window is computed by the caller (stacked vs split-pane layouts
 	// expose different amounts of vertical room for the feed).
@@ -1037,10 +1038,12 @@ func (m Model) renderFeedInner(width, maxVisible int, compact bool) (string, int
 			m.theme.FindingReason.Render(reasonStr),
 		)
 
+		// One blank line between finding rows: each finding reads as its own
+		// record instead of a compressed table wall.
 		if i == m.selectedIndex {
-			b.WriteString(m.theme.FindingRowSelected.Render(line) + "\n")
+			b.WriteString(m.theme.FindingRowSelected.Render(line) + "\n\n")
 		} else {
-			b.WriteString(m.theme.FindingRowNormal.Render(line) + "\n")
+			b.WriteString(m.theme.FindingRowNormal.Render(line) + "\n\n")
 		}
 	}
 

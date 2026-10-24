@@ -932,6 +932,124 @@
     for (var j = 0; j < items.length; j++) io.observe(items[j]);
   }
 
+  // 14. Detection Timeline: severity lanes over the scan window. Built
+  // entirely from the embedded JSON payload with createElementNS (DOM-safe,
+  // CSP-safe). Markers open the finding drawer.
+  function buildTimeline() {
+    var wrap = document.getElementById('timeline-wrap');
+    if (!wrap || !allFindings.length) {
+      if (wrap) wrap.appendChild(el('div', 'timeline-empty',
+        allFindings.length ? '' : 'No findings recorded — the timeline populates as detections surface.'));
+      return;
+    }
+
+    var parseTS = function(s) {
+      var d = new Date(s);
+      return isNaN(d.getTime()) ? null : d.getTime();
+    };
+    var times = [];
+    for (var i = 0; i < allFindings.length; i++) {
+      var t = parseTS(allFindings[i].timestamp);
+      if (t !== null) times.push(t);
+    }
+    if (!times.length) { wrap.appendChild(el('div', 'timeline-empty', 'Finding timestamps unavailable.')); return; }
+    times.sort(function(a, b) { return a - b; });
+    var t0 = times[0], t1 = times[times.length - 1];
+    if (t1 - t0 < 1000) { t0 -= 500; t1 += 500; } // degenerate single-instant window
+
+    var W = 1000, laneH = 34, topPad = 18, botPad = 26, labelW = 64;
+    var plotW = W - labelW - 16;
+    var lanes = [
+      { key: 'ALERT', label: 'ALERT' },
+      { key: 'WARNING', label: 'WARN' },
+      { key: 'NOTICE', label: 'NOTICE' },
+      { key: 'INFO', label: 'INFO' }
+    ];
+    var laneIndex = function(sev) {
+      var s = (sev || '').toUpperCase();
+      if (s === 'ALERT' || s === 'CRITICAL') return 0;
+      if (s === 'WARNING' || s === 'HIGH') return 1;
+      if (s === 'NOTICE' || s === 'MEDIUM') return 2;
+      return 3;
+    };
+
+    var H = topPad + lanes.length * laneH + botPad;
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'timeline-svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Detection timeline: findings per severity over the scan window');
+
+    var mk = function(tag, attrs, text) {
+      var n = document.createElementNS(NS, tag);
+      for (var k in attrs) n.setAttribute(k, attrs[k]);
+      if (text !== undefined) n.textContent = text;
+      return n;
+    };
+    var fmt = function(ms) {
+      var d = new Date(ms);
+      var p = function(x) { return (x < 10 ? '0' : '') + x; };
+      return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+    };
+    var xOf = function(ms) { return labelW + ((ms - t0) / (t1 - t0)) * plotW; };
+
+    // Lane backgrounds, labels, and baseline grid.
+    for (var li = 0; li < lanes.length; li++) {
+      var y = topPad + li * laneH;
+      svg.appendChild(mk('rect', { x: labelW, y: y + 4, width: plotW, height: laneH - 8, rx: 6, class: 'tl-lane tl-lane-' + lanes[li].key.toLowerCase() }));
+      svg.appendChild(mk('text', { x: labelW - 8, y: y + laneH / 2 + 3, 'text-anchor': 'end', class: 'tl-lane-label' }, lanes[li].label));
+    }
+    // Time axis: start, middle, end.
+    svg.appendChild(mk('line', { x1: labelW, y1: topPad + lanes.length * laneH, x2: labelW + plotW, y2: topPad + lanes.length * laneH, class: 'tl-axis' }));
+    svg.appendChild(mk('text', { x: labelW, y: H - 8, class: 'tl-tick' }, fmt(t0)));
+    svg.appendChild(mk('text', { x: labelW + plotW / 2, y: H - 8, 'text-anchor': 'middle', class: 'tl-tick' }, fmt((t0 + t1) / 2)));
+    svg.appendChild(mk('text', { x: labelW + plotW, y: H - 8, 'text-anchor': 'end', class: 'tl-tick' }, fmt(t1)));
+
+    // Markers: newest last so alerts stack on top; click opens the drawer.
+    for (var fi = 0; fi < allFindings.length; fi++) {
+      var f = allFindings[fi];
+      var ms = parseTS(f.timestamp);
+      if (ms === null) continue;
+      var lane = laneIndex(f.severity);
+      var cx = xOf(ms);
+      if (cx < labelW + 4 || cx > labelW + plotW - 4) cx = Math.max(labelW + 4, Math.min(cx, labelW + plotW - 4));
+      var cy = topPad + lane * laneH + laneH / 2;
+      var sevKey = (f.severity || 'INFO').toLowerCase();
+
+      var g = document.createElementNS(NS, 'g');
+      g.setAttribute('class', 'tl-marker');
+      g.setAttribute('tabindex', '0');
+      g.setAttribute('role', 'button');
+      var circle = mk('circle', { cx: cx, cy: cy, r: 5, class: 'tl-dot tl-dot-' + sevKey });
+      var halo = mk('circle', { cx: cx, cy: cy, r: 9, class: 'tl-halo tl-halo-' + sevKey });
+      var title = mk('title', {}, (f.severity || '') + ' — ' + (f.rule_name || '') + '\n' + (f.path || ''));
+      g.appendChild(halo);
+      g.appendChild(circle);
+      g.appendChild(title);
+
+      (function(finding, idx) {
+        var open = function() {
+          currentFilteredFindings = allFindings.slice();
+          currentFilteredIndex = idx;
+          renderDrawerFinding(finding);
+          openDrawer();
+        };
+        g.addEventListener('click', open);
+        g.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
+            e.preventDefault();
+            open();
+          }
+        });
+      })(f, fi);
+      svg.appendChild(g);
+    }
+    wrap.appendChild(svg);
+  }
+
   initCountUp();
   initReveal();
+  buildTimeline();
 })();

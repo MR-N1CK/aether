@@ -1133,3 +1133,57 @@ func TestHTMLReport_PrintStylesheet(t *testing.T) {
 		}
 	}
 }
+
+// 19. Executive Briefing: the first-screenful summary must render top
+// adversarial tactics and top triggered rules when findings exist.
+func TestHTMLReport_ExecutiveBriefing(t *testing.T) {
+	rep, err := htmlreport.GenerateHTMLReport(sampleReportData())
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+	out := string(rep)
+
+	if !strings.Contains(out, `aria-label="Executive Briefing"`) {
+		t.Fatal("executive briefing card missing")
+	}
+	if !strings.Contains(out, "Top Adversarial Tactics") || !strings.Contains(out, "Top Triggered Rules") {
+		t.Fatal("briefing blocks missing")
+	}
+	if !strings.Contains(out, "briefing-rank rank-1") {
+		t.Fatal("briefing ranking markers missing")
+	}
+	// Ranked by detection count: the most-detected tactic must appear first.
+	idxRank1 := strings.Index(out, "briefing-rank rank-1")
+	idxRank2 := strings.Index(out, "briefing-rank rank-2")
+	if idxRank1 == -1 || idxRank2 == -1 || idxRank1 > idxRank2 {
+		t.Fatal("briefing rows not ranked in order")
+	}
+}
+
+// 20. Detection Timeline: the section scaffold exists and the renderer is
+// wired (markers are built client-side from the nonce'd JSON payload).
+func TestHTMLReport_DetectionTimeline(t *testing.T) {
+	rep, err := htmlreport.GenerateHTMLReport(sampleReportData())
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+	out := string(rep)
+
+	if !strings.Contains(out, `id="timeline-section"`) {
+		t.Fatal("timeline section missing")
+	}
+	if !strings.Contains(out, `id="timeline-wrap"`) {
+		t.Fatal("timeline container missing")
+	}
+	if !strings.Contains(out, "function buildTimeline") {
+		t.Fatal("timeline renderer missing from embedded JS")
+	}
+	// The renderer must use namespace-safe SVG construction, never innerHTML.
+	if !strings.Contains(out, "createElementNS") {
+		t.Fatal("timeline SVG must be built via createElementNS (DOM-safe)")
+	}
+	// Print + reduced-motion contracts still hold with the new sections.
+	if !strings.Contains(out, "@media (prefers-reduced-motion: reduce)") {
+		t.Fatal("reduced-motion guard missing")
+	}
+}

@@ -617,6 +617,53 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("      <div class=\"verdict-reason\">" + html.EscapeString(verdictReason) + "</div>\n")
 	buf.WriteString("    </section>\n\n")
 
+	// 2a-bis. Executive Briefing: the first-screenful summary — top tactics,
+	// top rules, and posture in one glance, before any detail.
+	if len(mitreGroups) > 0 || len(data.TopRules) > 0 {
+		buf.WriteString("    <section class=\"card briefing-card reveal\" aria-label=\"Executive Briefing\">\n")
+		buf.WriteString("      <h2 class=\"section-title\">Executive Briefing</h2>\n")
+		buf.WriteString("      <span class=\"subtitle\">Highest-signal summary of the scan — what happened, where, and what matters first.</span>\n")
+		buf.WriteString("      <div class=\"briefing-grid\">\n")
+
+		// Top adversarial tactics (MITRE), ranked by detection count.
+		buf.WriteString("        <div class=\"briefing-block\">\n")
+		buf.WriteString("          <h3 class=\"briefing-head\">Top Adversarial Tactics</h3>\n")
+		ranked := append([]mitreTacticGroup(nil), mitreGroups...)
+		sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].TotalCount > ranked[j].TotalCount })
+		top := 3
+		if len(ranked) < top {
+			top = len(ranked)
+		}
+		for i := 0; i < top; i++ {
+			g := ranked[i]
+			tech := ""
+			if len(g.Techniques) > 0 {
+				tech = g.Techniques[0].ID + " " + g.Techniques[0].Name
+			}
+			buf.WriteString(fmt.Sprintf("          <div class=\"briefing-row\"><span class=\"briefing-rank rank-%d\">%d</span><span class=\"briefing-item\"><strong>%s</strong> <span class=\"briefing-meta\">%s</span></span><span class=\"briefing-count\">%d</span></div>\n",
+				i+1, i+1, html.EscapeString(g.Tactic), html.EscapeString(tech), g.TotalCount))
+		}
+		buf.WriteString("        </div>\n")
+
+		// Top triggered rules.
+		buf.WriteString("        <div class=\"briefing-block\">\n")
+		buf.WriteString("          <h3 class=\"briefing-head\">Top Triggered Rules</h3>\n")
+		topRules := 3
+		if len(data.TopRules) < topRules {
+			topRules = len(data.TopRules)
+		}
+		for i := 0; i < topRules; i++ {
+			r := data.TopRules[i]
+			badgeClass := "sev-" + strings.ToLower(string(canonicalSeverity(r.Severity)))
+			buf.WriteString(fmt.Sprintf("          <div class=\"briefing-row\"><span class=\"briefing-rank rank-%d\">%d</span><span class=\"briefing-item\"><code>%s</code></span><span class=\"badge %s\">%s</span><span class=\"briefing-count\">%d</span></div>\n",
+				i+1, i+1, html.EscapeString(r.RuleName), badgeClass, html.EscapeString(string(canonicalSeverity(r.Severity))), r.Count))
+		}
+		buf.WriteString("        </div>\n")
+
+		buf.WriteString("      </div>\n")
+		buf.WriteString("    </section>\n\n")
+	}
+
 	// 2b. Executive System Assessment & Remediation Card
 	if data.SystemPosture != "" {
 		postureClass := "posture-safe"
@@ -698,6 +745,15 @@ func GenerateHTMLReport(data HTMLReportData) ([]byte, error) {
 	buf.WriteString("      <h2 class=\"section-title\">Adversary Kill-Chain Coverage</h2>\n")
 	buf.WriteString("      <span class=\"subtitle\">Stage nodes highlight wherever observations map onto each kill-chain tactic; hollow nodes had no findings.</span>\n")
 	buf.WriteString("      <div class=\"killchain-wrap\">\n" + renderKillchainSVG(mitreGroups) + "\n      </div>\n")
+	buf.WriteString("    </section>\n\n")
+
+	// 2e. Detection Timeline: chronological severity lanes over the scan
+	// window. Rendered client-side from the embedded JSON payload (strict
+	// CSP: no inline event handlers; markers open the detail drawer).
+	buf.WriteString("    <section class=\"card section-card reveal\" id=\"timeline-section\" aria-label=\"Detection Timeline\">\n")
+	buf.WriteString("      <h2 class=\"section-title\">Detection Timeline</h2>\n")
+	buf.WriteString("      <span class=\"subtitle\">When each finding surfaced during the scan — severity lanes over the inspection window. Click a marker for its dossier.</span>\n")
+	buf.WriteString("      <div id=\"timeline-wrap\" class=\"timeline-wrap\"></div>\n")
 	buf.WriteString("    </section>\n\n")
 
 	// 3. Forensic Audit Coverage & Subsystem Health Section

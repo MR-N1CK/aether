@@ -971,4 +971,3 @@ func TestCheckAllSuspiciousScriptContent_ConfigAndLocalContextGating(t *testing.
 		}
 	}
 }
-

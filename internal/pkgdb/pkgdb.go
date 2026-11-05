@@ -118,7 +118,19 @@ func (d *DB) init() {
 			return
 		}
 
-		// 3. Check for RPM (/var/lib/rpm)
+		// 3. Check for Alpine Linux (/lib/apk/db/installed or /var/lib/apk/db/installed)
+		apkInstalled := d.resolve("/lib/apk/db/installed")
+		if stat, err := os.Stat(apkInstalled); err == nil && !stat.IsDir() {
+			d.loadApk(apkInstalled)
+			return
+		}
+		apkInstalledVar := d.resolve("/var/lib/apk/db/installed")
+		if stat, err := os.Stat(apkInstalledVar); err == nil && !stat.IsDir() {
+			d.loadApk(apkInstalledVar)
+			return
+		}
+
+		// 4. Check for RPM (/var/lib/rpm)
 		rpmDir := d.resolve("/var/lib/rpm")
 		if stat, err := os.Stat(rpmDir); err == nil && stat.IsDir() {
 			d.available = false
@@ -322,6 +334,89 @@ func (d *DB) parsePacmanFiles(r io.Reader, pkgName string) {
 			cleaned := filepath.Clean(absPath)
 			if cleaned != norm {
 				d.ownerMap[cleaned] = pkgName
+			}
+		}
+	}
+}
+
+// loadApk parses Alpine Linux /lib/apk/db/installed or /var/lib/apk/db/installed.
+func (d *DB) loadApk(installedPath string) {
+	f, err := safeopen.OpenReadOnly(installedPath)
+	if err != nil {
+		d.available = false
+		d.statusNote = "Failed to open apk database: " + err.Error()
+		return
+	}
+	defer f.Close()
+
+	d.parseApkInstalled(f)
+
+	d.available = len(d.ownerMap) > 0
+	if d.available {
+		d.statusNote = "Alpine apk database loaded"
+	} else {
+		d.statusNote = "Alpine apk database empty"
+	}
+}
+
+func (d *DB) parseApkInstalled(r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	var currentPkg string
+	var currentDir string
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			currentPkg = ""
+			currentDir = ""
+			continue
+		}
+
+		if strings.HasPrefix(line, "P:") {
+			currentPkg = strings.TrimSpace(line[2:])
+			currentDir = ""
+			continue
+		}
+
+		if currentPkg == "" {
+			continue
+		}
+
+		if strings.HasPrefix(line, "F:") {
+			rawDir := strings.TrimSpace(line[2:])
+			if rawDir == "" || rawDir == "." {
+				currentDir = "/"
+			} else {
+				currentDir = "/" + strings.TrimPrefix(rawDir, "/")
+			}
+			normDir := NormalizePath(currentDir)
+			d.ownerMap[normDir] = currentPkg
+			cleanedDir := filepath.Clean(currentDir)
+			if cleanedDir != normDir {
+				d.ownerMap[cleanedDir] = currentPkg
+			}
+			continue
+		}
+
+		if strings.HasPrefix(line, "R:") {
+			file := strings.TrimSpace(line[2:])
+			if file == "" {
+				continue
+			}
+			var absPath string
+			if currentDir != "" && currentDir != "/" {
+				absPath = filepath.Join(currentDir, file)
+			} else {
+				absPath = "/" + strings.TrimPrefix(file, "/")
+			}
+			norm := NormalizePath(absPath)
+			d.ownerMap[norm] = currentPkg
+			cleaned := filepath.Clean(absPath)
+			if cleaned != norm {
+				d.ownerMap[cleaned] = currentPkg
 			}
 		}
 	}

@@ -122,6 +122,62 @@ usr/lib/systemd/system/systemd-journald.service
 	}
 }
 
+func TestPkgDB_Alpine(t *testing.T) {
+	root := t.TempDir()
+
+	apkDir := filepath.Join(root, "lib/apk/db")
+	if err := os.MkdirAll(apkDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	installedContent := `C:Q1dummychecksum
+P:busybox
+V:1.36.1-r0
+A:x86_64
+S:977792
+T:Size optimized toolbox
+F:bin
+R:busybox
+a:uid=0 gid=0 mode=04755
+R:sh
+F:usr/bin
+R:wc
+
+C:Q1dummycurl
+P:curl
+V:8.5.0-r0
+F:usr/bin
+R:curl
+`
+	if err := os.WriteFile(filepath.Join(apkDir, "installed"), []byte(installedContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	db := pkgdb.New(root)
+	if !db.IsAvailable() {
+		t.Fatalf("expected Alpine db to be available, got status: %s", db.StatusNote())
+	}
+
+	if pkg, ok := db.Owner("/bin/busybox"); !ok || pkg != "busybox" {
+		t.Errorf("expected /bin/busybox -> busybox, got %q (ok=%v)", pkg, ok)
+	}
+	if pkg, ok := db.Owner("/usr/bin/busybox"); !ok || pkg != "busybox" {
+		t.Errorf("expected /usr/bin/busybox -> busybox (merged-/usr), got %q (ok=%v)", pkg, ok)
+	}
+	if pkg, ok := db.Owner("/bin/sh"); !ok || pkg != "busybox" {
+		t.Errorf("expected /bin/sh -> busybox, got %q (ok=%v)", pkg, ok)
+	}
+	if pkg, ok := db.Owner("/usr/bin/wc"); !ok || pkg != "busybox" {
+		t.Errorf("expected /usr/bin/wc -> busybox, got %q (ok=%v)", pkg, ok)
+	}
+	if pkg, ok := db.Owner("/usr/bin/curl"); !ok || pkg != "curl" {
+		t.Errorf("expected /usr/bin/curl -> curl, got %q (ok=%v)", pkg, ok)
+	}
+	if pkg, ok := db.Owner("/usr/bin/unknown"); ok {
+		t.Errorf("expected unknown binary to return false, got %q", pkg)
+	}
+}
+
 func TestPkgDB_RPMGracefulDegradation(t *testing.T) {
 	root := t.TempDir()
 

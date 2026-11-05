@@ -2,8 +2,12 @@ package theme_test
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"aether/internal/report"
 	"aether/internal/ui/theme"
@@ -118,3 +122,63 @@ func TestTheme_ThreatScoreMeter(t *testing.T) {
 		t.Errorf("expected 50/100 with # block in ASCII meter, got: %q", meterASCII)
 	}
 }
+
+func TestTheme_GradientBar(t *testing.T) {
+	// lipgloss strips colors when stdout is not a TTY (as in tests); force
+	// TrueColor so the gradient ramp is actually rendered, then restore.
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prevProfile)
+
+	th := theme.NewTheme(false)
+	empty := lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
+
+	// Truecolor: columns are tinted along the ramp — a wide bar must carry
+	// more than one distinct SGR truecolor sequence (38;2;r;g;b).
+	bar := th.RenderGradientBar(20, 1.0, empty, theme.AuroraRamp...)
+	colors := ansiTrueColorRegex.FindAllString(bar, -1)
+	uniq := map[string]bool{}
+	for _, c := range colors {
+		uniq[c] = true
+	}
+	if len(uniq) < 2 {
+		t.Errorf("expected multi-stop gradient (>=2 distinct colors), got %d in %q", len(uniq), bar)
+	}
+	if strings.Contains(bar, "░") {
+		t.Errorf("full-ratio bar must have no empty track, got %q", bar)
+	}
+
+	// Partial ratio leaves an empty track.
+	partial := th.RenderGradientBar(20, 0.5, empty, theme.AuroraRamp...)
+	if !strings.Contains(partial, "░") {
+		t.Errorf("half bar must contain empty track, got %q", partial)
+	}
+
+	// Ratio clamping.
+	over := th.RenderGradientBar(10, 2.0, empty, theme.AuroraRamp...)
+	if strings.Contains(over, "░") {
+		t.Errorf("ratio > 1 must clamp to full, got %q", over)
+	}
+	under := th.RenderGradientBar(10, -1, empty, theme.AuroraRamp...)
+	if !strings.Contains(under, "░") {
+		t.Errorf("negative ratio must clamp to empty, got %q", under)
+	}
+
+	// Monochrome fallback: solid fractional bar, no gradient escapes. The
+	// empty style is plain too — production callers pass themed mono styles.
+	thMono := theme.NewTheme(true)
+	mono := thMono.RenderGradientBar(10, 0.5, lipgloss.NewStyle(), theme.AuroraRamp...)
+	if ansiTrueColorRegex.MatchString(mono) {
+		t.Errorf("monochrome bar must not contain color escapes, got %q", mono)
+	}
+
+	// ASCII fallback: # fills.
+	thASCII := theme.NewTheme(false, true)
+	ascii := thASCII.RenderGradientBar(10, 0.5, empty, theme.AuroraRamp...)
+	if !strings.Contains(ascii, "#") {
+		t.Errorf("ASCII bar must use # fills, got %q", ascii)
+	}
+}
+
+// ansiTrueColorRegex matches 24-bit SGR foreground sequences.
+var ansiTrueColorRegex = regexp.MustCompile(`38;2;\d+;\d+;\d+`)

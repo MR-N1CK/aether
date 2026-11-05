@@ -13,6 +13,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"aether/internal/events"
 	"aether/internal/report"
@@ -36,6 +37,13 @@ const (
 	sortByArrival                  // chronological detection order
 )
 
+// auroraSpinner is the Command Deck orbit spinner: a 10-frame braille spin
+// running at 12 FPS. Non-animated terminals keep the stock Dot spinner.
+var auroraSpinner = spinner.Spinner{
+	Frames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+	FPS:    time.Second / 12,
+}
+
 type frameTickMsg time.Time
 type splashTickMsg int
 
@@ -49,6 +57,7 @@ type ModuleStatus struct {
 	Findings    int
 	Err         error
 	Status      string
+	StartedAt   time.Time // set on ModuleStarted; drives the live elapsed readout
 }
 
 // Model is the Bubble Tea model managing the interactive scanner interface.
@@ -115,8 +124,14 @@ type Model struct {
 	confirmQuit          bool
 	toastMessage         string
 	toastUntil           time.Time
-	findingsDirty        bool
-	htmlReportPath       string
+	// bellRung ensures the terminal bell rings exactly once per scan, on the
+	// first ALERT-class finding.
+	bellRung bool
+	// lastSelectMove timestamps selection changes to drive the 200ms rail
+	// pulse in the findings feed (DESIGN.md motion-fast).
+	lastSelectMove time.Time
+	findingsDirty  bool
+	htmlReportPath string
 
 	// UI components
 	spinner spinner.Model
@@ -134,7 +149,10 @@ func NewModel(ctx context.Context, cancel context.CancelFunc, sub *events.Subscr
 	}
 
 	sp := spinner.New()
-	sp.Spinner = spinner.Dot
+	sp.Spinner = auroraSpinner
+	if noAnim {
+		sp.Spinner = spinner.Dot
+	}
 	sp.Style = th.BadgeNotice
 
 	initialState := stateSplash
@@ -273,8 +291,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case events.Event:
-		m.handleScanEvent(msg)
 		cmds = append(cmds, m.listenEvents())
+		if cmd := m.handleScanEvent(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case tea.KeyMsg:
 		cmd := m.handleKey(msg)
@@ -292,7 +312,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) handleScanEvent(e events.Event) {
+// handleScanEvent applies a scan lifecycle event to the model. It returns a
+// tea.Cmd when the event must emit a terminal side effect (e.g. the one-shot
+// alert bell), nil otherwise.
+func (m *Model) handleScanEvent(e events.Event) tea.Cmd {
 	switch ev := e.(type) {
 	case events.ScanStarted:
 		m.mode = strings.ToUpper(ev.Mode)
@@ -307,6 +330,7 @@ func (m *Model) handleScanEvent(e events.Event) {
 			Name:        ev.ModuleName,
 			Description: ev.Description,
 			Running:     true,
+			StartedAt:   time.Now(),
 		}
 
 	case events.ModuleFinished:
@@ -329,6 +353,14 @@ func (m *Model) handleScanEvent(e events.Event) {
 		m.lastActivity = time.Now()
 		if ev.Finding.Severity == report.SeverityAlert || ev.Finding.Severity == report.SeverityCritical {
 			m.lastAlertAt = time.Now()
+			// One bell per scan on the first ALERT: bubbletea v1 has no
+			// tea.Bell, so the BEL control char is emitted via the printf
+			// passthrough (it renders as nothing and rings the terminal).
+			if !m.bellRung {
+				m.bellRung = true
+				m.showToast("THREAT DETECTED — check THREATS tab [2]")
+				return tea.Printf("\a")
+			}
 		}
 		// Worst-finding pin: keep the highest-severity detection visible in
 		// the HUD at all times so the operator never loses the peak signal.
@@ -364,6 +396,7 @@ func (m *Model) handleScanEvent(e events.Event) {
 			m.state = stateFinished
 		}
 	}
+	return nil
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
@@ -483,11 +516,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			return nil
 		case "tab", "right", "]":
-			m.activeTab = (m.activeTab + 1) % 4
+			m.activeTab = (m.activeTab + 1) % 5
 			m.modalScrollY = 0
 			return nil
 		case "shift+tab", "left", "[":
-			m.activeTab = (m.activeTab + 3) % 4
+			m.activeTab = (m.activeTab + 4) % 5
 			m.modalScrollY = 0
 			return nil
 		case "1":
@@ -504,6 +537,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		case "4":
 			m.activeTab = 3
+			m.modalScrollY = 0
+			return nil
+		case "5":
+			m.activeTab = 4
 			m.modalScrollY = 0
 			return nil
 		case "up", "k":
@@ -530,14 +567,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.modalScrollY = 9999
 			return nil
 		case "p":
-			m.copySelectedPath()
-			return nil
+			return m.copySelectedPath()
 		case "y", "h", "hash", "#":
-			m.copySelectedHash()
-			return nil
+			return m.copySelectedHash()
 		case "c", "r":
-			m.copySelectedCommand()
-			return nil
+			return m.copySelectedCommand()
 		case "enter":
 			m.modalScrollY = 0
 			if m.scanFinished {
@@ -632,20 +666,24 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "up", "k":
 		if m.selectedIndex > 0 {
 			m.selectedIndex--
+			m.lastSelectMove = time.Now()
 		}
 
 	case "down", "j":
 		if m.selectedIndex < len(m.currentList())-1 {
 			m.selectedIndex++
+			m.lastSelectMove = time.Now()
 		}
 
 	case "g", "home":
 		m.selectedIndex = 0
+		m.lastSelectMove = time.Now()
 
 	case "G", "end":
 		list := m.currentList()
 		if len(list) > 0 {
 			m.selectedIndex = len(list) - 1
+			m.lastSelectMove = time.Now()
 		}
 
 	case "pgup":
@@ -653,6 +691,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if m.selectedIndex < 0 {
 			m.selectedIndex = 0
 		}
+		m.lastSelectMove = time.Now()
 
 	case "pgdown":
 		m.selectedIndex += 5
@@ -663,15 +702,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if m.selectedIndex < 0 {
 			m.selectedIndex = 0
 		}
+		m.lastSelectMove = time.Now()
 
 	case "p":
-		m.copySelectedPath()
+		return m.copySelectedPath()
 
 	case "y", "h":
-		m.copySelectedHash()
+		return m.copySelectedHash()
 
 	case "c", "r":
-		m.copySelectedCommand()
+		return m.copySelectedCommand()
 
 	case "esc":
 		if m.filterQuery != "" {
@@ -701,36 +741,50 @@ func (m *Model) showToast(msg string) {
 	m.toastUntil = time.Now().Add(2500 * time.Millisecond)
 }
 
-func (m *Model) copyToClipboard(text, label string) {
+func (m *Model) copyToClipboard(text, label string) tea.Cmd {
 	if text == "" {
 		m.showToast(fmt.Sprintf("No %s to copy", label))
-		return
+		return nil
 	}
 	err := clipboard.WriteAll(text)
-	if err != nil {
-		m.showToast("Clipboard unavailable in headless session")
-	} else {
+	if err == nil {
 		m.showToast(fmt.Sprintf("Copied %s to clipboard!", label))
+		return nil
 	}
+	// OSC 52 fallback: sets the clipboard of the local terminal emulator
+	// through the session, which is what makes yank work over SSH without a
+	// local clipboard helper. Bounded because terminals cap OSC 52 payloads.
+	if len(text) <= osc52MaxBytes {
+		m.showToast(fmt.Sprintf("Copied %s via OSC 52", label))
+		return tea.Printf("%s", ansi.SetSystemClipboard(text))
+	}
+	m.showToast("Clipboard unavailable in headless session")
+	return nil
 }
 
-func (m *Model) copySelectedPath() {
+// osc52MaxBytes bounds the OSC 52 escape payload; common terminal and tmux
+// implementations reject clipboard writes larger than ~100 KB.
+const osc52MaxBytes = 100 * 1024
+
+func (m *Model) copySelectedPath() tea.Cmd {
 	if sel := m.SelectedFinding(); sel != nil {
-		m.copyToClipboard(sel.Path, "Path")
+		return m.copyToClipboard(sel.Path, "Path")
 	}
+	return nil
 }
 
-func (m *Model) copySelectedHash() {
+func (m *Model) copySelectedHash() tea.Cmd {
 	if sel := m.SelectedFinding(); sel != nil {
 		hash := sel.Hashes["SHA256"]
 		if hash == "" {
 			hash = sel.Hashes["MD5"]
 		}
-		m.copyToClipboard(hash, "SHA256")
+		return m.copyToClipboard(hash, "SHA256")
 	}
+	return nil
 }
 
-func (m *Model) copySelectedCommand() {
+func (m *Model) copySelectedCommand() tea.Cmd {
 	if sel := m.SelectedFinding(); sel != nil {
 		report.PopulateFindingDetails(sel)
 		cmd := ""
@@ -747,8 +801,9 @@ func (m *Model) copySelectedCommand() {
 		if cmd == "" && len(sel.Remediation) > 0 {
 			cmd = sel.Remediation[0]
 		}
-		m.copyToClipboard(cmd, "Remediation Command")
+		return m.copyToClipboard(cmd, "Remediation Command")
 	}
+	return nil
 }
 
 func (m *Model) currentList() []report.Finding {
@@ -1009,12 +1064,7 @@ func (m Model) getFilteredPaletteActions() []PaletteAction {
 func (m *Model) executePaletteAction(actionID string) tea.Cmd {
 	switch actionID {
 	case "inspect":
-		if len(m.currentList()) > 0 {
-			m.state = stateDetail
-			m.activeTab = 0
-			m.modalScrollY = 0
-			m.detailOpenedAt = time.Now()
-		}
+		return m.openDossier()
 	case "next_alert":
 		m.jumpToNextAlert()
 	case "prev_alert":
@@ -1035,11 +1085,11 @@ func (m *Model) executePaletteAction(actionID string) tea.Cmd {
 		m.recomputeVisible()
 		m.showToast(fmt.Sprintf("Switched to Tab %d", m.dashboardTab+1))
 	case "copy_runbook":
-		m.copySelectedCommand()
+		return m.copySelectedCommand()
 	case "copy_path":
-		m.copySelectedPath()
+		return m.copySelectedPath()
 	case "copy_hash":
-		m.copySelectedHash()
+		return m.copySelectedHash()
 	case "open_html":
 		m.openHTMLReport()
 	case "next_tab":
@@ -1101,6 +1151,79 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		if m.selectedIndex < len(list)-1 {
 			m.selectedIndex++
 		}
+	case tea.MouseLeft:
+		return m.handleMouseClick(msg)
 	}
+	return nil
+}
+
+// handleMouseClick resolves left-clicks against the dashboard geometry:
+// category tabs switch the feed tab, finding rows select (or open the dossier
+// when already selected), and the forensic inspector dock opens the dossier.
+func (m *Model) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
+	if m.state != stateDashboard || m.isFiltering {
+		return nil
+	}
+
+	// 1. Category tab row.
+	if msg.Y == telemetryTabY {
+		if idx := m.tabHitX(msg.X); idx >= 0 {
+			return m.setDashboardTab(idx)
+		}
+		return nil
+	}
+
+	g := m.dashFeedGeom()
+	list := m.currentList()
+
+	// 2. Finding rows: each row occupies feedRowStride terminal lines; clicks
+	// on a row's blank separator line snap down to the row above it.
+	if rel := msg.Y - g.firstRowY; rel >= 0 && g.visible > 0 {
+		if g.feedMaxX < 0 || msg.X <= g.feedMaxX {
+			row := rel / g.rowStride
+			if row < g.visible && g.start+row < len(list) {
+				idx := g.start + row
+				if idx == m.selectedIndex {
+					return m.openDossier()
+				}
+				m.selectedIndex = idx
+				m.lastSelectMove = time.Now()
+				return nil
+			}
+		}
+	}
+
+	// 3. Inspector dock (flight-deck layout): open the dossier for the
+	// selected finding.
+	if g.inspectorY >= 0 && msg.Y >= g.inspectorY {
+		return m.openDossier()
+	}
+	return nil
+}
+
+// setDashboardTab switches the feed category tab, reusing the keybinding toast.
+func (m *Model) setDashboardTab(idx int) tea.Cmd {
+	if idx < 0 || idx > 4 {
+		return nil
+	}
+	m.dashboardTab = idx
+	m.recomputeVisible()
+	m.showToast(fmt.Sprintf("Tab [%d: %s]", idx+1, dashboardTabNames[idx]))
+	return nil
+}
+
+var dashboardTabNames = [5]string{"All Findings", "Malicious Threats", "Suspicious Anomalies", "Audit Notices", "Execution Pipeline"}
+
+// openDossier opens the forensic dossier modal for the selected finding,
+// mirroring the Enter keybinding.
+func (m *Model) openDossier() tea.Cmd {
+	list := m.currentList()
+	if len(list) == 0 || m.selectedIndex < 0 || m.selectedIndex >= len(list) {
+		return nil
+	}
+	m.state = stateDetail
+	m.activeTab = 0
+	m.modalScrollY = 0
+	m.detailOpenedAt = time.Now()
 	return nil
 }

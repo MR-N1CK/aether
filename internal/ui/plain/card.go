@@ -62,7 +62,19 @@ func RenderFindingCard(w io.Writer, f report.Finding, th *theme.Theme) {
 		for _, l := range titleLines[1:] {
 			fmt.Fprintf(w, "| %-22s %-*s |\n", "", cardWidth-27, l)
 		}
-		row("Path:", pathVal)
+		// Path row with an OSC 8 hyperlink on the first wrapped line; padding
+		// is ANSI-aware so the escape bytes never widen the card.
+		linkPath := osc8Enabled(w)
+		for i, l := range WrapWords(pathVal, cellWidth) {
+			lbl := strings.Repeat(" ", 14)
+			if i == 0 {
+				lbl = fmt.Sprintf("%-14s", "Path:")
+				if linkPath {
+					l = osc8Link(f.Path, l)
+				}
+			}
+			fmt.Fprintf(w, "| %s %s |\n", lbl, padCell(l, cellWidth))
+		}
 		if f.RuleName != "" {
 			row("Rule:", f.RuleName)
 		}
@@ -187,7 +199,20 @@ func RenderFindingCard(w io.Writer, f report.Finding, th *theme.Theme) {
 	wrapRender := func(render func(...string) string) func(string) string {
 		return func(s string) string { return render(s) }
 	}
-	addKeyValue("Path:", pathVal, unwrap)
+	// Path value gets an OSC 8 hyperlink on its first wrapped line; lipgloss
+	// width is ANSI-aware so borders still hug the card exactly.
+	pathRender := unwrap
+	if osc8Enabled(w) {
+		first := true
+		pathRender = func(s string) string {
+			if first {
+				first = false
+				return osc8Link(f.Path, s)
+			}
+			return s
+		}
+	}
+	addKeyValue("Path:", pathVal, pathRender)
 	if f.RuleName != "" {
 		addKeyValue("Rule:", f.RuleName, unwrap)
 	}

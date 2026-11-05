@@ -13,6 +13,25 @@ import (
 	"aether/internal/ui/theme"
 )
 
+// RiskLevelFromCounts maps finding counts to the executive risk level word.
+// Calibration (2026-11 review): CRITICAL is reserved for confirmed alert-class
+// evidence; warnings alone are ELEVATED, notices alone are MODERATE. The
+// numeric threat score remains a volume meter, but the level word must never
+// claim CRITICAL without at least one alert, so the headline cannot outrun
+// the finding list an analyst can actually see.
+func RiskLevelFromCounts(alerts, warnings, notices int) string {
+	switch {
+	case alerts > 0:
+		return "CRITICAL"
+	case warnings > 0:
+		return "ELEVATED"
+	case notices > 0:
+		return "MODERATE"
+	default:
+		return "LOW"
+	}
+}
+
 // RenderExecutiveVerdict renders a comprehensive executive risk assessment box,
 // including host posture, subsystem duration breakdown, and prioritized action recommendations.
 func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme) {
@@ -25,7 +44,9 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 	ass := synth.SynthesizeFromScan(nil, ev)
 	bd := realworld.FromScanFinished(ev, 0)
 
-	// Calculate threat score and risk level
+	// Calculate threat score and risk level. The score is a volume meter
+	// (how much signal fired); the level word comes from RiskLevelFromCounts
+	// so warnings alone can no longer display CRITICAL.
 	threatScore := 0
 	threatScore += ev.Alerts * 25
 	threatScore += ev.Warnings * 5
@@ -37,16 +58,7 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 	var postureTitle string
 	var riskColor lipgloss.Color
 
-	var riskLevel string
-	if ev.Alerts > 0 || threatScore >= 25 {
-		riskLevel = "CRITICAL"
-	} else if ev.Warnings > 0 || threatScore >= 10 {
-		riskLevel = "ELEVATED"
-	} else if ev.Notices > 0 || threatScore >= 5 {
-		riskLevel = "MODERATE"
-	} else {
-		riskLevel = "LOW"
-	}
+	riskLevel := RiskLevelFromCounts(ev.Alerts, ev.Warnings, ev.Notices)
 
 	switch ass.Posture {
 	case realworld.PostureHighRisk:

@@ -92,6 +92,29 @@ func TestRenderFindingCard_VerdictAndRationale(t *testing.T) {
 	}
 }
 
+func TestRiskLevelFromCounts(t *testing.T) {
+	cases := []struct {
+		name               string
+		alerts, warn, notc int
+		want               string
+	}{
+		{"alerts imply CRITICAL", 1, 0, 0, "CRITICAL"},
+		{"alerts+many warnings imply CRITICAL", 2, 30, 40, "CRITICAL"},
+		{"warnings alone are ELEVATED (not CRITICAL)", 0, 29, 20, "ELEVATED"},
+		{"one warning is ELEVATED", 0, 1, 0, "ELEVATED"},
+		{"notices alone are MODERATE", 0, 0, 9, "MODERATE"},
+		{"nothing is LOW", 0, 0, 0, "LOW"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RiskLevelFromCounts(tc.alerts, tc.warn, tc.notc)
+			if got != tc.want {
+				t.Errorf("RiskLevelFromCounts(%d, %d, %d) = %q; want %q", tc.alerts, tc.warn, tc.notc, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRenderExecutiveVerdict(t *testing.T) {
 	var buf bytes.Buffer
 	th := theme.NewTheme(false)

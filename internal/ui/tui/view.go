@@ -132,7 +132,7 @@ func (m Model) renderSplash() string {
 		// High-precision fractional sub-block progress track
 		trackWidth := 46
 		ratio := float64(m.splashFrame) / float64(m.maxSplash)
-		bar := theme.RenderFractionalBar(trackWidth, ratio, lipgloss.NewStyle().Foreground(theme.ColorCyan), m.theme.FindingTimestamp, m.theme.ASCII)
+		bar := m.theme.RenderGradientBar(trackWidth, ratio, m.theme.FindingTimestamp, theme.AuroraRamp...)
 		b.WriteString(bar + "\n\n")
 
 		hint := m.theme.FindingTimestamp.Render("Press any key to enter command center...")
@@ -226,7 +226,7 @@ func (m Model) renderDashboard() string {
 			if yara.IsCompiledIn() {
 				modRow.WriteString(m.spinner.View() + " Initializing detection modules & YARA-X rules...")
 			} else {
-				modRow.WriteString(m.spinner.View() + " Initializing detection modules (native heuristics only)...")
+				modRow.WriteString(m.spinner.View() + " Initializing detection modules & embedded signatures (pure-Go fallback)...")
 			}
 		} else {
 			for i, name := range m.moduleOrder {
@@ -290,6 +290,29 @@ func (m Model) renderDashboard() string {
 
 // renderTabBar renders the interactive 1-5 filter tabs.
 func (m Model) renderTabBar(width int) string {
+	labels := m.tabLabels()
+
+	alertPulse := !m.noAnim && time.Since(m.lastAlertAt) < 1500*time.Millisecond
+	var tabItems []string
+	for i, label := range labels {
+		if i == 1 && alertPulse && (m.animFrame/4)%2 == 0 {
+			// New ALERT-class finding: draw the eye with a brief rose flash
+			// on the THREATS tab, decaying after 1.5s.
+			tabItems = append(tabItems, m.theme.BadgeAlert.Render(label))
+		} else if m.dashboardTab == i {
+			tabItems = append(tabItems, m.theme.TabBadgeActive.Render(label))
+		} else {
+			tabItems = append(tabItems, m.theme.TabBadgeInactive.Render(label))
+		}
+	}
+
+	return strings.Join(tabItems, " ")
+}
+
+// tabLabels builds the plain-text category tab labels. Shared by the tab bar
+// renderer and mouse hit-testing so click ranges can never drift from what is
+// drawn on screen.
+func (m Model) tabLabels() []string {
 	alerts, warns, notes, live := 0, 0, 0, 0
 	for _, f := range m.findings {
 		if f.Module != "filesystem" && f.Module != "" {
@@ -305,32 +328,133 @@ func (m Model) renderTabBar(width int) string {
 		}
 	}
 
-	tabs := []struct {
-		id    int
-		label string
-	}{
-		{0, fmt.Sprintf("1: ALL (%d)", len(m.findings))},
-		{1, fmt.Sprintf("2: THREATS (%d)", alerts)},
-		{2, fmt.Sprintf("3: ANOMALIES (%d)", warns)},
-		{3, fmt.Sprintf("4: NOTICES (%d)", notes)},
-		{4, fmt.Sprintf("5: LIVE HOST (%d)", live)},
+	return []string{
+		fmt.Sprintf("1: ALL (%d)", len(m.findings)),
+		fmt.Sprintf("2: THREATS (%d)", alerts),
+		fmt.Sprintf("3: ANOMALIES (%d)", warns),
+		fmt.Sprintf("4: NOTICES (%d)", notes),
+		fmt.Sprintf("5: LIVE HOST (%d)", live),
+	}
+}
+
+// Dashboard geometry constants shared by the renderer and mouse hit-testing.
+// They mirror the fixed vertical rhythm of renderDashboard:
+// brand banner -> blank band -> telemetry card -> blank band -> center area.
+const (
+	brandBannerHeight = 4                                       // 2 content lines + top/bottom border
+	blankBandHeight   = 2                                       // "\n\n" band between major dashboard sections
+	telemetryTabY     = brandBannerHeight + blankBandHeight + 1 // border top, then first content line
+	telemetryX0       = 3                                       // AppContainer padding (1) + CardBox border (1) + padding (1)
+	feedHeaderLines   = 5                                       // section header, blank, table header, separator, blank
+	feedRowStride     = 2                                       // finding row + trailing blank line
+	feedPaneInsetY    = 2                                       // FlightDeckRightPane border top + vertical padding top
+)
+
+// dashFeedGeom describes the clickable geometry of the dashboard findings
+// feed for the current terminal size and layout tier. The row window mirrors
+// renderFeedInner: start follows the selection so the selected row is visible.
+type dashFeedGeom struct {
+	firstRowY  int // absolute terminal line of the first visible finding row
+	rowStride  int // terminal lines per row (row + blank separator)
+	start      int // window start index into the current finding list
+	visible    int // visible row count (window + list bounded)
+	feedMaxX   int // rightmost clickable column, -1 = full width
+	inspectorY int // first terminal line of the inspector dock, -1 when absent
+}
+
+func (m Model) dashFeedGeom() dashFeedGeom {
+	list := m.currentList()
+
+	// Telemetry card content: tab bar + blank + stats line, plus the
+	// peak-finding pin line while a scan is running.
+	contentH := 3
+	if m.worstFinding != nil {
+		contentH++
+	}
+	topAfterTelemetry := brandBannerHeight + blankBandHeight + (contentH + 2) + blankBandHeight
+
+	cardWidth := m.width - 4
+	if cardWidth < 68 {
+		cardWidth = 68
 	}
 
-	alertPulse := !m.noAnim && time.Since(m.lastAlertAt) < 1500*time.Millisecond
-	var tabItems []string
-	for _, tab := range tabs {
-		if tab.id == 1 && alertPulse && (m.animFrame/4)%2 == 0 {
-			// New ALERT-class finding: draw the eye with a brief rose flash
-			// on the THREATS tab, decaying after 1.5s.
-			tabItems = append(tabItems, m.theme.BadgeAlert.Render(tab.label))
-		} else if m.dashboardTab == tab.id {
-			tabItems = append(tabItems, m.theme.TabBadgeActive.Render(tab.label))
-		} else {
-			tabItems = append(tabItems, m.theme.TabBadgeInactive.Render(tab.label))
+	g := dashFeedGeom{rowStride: feedRowStride, feedMaxX: -1, inspectorY: -1}
+
+	if cardWidth >= theme.TierStandard {
+		// Flight deck (>= 120 cols): feed pane sits directly below telemetry.
+		maxVisible := 6
+		if m.height > 28 {
+			maxVisible = 8
+		}
+		if m.height > 34 {
+			maxVisible = 12
+		}
+		g.firstRowY = topAfterTelemetry + feedPaneInsetY + feedHeaderLines
+		g.start, g.visible = feedWindow(m.selectedIndex, maxVisible, len(list))
+		// Inspector dock: below the feed box (2 border + 2 vertical padding +
+		// header + one stride per visible row) plus the blank band.
+		g.inspectorY = topAfterTelemetry + 4 + feedHeaderLines + feedRowStride*g.visible + blankBandHeight
+		return g
+	}
+
+	// Stacked layout (< 120 cols): the module status card above the feed
+	// wraps to a content-dependent height, so absolute row coordinates are
+	// not reliably predictable. Row and inspector clicks stay disabled;
+	// navigation falls back to keys and the mouse wheel. Tab clicks are
+	// unaffected (the tab row sits above all wrapping content).
+	maxVisible := 5
+	if m.height > 26 {
+		maxVisible = 7
+	}
+	g.firstRowY = -1
+	g.start, g.visible = feedWindow(m.selectedIndex, maxVisible, len(list))
+
+	// Split-pane mode narrows the feed to the left 62% of the card; clicks in
+	// the preview pane are not row clicks.
+	sel := m.SelectedFinding()
+	if sel != nil && cardWidth >= splitPaneMinWidth {
+		feedWidth := cardWidth * 62 / 100
+		if feedWidth-6 >= compactMinInnerWidth {
+			g.feedMaxX = telemetryX0 + feedWidth - 1
 		}
 	}
+	return g
+}
 
-	return strings.Join(tabItems, " ")
+// feedWindow returns the feed row window [start, start+visible) for the given
+// selection, mirroring the scroll logic in renderFeedInner.
+func feedWindow(selectedIndex, maxVisible, listLen int) (start, visible int) {
+	if listLen <= 0 {
+		return 0, 0
+	}
+	start = 0
+	if selectedIndex >= maxVisible {
+		start = selectedIndex - maxVisible + 1
+	}
+	if start > listLen-1 {
+		start = listLen - 1
+		if start < 0 {
+			start = 0
+		}
+	}
+	visible = listLen - start
+	if visible > maxVisible {
+		visible = maxVisible
+	}
+	return start, visible
+}
+
+// tabHitX maps a click column to a tab index (0-4) on the tab row, or -1.
+func (m Model) tabHitX(x int) int {
+	cursor := telemetryX0
+	for i, label := range m.tabLabels() {
+		w := runewidth.StringWidth(label)
+		if x >= cursor && x < cursor+w {
+			return i
+		}
+		cursor += w + 1 // single space separator
+	}
+	return -1
 }
 
 // runningSweepBar renders a 4-cell indeterminate activity indicator from
@@ -369,6 +493,8 @@ func (m Model) renderModuleMatrixPane(width, height int) string {
 		msg := "Initializing modules..."
 		if yara.IsCompiledIn() {
 			msg = "Loading YARA-X rules..."
+		} else {
+			msg = "Loading embedded signatures..."
 		}
 		b.WriteString(m.theme.ModuleRowPending.Render(m.spinner.View()+" "+msg) + "\n")
 	} else {
@@ -390,7 +516,12 @@ func (m Model) renderModuleMatrixPane(width, height int) string {
 				icon = m.spinner.View()
 				rowStyle = m.theme.ModuleRowRunning
 				hitsStr = fmt.Sprintf("%2dh", mod.Findings)
-				durStr = runningSweepBar(m.animFrame, m.noAnim)
+				// Live Command Deck readout: sweep bar + ticking elapsed.
+				elapsed := ""
+				if !mod.StartedAt.IsZero() && !m.noAnim {
+					elapsed = " " + m.formatDuration(time.Since(mod.StartedAt))
+				}
+				durStr = runningSweepBar(m.animFrame, m.noAnim) + elapsed
 			} else if mod.Finished {
 				if mod.Status == "NOT IMPLEMENTED" {
 					icon = m.theme.IconSkip()
@@ -554,9 +685,9 @@ func (m Model) renderBrandHeader(width int, statusText string) string {
 		}
 	}
 
-	yaraBadge := "[YARA: OFF]"
+	yaraBadge := "[SIG: PURE-GO]"
 	if yara.IsCompiledIn() {
-		yaraBadge = "[YARA: ON]"
+		yaraBadge = "[SIG: YARA-X]"
 	}
 
 	infoRow := fmt.Sprintf("Host: %s  │  Target: %s  │  Elapsed: %s  │  Workers: %d  │  %s  │  %s",
@@ -625,7 +756,24 @@ func (m Model) renderRiskGauge(width int, alerts, warnings int) string {
 		}
 	}
 
-	filled := (percent * gaugeWidth) / 100
+	// Command Deck verdict moment: the gauge fills over 600ms with an
+	// ease-out-quart curve when the finished screen first renders (DESIGN.md
+	// motion-draw). Static under --noAnim.
+	gaugeRatio := 1.0
+	if m.scanFinished && !m.noAnim && !m.finishedAt.IsZero() {
+		since := time.Since(m.finishedAt).Seconds()
+		const dur = 0.6
+		t := since / dur
+		if t > 1 {
+			t = 1
+		}
+		if t < 0 {
+			t = 0
+		}
+		// easeOutQuart: 1 - (1-t)^4
+		gaugeRatio = 1 - (1-t)*(1-t)*(1-t)*(1-t)
+	}
+	filled := int(float64(percent) * gaugeRatio * float64(gaugeWidth) / 100)
 	empty := gaugeWidth - filled
 	if empty < 0 {
 		empty = 0
@@ -1021,10 +1169,16 @@ func (m Model) renderFeedInner(width, maxVisible int, compact bool) (string, int
 		ts := f.Timestamp.Format("15:04:05")
 		prefix := "  "
 		if i == m.selectedIndex {
+			// 200ms bright pulse on the active rail right after a selection
+			// move (DESIGN.md motion-fast); settles back to the lit rail.
+			railStyle := m.theme.ActiveRail
+			if !m.noAnim && !m.lastSelectMove.IsZero() && time.Since(m.lastSelectMove) < 200*time.Millisecond {
+				railStyle = lipgloss.NewStyle().Foreground(theme.ColorTextPrim).Bold(true)
+			}
 			if m.theme.ASCII {
-				prefix = m.theme.ActiveRail.Render("> ")
+				prefix = railStyle.Render("> ")
 			} else {
-				prefix = m.theme.ActiveRail.Render(theme.GlyphActiveRail + " ")
+				prefix = railStyle.Render(theme.GlyphActiveRail + " ")
 			}
 		}
 
@@ -1142,7 +1296,7 @@ func (m Model) renderDetailModal() string {
 	b.WriteString(m.theme.ModalHeader.Render(title) + "\n\n")
 
 	// Render Tab Navigation Bar
-	tabTitles := []string{"[1] Assessment", "[2] Artifact", "[3] MITRE ATT&CK", "[4] Remediation"}
+	tabTitles := []string{"[1] Assessment", "[2] Artifact", "[3] Hex Inspector", "[4] MITRE ATT&CK", "[5] Remediation"}
 	var tabsRow strings.Builder
 	for i, tTitle := range tabTitles {
 		if i == m.activeTab {
@@ -1185,6 +1339,25 @@ func (m Model) renderDetailModal() string {
 		if f.Evidence != "" {
 			content.WriteString(fmt.Sprintf("\n%s\n  %s\n", m.theme.ModalFieldKey.Render("Matched Evidence:"), f.Evidence))
 		}
+		if f.Snippet != nil && len(f.Snippet.Lines) > 0 {
+			content.WriteString(fmt.Sprintf("\n%s\n", m.theme.SubSectionHeader.Render("SOURCE CODE CONTEXT & MATCH LINE:")))
+			for _, sl := range f.Snippet.Lines {
+				lineIndicator := "  "
+				lineNo := fmt.Sprintf("%4d │ ", sl.Number)
+				if sl.IsMatch {
+					lineIndicator = "▶ "
+					content.WriteString(fmt.Sprintf("  %s%s%s\n",
+						m.theme.BadgeAlert.Render(lineIndicator),
+						m.theme.ModalFieldKey.Render(lineNo),
+						m.theme.FindingRowSelected.Render(sl.Text)))
+				} else {
+					content.WriteString(fmt.Sprintf("  %s%s%s\n",
+						lineIndicator,
+						m.theme.FindingTimestamp.Render(lineNo),
+						sl.Text))
+				}
+			}
+		}
 		if len(f.Hashes) > 0 {
 			content.WriteString(fmt.Sprintf("\n%s\n", m.theme.ModalFieldKey.Render("Cryptographic Hashes:")))
 			for k, v := range f.Hashes {
@@ -1192,7 +1365,32 @@ func (m Model) renderDetailModal() string {
 			}
 		}
 
-	case 2: // MITRE ATT&CK
+	case 2: // Hex & Byte Inspector
+		content.WriteString(m.theme.SubSectionHeader.Render("RAW FORENSIC PAYLOAD BYTE DUMP (HEX / ASCII)") + "\n")
+		var rawBytes []byte
+		if f.EvidenceRecord != nil && f.EvidenceRecord.LineContent != "" {
+			rawBytes = []byte(f.EvidenceRecord.LineContent)
+		} else if f.Evidence != "" {
+			rawBytes = []byte(f.Evidence)
+		} else if f.Snippet != nil && len(f.Snippet.Lines) > 0 {
+			var sb strings.Builder
+			for _, l := range f.Snippet.Lines {
+				sb.WriteString(l.Text + "\n")
+			}
+			rawBytes = []byte(sb.String())
+		}
+		if len(rawBytes) == 0 {
+			content.WriteString(fmt.Sprintf("  Target Path: %s\n", f.Path))
+			if len(f.Hashes) > 0 {
+				content.WriteString(fmt.Sprintf("  SHA-256:     %s\n", f.Hashes["SHA256"]))
+			}
+			content.WriteString("  No in-memory raw payload bytes captured for this structural finding.\n")
+		} else {
+			content.WriteString(fmt.Sprintf("  Payload Size: %d bytes  │  Target: %s\n\n", len(rawBytes), runewidth.Truncate(f.Path, 50, "…")))
+			content.WriteString(formatHexDump(rawBytes, 512))
+		}
+
+	case 3: // MITRE ATT&CK
 		content.WriteString(m.theme.SubSectionHeader.Render("MITRE ATT&CK FRAMEWORK CLASSIFICATION") + "\n")
 		if len(f.MITRE) == 0 {
 			content.WriteString("  No MITRE ATT&CK techniques mapped to this finding.\n")
@@ -1205,7 +1403,7 @@ func (m Model) renderDetailModal() string {
 			}
 		}
 
-	case 3: // Remediation Plan
+	case 4: // Remediation Plan
 		content.WriteString(m.theme.SubSectionHeader.Render("RECOMMENDED CONTAINMENT & REMEDIATION PLAN") + "\n")
 		if len(f.Remediation) == 0 {
 			content.WriteString("  No specific remediation steps required for this finding.\n")
@@ -1249,10 +1447,10 @@ func (m Model) renderDetailModal() string {
 	}
 
 	footer := fmt.Sprintf("%s Tab   %s Scroll   %s Path   %s Hash   %s Cmd   %s Close",
-		m.theme.KeyCap.Render("[Tab/1-4]"),
+		m.theme.KeyCap.Render("[Tab/1-5]"),
 		m.theme.KeyCap.Render("[j/k]"),
-		m.theme.KeyCap.Render("[y]"),
-		m.theme.KeyCap.Render("[h]"),
+		m.theme.KeyCap.Render("[p]"),
+		m.theme.KeyCap.Render("[y/h]"),
 		m.theme.KeyCap.Render("[c]"),
 		m.theme.KeyCap.Render("[Esc]"),
 	)
@@ -1622,7 +1820,7 @@ func (m Model) renderProgressBar(width int) string {
 		return fmt.Sprintf("[%s %3.0f%%]", gaugeStyle.Render(b.String()), progressRatio*100)
 	}
 
-	bar := theme.RenderFractionalBar(trackWidth, progressRatio, m.theme.StatValueNotice, m.theme.FindingTimestamp, false)
+	bar := m.theme.RenderGradientBar(trackWidth, progressRatio, m.theme.FindingTimestamp, theme.AuroraRamp...)
 	return fmt.Sprintf("[%s %3.0f%%]", bar, progressRatio*100)
 }
 
@@ -1770,4 +1968,48 @@ func (m Model) renderTopRulesBars(cardWidth int, topRules []report.RuleSummary) 
 	}
 
 	return sb.String()
+}
+
+// formatHexDump formats byte slice into an authentic 16-byte aligned Hex/ASCII dump.
+func formatHexDump(data []byte, maxBytes int) string {
+	if len(data) == 0 {
+		return "  (No raw payload or snippet captured for this finding)\n"
+	}
+	if maxBytes > 0 && len(data) > maxBytes {
+		data = data[:maxBytes]
+	}
+
+	var b strings.Builder
+	b.WriteString("  OFFSET   00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F  │ ASCII DECODE\n")
+	b.WriteString("  ──────── ───────────────────────  ───────────────────────  │ ────────────────\n")
+
+	for i := 0; i < len(data); i += 16 {
+		end := i + 16
+		if end > len(data) {
+			end = len(data)
+		}
+		chunk := data[i:end]
+
+		b.WriteString(fmt.Sprintf("  %08X ", i))
+		for j := 0; j < 16; j++ {
+			if j == 8 {
+				b.WriteString(" ")
+			}
+			if j < len(chunk) {
+				b.WriteString(fmt.Sprintf("%02X ", chunk[j]))
+			} else {
+				b.WriteString("   ")
+			}
+		}
+		b.WriteString(" │ ")
+		for _, ch := range chunk {
+			if ch >= 32 && ch <= 126 {
+				b.WriteByte(ch)
+			} else {
+				b.WriteByte('.')
+			}
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }

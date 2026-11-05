@@ -499,7 +499,7 @@ var (
 	reLinkerHookValue     = regexp.MustCompile(`(?i)(LD_(?:AUDIT|PRELOAD|LIBRARY_PATH))\s*=\s*['"]?\s*([^\s'"]+)`)
 	rePamExecHook         = regexp.MustCompile(`(?i)(?:pam_exec\.so|pam_script\.so)\s+.*(?:/(?:tmp|var/tmp|dev/shm|root|home)|\/\.[a-zA-Z0-9_]+|\.sh\b|\.py\b|\.pl\b|seteuid)`)
 	reRansomwareScript    = regexp.MustCompile(`(?i)(?:from\s+cryptography\.fernet\s+import\s+Fernet|Crypto\.Cipher|AES\.new|ChaCha20|Fernet\()[\s\S]*(?:os\.walk|os\.scandir|rglob|glob\.glob|Path\.walk)[\s\S]*(?:\.encrypt\(|encrypt_file|os\.remove|\.locked|\.enc\b|ransom|RESCUE|DECRYPT|victim|TARGET_DIR)`)
-	reDataExfiltration    = regexp.MustCompile(`(?i)(?:(?:socket\.socket|socket\.create_connection|requests\.post|urllib\.request)[\s\S]*(?:os\.walk|os\.listdir|os\.scandir|iter_files|rglob|TARGET_DIR)[\s\S]*(?:sendall|send\(|socket\.send)|(?:exfil|exfiltrat|stealer)[\s\S]*(?:socket|requests|urllib|sendall|b64encode)|(?:zlib\.compress|base64\.b64encode)[\s\S]*(?:sendall|send\(|socket\.send))`)
+	reDataExfiltration    = regexp.MustCompile(`(?i)(?:(?:socket\.(?:socket|create_connection)|requests\.(?:post|put)|urllib\.request\.(?:urlopen|Request))[\s\S]{0,1000}(?:os\.(?:walk|listdir|scandir)|iter_files|rglob|TARGET_DIR)[\s\S]{0,1000}(?:sendall|send\(|socket\.send|requests\.(?:post|put))|(?:os\.(?:walk|listdir|scandir)|iter_files|rglob|TARGET_DIR)[\s\S]{0,1000}(?:socket\.(?:socket|create_connection)|requests\.(?:post|put)|urllib\.request\.(?:urlopen|Request))[\s\S]{0,1000}(?:sendall|send\(|socket\.send|requests\.(?:post|put))|(?:def\s+exfil|exfil(?:_data)?\s*=|class\s+\w*stealer|stealer\s*=)[\s\S]{0,1000}(?:socket\.(?:socket|create_connection)|requests\.(?:post|put)|sendall|socket\.send)|(?:zlib\.compress|base64\.b64encode)[\s\S]{0,1000}(?:sendall|socket\.send))`)
 	reExfilServer         = regexp.MustCompile(`(?i)socket\.socket[\s\S]*\.bind\s*\(\s*\([\s\S]*\.listen[\s\S]*\.accept[\s\S]*(?:zlib\.decompress|base64\.b64decode|exfil|stolen|victim|tree\.json|dump_payload)`)
 )
 
@@ -591,6 +591,18 @@ func isMediaOrArchiveExt(path string) bool {
 		".jar", ".apk", ".war", ".ear", ".whl", ".gem", ".nupkg", ".vsix",
 		".db", ".sqlite", ".sqlite3", ".mdb", ".idx",
 		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx":
+		return true
+	}
+	return false
+}
+
+// isCompiledSourceExt returns true if the file extension belongs to compiled
+// programming languages (Go, Rust, C, C++) where source files outside volatile
+// paths without shebangs or execute permissions must not be evaluated as scripts.
+func isCompiledSourceExt(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".go", ".rs", ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp":
 		return true
 	}
 	return false
@@ -803,6 +815,11 @@ func isScriptOrTextCandidate(path string, data []byte, cfg *config.Config, modeO
 		return false
 	}
 
+	// 3b. Rejection of compiled language source files outside volatile/web paths without shebang or execute bit
+	if !inVolatileOrWeb && !isExec && isCompiledSourceExt(cleaned) {
+		return false
+	}
+
 	// 4. Fast text-likeness ratio: printable ASCII + whitespace >= 85% in first 4KB.
 	// Closes shebang-less script bypasses (Python socket shells, Bash, Perl, PHP).
 	if isTextLikeness(data) {
@@ -914,6 +931,32 @@ func CheckAllSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.Packa
 }
 
 func evaluateScriptChunk(cleaned string, data []byte, isDoc, isTest, isInTemp bool, cfg *config.Config) []*HeuristicMatch {
+	matches := evaluateScriptChunkRaw(cleaned, data, isDoc, isTest, isInTemp, cfg)
+
+	// Anti-evasion: if potential shell quoting/concatenation evasion is present, evaluate dequoted stream
+	if len(data) <= 1024*1024 {
+		if dequoted := tryShellDequote(data); dequoted != nil {
+			deqMatches := evaluateScriptChunkRaw(cleaned, dequoted, isDoc, isTest, isInTemp, cfg)
+			for _, dm := range deqMatches {
+				exists := false
+				for _, m := range matches {
+					if m.Name == dm.Name {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					dm.Reason += " (detected via shell de-quoting anti-evasion)"
+					matches = append(matches, dm)
+				}
+			}
+		}
+	}
+
+	return matches
+}
+
+func evaluateScriptChunkRaw(cleaned string, data []byte, isDoc, isTest, isInTemp bool, cfg *config.Config) []*HeuristicMatch {
 
 	// If documentation metadata outside volatile temp directories, suppress non-critical dropper/server/exfil text examples
 	if isDoc && !isInTemp {
@@ -1044,7 +1087,7 @@ func evaluateScriptChunk(cleaned string, data []byte, isDoc, isTest, isInTemp bo
 	}
 
 	// 11. Data Exfiltration Stealer
-	if (bytes.Contains(data, []byte("send")) || bytes.Contains(data, []byte("post")) || bytes.Contains(data, []byte("exfil")) || bytes.Contains(data, []byte("stealer")) || bytes.Contains(data, []byte("b64encode"))) && reDataExfiltration.Match(data) {
+	if !isDoc && (!isTest || isInTemp) && (bytes.Contains(data, []byte("send")) || bytes.Contains(data, []byte("post")) || bytes.Contains(data, []byte("exfil")) || bytes.Contains(data, []byte("stealer")) || bytes.Contains(data, []byte("b64encode"))) && reDataExfiltration.Match(data) {
 		matches = append(matches, &HeuristicMatch{
 			Name:     "Script_Data_Exfiltration_Stealer",
 			Reason:   fmt.Sprintf("Automated filesystem harvesting and network exfiltration routine in script %s", filepath.Base(cleaned)),
@@ -1104,6 +1147,62 @@ func evaluateScriptChunk(cleaned string, data []byte, isDoc, isTest, isInTemp bo
 	}
 
 	return matches
+}
+
+// heuristicMatchOffset re-locates the first match of a named script heuristic
+// within data, for matched-line snippet capture on the finding path. It runs
+// only when a finding has already been produced, so the extra regex pass is
+// negligible. Returns -1 when the rule has no positional pattern or does not
+// re-match (e.g. linker hijack decided by value inspection, not one regex).
+func heuristicMatchOffset(name string, data []byte) int {
+	var re *regexp.Regexp
+	switch name {
+	case "Script_Process_Hiding_Procfs":
+		re = reProcHiding
+	case "Script_OpenSSL_Reverse_Shell":
+		re = reOpenSSLRevShell
+	case "Script_Reverse_Shell_Interactive":
+		re = reRevShellInteractive
+	case "Script_Netcat_Reverse_Shell":
+		re = reNetcatRevShell
+	case "Script_Socat_Reverse_Shell":
+		re = reSocatRevShell
+	case "Script_Reverse_Shell_Inline":
+		re = reInlineScriptRev
+	case "Webshell_PHP_Generic_Backdoor":
+		re = reWebshellGeneric
+	case "Script_Webshell_Traits":
+		re = reWebshellTraits
+	case "Script_Download_And_Execute":
+		re = reDownloadAndExec
+	case "Script_Python_Ransomware_Encryptor":
+		re = reRansomwareScript
+	case "Script_Data_Exfiltration_Stealer":
+		re = reDataExfiltration
+	case "Script_C2_Exfiltration_Server":
+		re = reExfilServer
+	case "Script_PowerShell_Encoded_Execution":
+		re = rePowerShellEncoded
+	case "Persistence_PAM_Exec_Suspicious":
+		re = rePamExecHook
+	case "Script_Cloud_Exfiltration_Tool":
+		re = reCloudExfilTool
+	case "Persistence_Linker_Audit_Hijack":
+		if loc := reLinkerHookDirect.FindIndex(data); loc != nil {
+			return loc[0]
+		}
+		if loc := reLinkerHookValue.FindIndex(data); loc != nil {
+			return loc[0]
+		}
+		return -1
+	default:
+		return -1
+	}
+	loc := re.FindIndex(data)
+	if loc == nil {
+		return -1
+	}
+	return loc[0]
 }
 
 // CheckSuspiciousScriptContent evaluates file bytes for malicious script patterns,

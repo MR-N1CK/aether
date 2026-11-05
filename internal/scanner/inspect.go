@@ -586,6 +586,30 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 			ContributingDetectors: contributing,
 		}
 
+		// Matched-line snippet from the in-memory buffer: prefer the primary
+		// rule's own match offset, then original-buffer YARA offsets. Matches
+		// from decode layers reference the deobfuscated content, not this
+		// buffer, so their offsets are skipped.
+		snippetOffset := heuristicMatchOffset(primaryRule, inspectData)
+		if snippetOffset < 0 {
+			for _, ym := range yaraMatches {
+				if deobf, ok := ym.Metadata["deobfuscated"].(bool); ok && deobf {
+					continue
+				}
+				if ym.FirstOffset >= 0 && ym.FirstOffset < len(inspectData) {
+					snippetOffset = ym.FirstOffset
+					break
+				}
+			}
+		}
+		if snippetOffset >= 0 {
+			f.Snippet = report.CaptureSnippet(inspectData, snippetOffset)
+			if lineText, lineNo := f.Snippet.MatchedLine(); lineNo > 0 {
+				f.EvidenceRecord.LineContent = lineText
+				f.EvidenceRecord.LineNumber = lineNo
+			}
+		}
+
 		isDoc := strings.Contains(virtPath, ".dist-info/") || strings.Contains(virtPath, ".egg-info/") ||
 			strings.HasSuffix(virtPath, ".md") || strings.HasSuffix(virtPath, ".rst") || strings.HasSuffix(virtPath, ".txt")
 		isTestFixture := (isPkgOwned || strings.Contains(virtPath, "/usr/lib/") || strings.Contains(virtPath, "/usr/share/")) &&

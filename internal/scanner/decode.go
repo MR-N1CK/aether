@@ -26,12 +26,17 @@ const (
 )
 
 var (
-	base64Pattern = regexp.MustCompile(`[A-Za-z0-9+/=]{32,}`)
-	hexPattern    = regexp.MustCompile(`(?:\\x[0-9a-fA-F]{2}){16,}|[0-9a-fA-F]{32,}`)
-	reRevEcho     = regexp.MustCompile(`(?:echo|printf)\s+(?:'([^']{16,})'|"([^"]{16,})")\s*\|\s*(?:ba|z|da)?sh\s*\|\s*rev|(?:echo|printf)\s+(?:'([^']{16,})'|"([^"]{16,})")\s*\|\s*rev`)
-	reRevHeredoc  = regexp.MustCompile(`rev\s*<<<\s*(?:'([^']{16,})'|"([^"]{16,})")`)
-	reRevPython   = regexp.MustCompile(`(?:'([^']{16,})'|"([^"]{16,})")\[::-1\]`)
-	reRot13       = regexp.MustCompile(`str_rot13\s*\(\s*(?:'([^']{16,})'|"([^"]{16,})")\s*\)`)
+	base64Pattern      = regexp.MustCompile(`[A-Za-z0-9+/=]{32,}`)
+	hexPattern         = regexp.MustCompile(`(?:\\x[0-9a-fA-F]{2}){16,}|[0-9a-fA-F]{32,}`)
+	reRevEcho          = regexp.MustCompile(`(?:echo|printf)\s+(?:'([^']{16,})'|"([^"]{16,})")\s*\|\s*(?:ba|z|da)?sh\s*\|\s*rev|(?:echo|printf)\s+(?:'([^']{16,})'|"([^"]{16,})")\s*\|\s*rev`)
+	reRevHeredoc       = regexp.MustCompile(`rev\s*<<<\s*(?:'([^']{16,})'|"([^"]{16,})")`)
+	reRevPython        = regexp.MustCompile(`(?:'([^']{16,})'|"([^"]{16,})")\[::-1\]`)
+	reRot13            = regexp.MustCompile(`str_rot13\s*\(\s*(?:'([^']{16,})'|"([^"]{16,})")\s*\)`)
+	rePythonB64        = regexp.MustCompile(`(?i)(?:__import__\s*\(\s*['"]base64['"]\s*\)\.b64decode|base64\.b64decode)\s*\(\s*b?['"]([A-Za-z0-9+/=]{16,})['"]\s*\)`)
+	rePythonHex        = regexp.MustCompile(`(?i)(?:__import__\s*\(\s*['"]binascii['"]\s*\)\.unhexlify|binascii\.unhexlify)\s*\(\s*b?['"]([0-9a-fA-F]{16,})['"]\s*\)`)
+	reB64PipeSh        = regexp.MustCompile(`(?:echo|printf)\s+(?:'([A-Za-z0-9+/=]{16,})'|"([A-Za-z0-9+/=]{16,})")\s*\|\s*base64\s+-(?:d|-decode)`)
+	reSingleCharSingle = regexp.MustCompile(`'([a-zA-Z0-9_\-\./])'`)
+	reSingleCharDouble = regexp.MustCompile(`"([a-zA-Z0-9_\-\./])"`)
 )
 
 // tryGzipDecompress attempts to decompress gzip or zlib data up to maxBytes.
@@ -261,9 +266,111 @@ func extractDecodedCandidates(data []byte, maxBytes int64) []decodedCandidate {
 				}
 			}
 		}
+
+		// 7. Scan for Python dynamic base64/hex decode patterns
+		for _, m := range rePythonB64.FindAllSubmatch(data, 5) {
+			if len(m) > 1 && len(m[1]) >= 16 {
+				if dec, ok := tryBase64Decode(m[1]); ok {
+					addResult(dec, "base64")
+				}
+			}
+		}
+		for _, m := range rePythonHex.FindAllSubmatch(data, 5) {
+			if len(m) > 1 && len(m[1]) >= 16 {
+				if dec, ok := tryHexDecode(m[1]); ok {
+					addResult(dec, "hex")
+				}
+			}
+		}
+		for _, m := range reB64PipeSh.FindAllSubmatch(data, 5) {
+			for i := 1; i < len(m); i++ {
+				if len(m[i]) >= 16 {
+					if dec, ok := tryBase64Decode(m[i]); ok {
+						addResult(dec, "base64")
+					}
+					break
+				}
+			}
+		}
+
+		// 8. Shell concatenation / de-quoting evasion
+		if dequoted := tryShellDequote(data); dequoted != nil {
+			addResult(dequoted, "dequote")
+		}
 	}
 
 	return results
+}
+
+// tryShellDequote normalizes bash concatenation and character escaping evasion:
+// - Removes empty quote pairs: ba”sh -> bash, c""url -> curl
+// - Unquotes single characters inside words: b'a's'h -> bash, c"u"r"l -> curl
+// - Strips obfuscating backslashes before alphanumeric/path characters: b\ash -> bash, \b\a\s\h -> bash, \/bin\/sh -> /bin/sh
+func tryShellDequote(data []byte) []byte {
+	if len(data) < 8 || len(data) > 1024*1024 {
+		return nil
+	}
+	hasEmptySingle := bytes.Contains(data, []byte("''"))
+	hasEmptyDouble := bytes.Contains(data, []byte(`""`))
+	hasBackslash := bytes.Contains(data, []byte(`\`))
+	hasQuote := bytes.Contains(data, []byte("'")) || bytes.Contains(data, []byte(`"`))
+
+	if !hasEmptySingle && !hasEmptyDouble && !hasBackslash && !hasQuote {
+		return nil
+	}
+
+	work := data
+
+	// 1. Remove empty quotes
+	if hasEmptySingle {
+		work = bytes.ReplaceAll(work, []byte("''"), nil)
+	}
+	if hasEmptyDouble {
+		work = bytes.ReplaceAll(work, []byte(`""`), nil)
+	}
+
+	// 2. Unquote single-character fragments in words (e.g. b'a's'h -> bash, c"u"r"l -> curl)
+	if hasQuote {
+		work = reSingleCharSingle.ReplaceAll(work, []byte("$1"))
+		work = reSingleCharDouble.ReplaceAll(work, []byte("$1"))
+	}
+
+	// 3. Strip backslashes escaping ASCII letters or path separators
+	if hasBackslash {
+		var buf bytes.Buffer
+		buf.Grow(len(work))
+		for i := 0; i < len(work); i++ {
+			if work[i] == '\\' && i+1 < len(work) {
+				next := work[i+1]
+				// Preserve \xHH for hex decode
+				if (next == 'x' || next == 'X') && i+3 < len(work) && isHex(work[i+2]) && isHex(work[i+3]) {
+					buf.WriteByte('\\')
+					continue
+				}
+				// Preserve standard C escapes \n, \r, \t, \0, \\
+				if next == 'n' || next == 'r' || next == 't' || next == '0' || next == '\\' {
+					buf.WriteByte('\\')
+					continue
+				}
+				// Strip backslash before ASCII letter, digit, '/', '-', '_'
+				if (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') ||
+					(next >= '0' && next <= '9') || next == '/' || next == '-' || next == '_' {
+					continue
+				}
+			}
+			buf.WriteByte(work[i])
+		}
+		work = buf.Bytes()
+	}
+
+	if !bytes.Equal(work, data) {
+		return work
+	}
+	return nil
+}
+
+func isHex(b byte) bool {
+	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
 }
 
 func tryRevDecode(b []byte) []byte {

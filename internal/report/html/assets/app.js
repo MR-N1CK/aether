@@ -567,6 +567,41 @@
     });
   }
 
+  // 5b. Hexdump Byte Formatter
+  function formatHexDump(str, maxBytes) {
+    if (!str) return '(No payload data captured)';
+    var bytes = [];
+    for (var i = 0; i < str.length && (!maxBytes || i < maxBytes); i++) {
+      bytes.push(str.charCodeAt(i) & 0xff);
+    }
+    var out = 'OFFSET    00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F  │ ASCII DECODE\n';
+    out += '────────  ───────────────────────  ───────────────────────  │ ────────────────\n';
+    for (var o = 0; o < bytes.length; o += 16) {
+      var hexPart1 = '', hexPart2 = '', asciiPart = '';
+      var offStr = ('00000000' + o.toString(16).toUpperCase()).slice(-8);
+      for (var j = 0; j < 8; j++) {
+        if (o + j < bytes.length) {
+          var b = bytes[o + j];
+          hexPart1 += ('0' + b.toString(16).toUpperCase()).slice(-2) + ' ';
+          asciiPart += (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.';
+        } else {
+          hexPart1 += '   ';
+        }
+      }
+      for (var k = 8; k < 16; k++) {
+        if (o + k < bytes.length) {
+          var b2 = bytes[o + k];
+          hexPart2 += ('0' + b2.toString(16).toUpperCase()).slice(-2) + ' ';
+          asciiPart += (b2 >= 32 && b2 <= 126) ? String.fromCharCode(b2) : '.';
+        } else {
+          hexPart2 += '   ';
+        }
+      }
+      out += offStr + '  ' + hexPart1 + ' ' + hexPart2 + ' │ ' + asciiPart + '\n';
+    }
+    return out;
+  }
+
   // 6. Detail Drawer Rendering
   function renderDrawerFinding(f) {
     clearChildren(drawerBody);
@@ -659,6 +694,23 @@
       evField.appendChild(evHdr);
       evField.appendChild(renderCodeBlockWithLines(f.evidence));
       evidCard.appendChild(evField);
+    }
+
+    // Forensic Hexdump / Byte Inspector View
+    var rawTextPayload = f.evidence || (f.evidence_record && f.evidence_record.line_content) || '';
+    if (rawTextPayload) {
+      var hexField = el('div', 'drawer-field');
+      var hexHdr = el('div', 'field-header');
+      hexHdr.appendChild(el('span', 'drawer-field-label', 'Forensic Byte Dump & Hex Inspector'));
+      var hexDumpStr = formatHexDump(rawTextPayload, 512);
+      var copyHexBtn = el('button', 'btn-copy-sm', 'Copy Hex');
+      copyHexBtn.addEventListener('click', function() { copyText(hexDumpStr, copyHexBtn); });
+      hexHdr.appendChild(copyHexBtn);
+      hexField.appendChild(hexHdr);
+      var hexWrap = el('div', 'hexdump-container');
+      hexWrap.appendChild(el('pre', 'hexdump-code', hexDumpStr));
+      hexField.appendChild(hexWrap);
+      evidCard.appendChild(hexField);
     }
 
     if (f.hashes && Object.keys(f.hashes).length > 0) {
@@ -1052,7 +1104,479 @@
     wrap.appendChild(svg);
   }
 
+  // 8. Threat Entity & Process Topology Graph (HTML5 Canvas)
+  function initThreatGraph() {
+    var canvas = document.getElementById('threat-graph-canvas');
+    if (!canvas || !canvas.getContext) return;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    var container = document.getElementById('graph-container');
+    function resizeCanvas() {
+      if (container) {
+        var rect = container.getBoundingClientRect();
+        if (rect.width > 200) {
+          canvas.width = Math.floor(rect.width);
+          canvas.height = 380;
+        }
+      }
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Build Graph Model
+    var hostLabel = reportData.hostname || 'Target Host';
+    var nodes = [];
+    var links = [];
+    var nodeMap = {};
+
+    function addNode(id, label, type, severity, queryTerm) {
+      if (nodeMap[id]) return nodeMap[id];
+      var color = '#8b5cf6';
+      var r = 10;
+      if (type === 'host') {
+        color = '#8b5cf6'; r = 16;
+      } else if (type === 'process') {
+        color = '#38bdf8'; r = 12;
+      } else if (type === 'socket') {
+        color = '#22d3ee'; r = 10;
+      } else if (type === 'persistence') {
+        color = '#fbbf24'; r = 11;
+      } else if (type === 'threat') {
+        color = (severity === 'ALERT' || severity === 'CRITICAL') ? '#ff3b6b' : '#ffb020';
+        r = 13;
+      }
+      var n = {
+        id: id,
+        label: label,
+        type: type,
+        severity: severity,
+        queryTerm: queryTerm || label,
+        color: color,
+        r: r,
+        x: canvas.width / 2,
+        y: canvas.height / 2,
+        vx: 0,
+        vy: 0
+      };
+      nodes.push(n);
+      nodeMap[id] = n;
+      return n;
+    }
+
+    function addLink(sourceId, targetId) {
+      links.push({ source: sourceId, target: targetId });
+    }
+
+    // Root Host Node
+    addNode('host', hostLabel, 'host', 'INFO', hostLabel);
+
+    // Populate Entities from findings
+    var procCount = 0, socketCount = 0, persistCount = 0, threatCount = 0;
+    allFindings.forEach(function(f, i) {
+      var sourceNodeId = 'host';
+
+      // 1. Process entity
+      var pid = (f.evidence_record && f.evidence_record.pid) ? f.evidence_record.pid : null;
+      var comm = (f.evidence_record && f.evidence_record.comm) ? f.evidence_record.comm : '';
+      if (pid && procCount < 12) {
+        var procId = 'proc_' + pid;
+        var procLbl = (comm ? comm + ' ' : '') + '(PID ' + pid + ')';
+        addNode(procId, procLbl, 'process', f.severity, String(pid));
+        addLink('host', procId);
+        sourceNodeId = procId;
+        procCount++;
+      }
+
+      // 2. Network Sockets
+      var sock = (f.evidence_record && f.evidence_record.socket_info) ? f.evidence_record.socket_info : null;
+      if (!sock && f.module === 'network' && f.path && f.path.indexOf(':') !== -1) {
+        sock = f.path;
+      }
+      if (sock && socketCount < 10) {
+        var sockId = 'sock_' + i;
+        addNode(sockId, sock, 'socket', f.severity, sock);
+        addLink(sourceNodeId, sockId);
+        socketCount++;
+      }
+
+      // 3. Persistence entity
+      if (f.module === 'persistence' && persistCount < 12) {
+        var persistId = 'persist_' + i;
+        var persistLbl = f.path ? f.path.split('/').pop() : f.rule_name;
+        addNode(persistId, persistLbl, 'persistence', f.severity, persistLbl);
+        addLink(sourceNodeId, persistId);
+        persistCount++;
+      }
+
+      // 4. Alert / Payload entity
+      if ((f.severity === 'ALERT' || f.severity === 'CRITICAL' || f.module === 'filesystem') && threatCount < 16) {
+        var threatId = 'threat_' + i;
+        var threatLbl = f.path ? f.path.split('/').pop() : f.rule_name;
+        addNode(threatId, threatLbl, 'threat', f.severity, f.path || f.rule_name);
+        addLink(sourceNodeId, threatId);
+        threatCount++;
+      }
+    });
+
+    // Orbit distribution layout around center
+    var cx = canvas.width / 2;
+    var cy = canvas.height / 2;
+    nodeMap['host'].x = cx;
+    nodeMap['host'].y = cy;
+
+    var childNodes = nodes.filter(function(n) { return n.id !== 'host'; });
+    var totalChildren = childNodes.length;
+
+    for (var ci = 0; ci < totalChildren; ci++) {
+      var angle = (ci / totalChildren) * 2 * Math.PI;
+      var dist = 110 + (ci % 3) * 45;
+      childNodes[ci].x = cx + Math.cos(angle) * dist;
+      childNodes[ci].y = cy + Math.sin(angle) * dist;
+    }
+
+    // Animation loop & Particle Render
+    var hoveredNode = null;
+    var pulseFrame = 0;
+
+    function renderGraph() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      pulseFrame += 0.03;
+
+      if (totalChildren === 0) {
+        ctx.fillStyle = '#10b981';
+        ctx.font = 'bold 14px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('✔  CLEAN ENDPOINT — ZERO MALICIOUS TOPOLOGY RESIDUE DETECTED', canvas.width / 2, canvas.height / 2);
+        return;
+      }
+
+      // 1. Draw Links
+      links.forEach(function(l) {
+        var s = nodeMap[l.source];
+        var t = nodeMap[l.target];
+        if (!s || !t) return;
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(t.x, t.y);
+        ctx.strokeStyle = 'rgba(139, 92, 246, 0.22)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        // Animated packet dot
+        var progress = (Math.sin(pulseFrame + (s.x + t.y) * 0.01) + 1) / 2;
+        var px = s.x + (t.x - s.x) * progress;
+        var py = s.y + (t.y - s.y) * progress;
+        ctx.beginPath();
+        ctx.arc(px, py, 2, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.75)';
+        ctx.fill();
+      });
+
+      // 2. Draw Nodes
+      nodes.forEach(function(n) {
+        var isHovered = (hoveredNode && hoveredNode.id === n.id);
+        var r = isHovered ? n.r + 4 : n.r;
+
+        // Outer Glow
+        var grad = ctx.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, r * 2.2);
+        grad.addColorStop(0, n.color);
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r * 2.2, 0, 2 * Math.PI);
+        ctx.fill();
+
+        // Node Body
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
+        ctx.fillStyle = n.color;
+        ctx.fill();
+        ctx.strokeStyle = isHovered ? '#ffffff' : 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = isHovered ? 2.5 : 1;
+        ctx.stroke();
+
+        // Node Label
+        ctx.fillStyle = isHovered ? '#ffffff' : '#c7d2fe';
+        ctx.font = (isHovered ? 'bold 11px' : '10px') + ' -apple-system, monospace';
+        ctx.textAlign = 'center';
+        var displayLbl = n.label.length > 20 ? n.label.slice(0, 18) + '…' : n.label;
+        ctx.fillText(displayLbl, n.x, n.y + r + 13);
+      });
+
+      requestAnimationFrame(renderGraph);
+    }
+    requestAnimationFrame(renderGraph);
+
+    // Canvas Mouse Interaction
+    function getNodeAt(x, y) {
+      for (var i = nodes.length - 1; i >= 0; i--) {
+        var n = nodes[i];
+        var dx = x - n.x;
+        var dy = y - n.y;
+        if (dx * dx + dy * dy <= (n.r + 6) * (n.r + 6)) {
+          return n;
+        }
+      }
+      return null;
+    }
+
+    canvas.addEventListener('mousemove', function(e) {
+      var rect = canvas.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var y = e.clientY - rect.top;
+      hoveredNode = getNodeAt(x, y);
+      canvas.style.cursor = hoveredNode ? 'pointer' : 'crosshair';
+    });
+
+    canvas.addEventListener('click', function(e) {
+      var rect = canvas.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var y = e.clientY - rect.top;
+      var clicked = getNodeAt(x, y);
+      if (clicked && clicked.queryTerm && searchInput) {
+        currentSearch = clicked.queryTerm;
+        searchInput.value = clicked.queryTerm;
+        renderTable();
+        var tbl = document.getElementById('findings-table');
+        if (tbl) tbl.scrollIntoView({ behavior: 'smooth' });
+      }
+    });
+
+    var resetBtn = document.getElementById('btn-graph-reset');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', function() {
+        cx = canvas.width / 2;
+        cy = canvas.height / 2;
+        nodeMap['host'].x = cx;
+        nodeMap['host'].y = cy;
+        for (var ci = 0; ci < totalChildren; ci++) {
+          var angle = (ci / totalChildren) * 2 * Math.PI;
+          var dist = 110 + (ci % 3) * 45;
+          childNodes[ci].x = cx + Math.cos(angle) * dist;
+          childNodes[ci].y = cy + Math.sin(angle) * dist;
+        }
+      });
+    }
+  }
+
+  // 9. Keyboard Shortcuts & Power-User Controls
+  function initShortcutsAndNavigation() {
+    var shortcutsOverlay = document.getElementById('shortcuts-overlay');
+    var btnShortcuts = document.getElementById('btn-shortcuts');
+    var shortcutsClose = document.getElementById('shortcuts-close');
+
+    function toggleShortcuts() {
+      if (!shortcutsOverlay) return;
+      var isHidden = (shortcutsOverlay.style.display === 'none');
+      shortcutsOverlay.style.display = isHidden ? 'flex' : 'none';
+      shortcutsOverlay.setAttribute('aria-hidden', isHidden ? 'false' : 'true');
+    }
+
+    if (btnShortcuts) {
+      btnShortcuts.addEventListener('click', toggleShortcuts);
+    }
+    if (shortcutsClose) {
+      shortcutsClose.addEventListener('click', toggleShortcuts);
+    }
+    if (shortcutsOverlay) {
+      shortcutsOverlay.addEventListener('click', function(e) {
+        if (e.target === shortcutsOverlay) toggleShortcuts();
+      });
+    }
+
+    document.addEventListener('keydown', function(e) {
+      var tag = (document.activeElement && document.activeElement.tagName) ? document.activeElement.tagName.toLowerCase() : '';
+      var isTyping = (tag === 'input' || tag === 'textarea' || tag === 'select');
+
+      // Global Escape
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        if (shortcutsOverlay && shortcutsOverlay.style.display !== 'none') {
+          shortcutsOverlay.style.display = 'none';
+          shortcutsOverlay.setAttribute('aria-hidden', 'true');
+          return;
+        }
+        if (drawerOverlay && drawerOverlay.style.display !== 'none') {
+          closeDrawer();
+          return;
+        }
+        if (searchInput && searchInput.value) {
+          searchInput.value = '';
+          currentSearch = '';
+          renderTable();
+          return;
+        }
+      }
+
+      if (isTyping) return;
+
+      // Focus Search: '/' or Cmd+K
+      if (e.key === '/' || ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K'))) {
+        e.preventDefault();
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
+        return;
+      }
+
+      // Help Modal: '?'
+      if (e.key === '?') {
+        e.preventDefault();
+        toggleShortcuts();
+        return;
+      }
+
+      // Theme toggle: 't'
+      if (e.key === 't' || e.key === 'T') {
+        if (themeToggle) themeToggle.click();
+        return;
+      }
+
+      // Print report: 'p'
+      if (e.key === 'p' || e.key === 'P') {
+        if (btnPrint) btnPrint.click();
+        return;
+      }
+
+      // Export CSV: 'e'
+      if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        exportCSV();
+        return;
+      }
+
+      // Row Navigation: 'j' (down), 'k' (up)
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        if (currentFilteredFindings.length > 0) {
+          e.preventDefault();
+          var nextIdx = currentFilteredIndex + 1;
+          if (nextIdx >= currentFilteredFindings.length) nextIdx = 0;
+          currentFilteredIndex = nextIdx;
+          renderDrawerFinding(currentFilteredFindings[currentFilteredIndex]);
+          if (drawerOverlay && drawerOverlay.style.display !== 'none') {
+            openDrawer();
+          }
+        }
+        return;
+      }
+
+      if (e.key === 'k' || e.key === 'ArrowUp') {
+        if (currentFilteredFindings.length > 0) {
+          e.preventDefault();
+          var prevIdx = currentFilteredIndex - 1;
+          if (prevIdx < 0) prevIdx = currentFilteredFindings.length - 1;
+          currentFilteredIndex = prevIdx;
+          renderDrawerFinding(currentFilteredFindings[currentFilteredIndex]);
+          if (drawerOverlay && drawerOverlay.style.display !== 'none') {
+            openDrawer();
+          }
+        }
+        return;
+      }
+
+      // Open finding in drawer: 'Enter'
+      if (e.key === 'Enter' && currentFilteredIndex >= 0 && currentFilteredIndex < currentFilteredFindings.length) {
+        e.preventDefault();
+        renderDrawerFinding(currentFilteredFindings[currentFilteredIndex]);
+        openDrawer();
+      }
+    });
+  }
+
+  // 10. Clickable Kill-Chain and MITRE Tech Chips
+  function bindKillchainAndTechClicks() {
+    // Kill-chain tactic nodes
+    document.querySelectorAll('.kill-stage').forEach(function(stageEl) {
+      stageEl.style.cursor = 'pointer';
+      stageEl.addEventListener('click', function() {
+        var titleEl = stageEl.querySelector('title');
+        if (titleEl && searchInput) {
+          var tactic = titleEl.textContent.split(' — ')[0];
+          if (tactic) {
+            currentSearch = tactic;
+            searchInput.value = tactic;
+            renderTable();
+            var tbl = document.getElementById('findings-table');
+            if (tbl) tbl.scrollIntoView({ behavior: 'smooth' });
+          }
+        }
+      });
+    });
+
+    // MITRE technique chips
+    document.querySelectorAll('.btn-tech-chip').forEach(function(chip) {
+      chip.addEventListener('click', function() {
+        var techId = chip.getAttribute('data-tech-id') || '';
+        if (techId && searchInput) {
+          currentSearch = techId;
+          searchInput.value = techId;
+          renderTable();
+          var tbl = document.getElementById('findings-table');
+          if (tbl) tbl.scrollIntoView({ behavior: 'smooth' });
+        }
+      });
+    });
+  }
+
+  // Command Deck scrollspy mini-nav (DESIGN.md §6): a fixed section index
+  // built from the report's own headings — DOM-safe (createElement/textContent
+  // only, never markup injection).
+  function initCommandDeckNav() {
+    var headings = document.querySelectorAll('h2.section-title');
+    if (headings.length < 3) return;
+
+    var items = [];
+    headings.forEach(function(h) {
+      var section = h.closest('section');
+      if (!section) return;
+      if (!section.id) section.id = 'cd-sec-' + (items.length + 1);
+      items.push({ id: section.id, label: (h.textContent || '').trim() });
+    });
+    if (items.length < 3) return;
+
+    var nav = el('nav', 'cd-mininav');
+    nav.setAttribute('aria-label', 'Report sections');
+    var links = {};
+    items.forEach(function(item) {
+      var a = el('a', null, item.label);
+      a.href = '#' + item.id;
+      a.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        var target = document.getElementById(item.id);
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      links[item.id] = a;
+      nav.appendChild(a);
+    });
+    document.body.appendChild(nav);
+
+    if (typeof IntersectionObserver === 'undefined') return;
+    var activeId = null;
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          var id = entry.target.id;
+          if (id === activeId) return;
+          activeId = id;
+          Object.keys(links).forEach(function(key) {
+            if (key === id) links[key].classList.add('active');
+            else links[key].classList.remove('active');
+          });
+        }
+      });
+    }, { rootMargin: '-35% 0px -55% 0px' });
+    items.forEach(function(item) {
+      var target = document.getElementById(item.id);
+      if (target) observer.observe(target);
+    });
+  }
+
   initCountUp();
   initReveal();
   buildTimeline();
+  initThreatGraph();
+  initShortcutsAndNavigation();
+  bindKillchainAndTechClicks();
+  initCommandDeckNav();
 })();

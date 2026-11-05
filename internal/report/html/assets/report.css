@@ -715,3 +715,117 @@ th[aria-sort="ascending"] .th-sort-ind, th[aria-sort="descending"] .th-sort-ind 
   text-shadow: 0 0 7px rgba(139, 92, 246, 0.5);
 }
 [data-theme="light"] .chip-new { color: #553bb0; background: rgba(109, 87, 246, 0.1); }
+
+/* -- 23. Threat Entity Topology & Process Graph -------------------------------- */
+.graph-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; gap: 14px; flex-wrap: wrap; }
+.graph-controls { display: flex; gap: 8px; }
+.graph-container {
+  position: relative; width: 100%; border-radius: var(--radius);
+  background: radial-gradient(ellipse at center, rgba(16, 21, 40, 0.95), rgba(7, 9, 18, 0.98));
+  border: 1px solid var(--glass-border); overflow: hidden;
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.6);
+}
+[data-theme="light"] .graph-container {
+  background: radial-gradient(ellipse at center, rgba(245, 247, 255, 0.95), rgba(230, 233, 247, 0.98));
+}
+#threat-graph-canvas { display: block; width: 100%; height: auto; cursor: crosshair; }
+.graph-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; padding: 8px 12px; border-radius: 8px; background: var(--glass); border: 1px solid var(--glass-border); font-size: 11.5px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--text-mid); font-family: var(--font-mono); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot-host { background: #8b5cf6; box-shadow: 0 0 8px rgba(139, 92, 246, 0.6); }
+.dot-proc { background: #38bdf8; box-shadow: 0 0 8px rgba(56, 189, 248, 0.6); }
+.dot-net { background: #22d3ee; box-shadow: 0 0 8px rgba(34, 211, 238, 0.6); }
+.dot-persist { background: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.6); }
+.dot-threat { background: #ff3b6b; box-shadow: 0 0 8px rgba(255, 59, 107, 0.7); }
+
+/* -- 24. Hexdump & Forensic Byte Inspector -------------------------------------- */
+.hexdump-container { margin-top: 8px; border-radius: 8px; overflow-x: auto; background: #05070d; border: 1px solid rgba(139, 92, 246, 0.25); }
+.hexdump-code {
+  margin: 0; padding: 12px 14px; font-family: var(--font-mono); font-size: 11px;
+  line-height: 1.5; color: #a5f3fc; white-space: pre; letter-spacing: 0.04em;
+}
+[data-theme="light"] .hexdump-container { background: #1e2235; }
+[data-theme="light"] .hexdump-code { color: #67e8f9; }
+
+/* -- 25. Keyboard Shortcuts HUD Modal ------------------------------------------ */
+.shortcuts-overlay {
+  position: fixed; inset: 0; z-index: 1000; background: rgba(5, 7, 13, 0.78);
+  backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center;
+}
+.shortcuts-modal {
+  width: 90%; max-width: 480px; background: var(--bg-deep); border: 1px solid var(--glass-border-lit);
+  border-radius: var(--radius-lg); padding: 22px; box-shadow: var(--glow-accent);
+}
+.shortcuts-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.shortcuts-title { font-size: 15px; font-weight: 800; color: var(--text-hi); }
+.shortcuts-list { display: flex; flex-direction: column; gap: 10px; }
+.shortcut-row { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; }
+.kbd-key {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  padding: 3px 8px; border-radius: 6px; background: var(--glass-strong);
+  border: 1px solid var(--glass-border); color: var(--accent-2);
+}
+
+/* ==========================================================================
+   Command Deck layer (DESIGN.md) — draw-on charts, mini-nav, light parity
+   ========================================================================== */
+
+/* -- Draw-on: donut segments reveal in sequence (geometry-safe: the arcs
+   keep their computed dash offsets; only opacity animates). --------------- */
+.donut-segment { opacity: 0; animation: donut-seg-in 0.6s var(--ease-out) forwards; }
+.donut-segment:nth-of-type(1) { animation-delay: 0.10s; }
+.donut-segment:nth-of-type(2) { animation-delay: 0.18s; }
+.donut-segment:nth-of-type(3) { animation-delay: 0.26s; }
+.donut-segment:nth-of-type(4) { animation-delay: 0.34s; }
+.donut-segment:nth-of-type(5) { animation-delay: 0.42s; }
+@keyframes donut-seg-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* -- Draw-on: kill-chain nodes pop in with a stagger along the chain. ----- */
+.killchain-svg .kill-node-hit,
+.killchain-svg .kill-node-none { animation: node-pop 0.6s var(--ease-out) backwards; }
+.killchain-svg g:nth-of-type(1) .kill-node-hit, .killchain-svg g:nth-of-type(1) .kill-node-none { animation-delay: 0.05s; }
+.killchain-svg g:nth-of-type(2) .kill-node-hit, .killchain-svg g:nth-of-type(2) .kill-node-none { animation-delay: 0.15s; }
+.killchain-svg g:nth-of-type(3) .kill-node-hit, .killchain-svg g:nth-of-type(3) .kill-node-none { animation-delay: 0.25s; }
+.killchain-svg g:nth-of-type(4) .kill-node-hit, .killchain-svg g:nth-of-type(4) .kill-node-none { animation-delay: 0.35s; }
+.killchain-svg g:nth-of-type(5) .kill-node-hit, .killchain-svg g:nth-of-type(5) .kill-node-none { animation-delay: 0.45s; }
+.killchain-svg g:nth-of-type(n+6) .kill-node-hit, .killchain-svg g:nth-of-type(n+6) .kill-node-none { animation-delay: 0.55s; }
+@keyframes node-pop {
+  from { opacity: 0; transform: translateY(6px) scale(0.92); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* -- Scrollspy mini-nav (built by app.js; fixed, unobtrusive) ------------- */
+.cd-mininav {
+  position: fixed; top: 18px; right: 18px; z-index: 40;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 10px; padding: 8px 6px; backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.cd-mininav a {
+  display: block; font-size: 10.5px; font-weight: 600; letter-spacing: 0.4px;
+  text-transform: uppercase; text-decoration: none; white-space: nowrap;
+  color: var(--text-low); padding: 4px 10px; border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.cd-mininav a:hover { color: var(--text-high); background: var(--glass-strong); }
+.cd-mininav a.active {
+  color: var(--accent-2); border-left-color: var(--accent-2);
+  background: rgba(56, 189, 248, 0.08);
+}
+@media (max-width: 1180px) { .cd-mininav { display: none; } }
+@media print { .cd-mininav { display: none !important; } }
+
+/* -- Light theme aurora parity: the light world keeps its washes but at a
+   brightness/opacity that reads on paper-white surfaces. ------------------ */
+[data-theme="light"] .aurora-a,
+[data-theme="light"] .aurora-b { opacity: 0.16; filter: blur(90px) saturate(1.2); }
+[data-theme="light"] .cd-mininav {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(60, 66, 96, 0.16);
+}
+[data-theme="light"] .cd-mininav a { color: #3c4260; }
+[data-theme="light"] .cd-mininav a.active {
+  color: #4f46e5; border-left-color: #4f46e5; background: rgba(79, 70, 229, 0.08);
+}

@@ -1187,3 +1187,42 @@ func TestHTMLReport_DetectionTimeline(t *testing.T) {
 		t.Fatal("reduced-motion guard missing")
 	}
 }
+
+// 21. Threat Topology Graph, Hexdump Inspector, and Keyboard Shortcuts HUD.
+func TestHTMLReport_ThreatGraph_Hexdump_Shortcuts(t *testing.T) {
+	rep, err := htmlreport.GenerateHTMLReport(sampleReportData())
+	if err != nil {
+		t.Fatalf("GenerateHTMLReport failed: %v", err)
+	}
+	out := string(rep)
+
+	// Threat Topology Canvas & Legend
+	if !strings.Contains(out, `id="threat-graph-section"`) {
+		t.Fatal("threat topology graph section missing")
+	}
+	if !strings.Contains(out, `id="threat-graph-canvas"`) {
+		t.Fatal("threat topology graph canvas missing")
+	}
+	if !strings.Contains(out, "function initThreatGraph") {
+		t.Fatal("threat graph initializer missing in JS")
+	}
+
+	// Hexdump Byte Inspector
+	if !strings.Contains(out, "function formatHexDump") {
+		t.Fatal("formatHexDump missing in embedded JS")
+	}
+	if !strings.Contains(out, "Forensic Byte Dump & Hex Inspector") {
+		t.Fatal("hex inspector title missing in JS")
+	}
+
+	// Keyboard Shortcuts Modal & Buttons
+	if !strings.Contains(out, `id="shortcuts-overlay"`) {
+		t.Fatal("shortcuts overlay dialog missing in HTML")
+	}
+	if !strings.Contains(out, `id="btn-shortcuts"`) {
+		t.Fatal("shortcuts button missing in header")
+	}
+	if !strings.Contains(out, "function initShortcutsAndNavigation") {
+		t.Fatal("shortcuts and navigation initializer missing in JS")
+	}
+}

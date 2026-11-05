@@ -361,6 +361,100 @@ func CheckFilelessExecution(info *ProcessInfo, cfg *config.Config) []*ProcessSig
 	return signals
 }
 
+var knownJITBinaries = map[string]bool{
+	"node":               true,
+	"nodejs":             true,
+	"deno":               true,
+	"bun":                true,
+	"java":               true,
+	"jvm":                true,
+	"chrome":             true,
+	"chromium":           true,
+	"brave":              true,
+	"electron":           true,
+	"code":               true,
+	"slack":              true,
+	"discord":            true,
+	"firefox":            true,
+	"firefox-esr":        true,
+	"firefox-bin":        true,
+	"librewolf":          true,
+	"waterfox":           true,
+	"epiphany":           true,
+	"dotnet":             true,
+	"mono":               true,
+	"pypy":               true,
+	"pypy3":              true,
+	"luajit":             true,
+	"qemu-system-x86_64": true,
+	"qemu-x86_64":        true,
+	"qemu-aarch64":       true,
+}
+
+// browserContentComms are process titles that Firefox-style browsers assign
+// to their child processes via PR_SET_NAME (truncated to 15 characters).
+// These children are SpiderMonkey/Gecko JIT runtimes that legitimately carry
+// anonymous RWX regions, and their comm never matches the browser binary
+// name — so the binary-name exemption above cannot catch them.
+var browserContentComms = map[string]bool{
+	"web content":     true,
+	"webextensions":   true,
+	"privileged cont": true,
+	"socket process":  true,
+	"rdd process":     true,
+	"gpu process":     true,
+	"utility proces":  true,
+}
+
+func isJITProcess(info *ProcessInfo) bool {
+	comm := strings.ToLower(strings.TrimSpace(info.Comm))
+	if knownJITBinaries[comm] {
+		return true
+	}
+	if browserContentComms[comm] {
+		return true
+	}
+	if info.Exe != "" {
+		exeBase := strings.ToLower(filepath.Base(strings.TrimSuffix(info.Exe, " (deleted)")))
+		if knownJITBinaries[exeBase] {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckAnonymousRWXInjection detects anonymous Read-Write-Execute (RWX) memory regions
+// in non-JIT processes, indicative of in-memory shellcode or reflective injection.
+func CheckAnonymousRWXInjection(info *ProcessInfo, cfg *config.Config) *ProcessSignal {
+	if isJITProcess(info) {
+		return nil
+	}
+
+	for _, m := range info.Maps {
+		// Must have Read, Write, and Execute permissions simultaneously
+		if !strings.Contains(m.Perms, "r") || !strings.Contains(m.Perms, "w") || !strings.Contains(m.Perms, "x") {
+			continue
+		}
+
+		path := strings.TrimSpace(m.Pathname)
+		// Anonymous mappings: empty pathname or [anon:...] (excluding stack/heap/vdso/vsyscall)
+		isAnon := path == "" || strings.HasPrefix(path, "[anon")
+		if !isAnon || path == "[heap]" || path == "[stack]" || path == "[vdso]" || path == "[vsyscall]" {
+			continue
+		}
+
+		return &ProcessSignal{
+			RuleName:    "Process_Anonymous_RWX_Memory_Injection",
+			Reason:      fmt.Sprintf("Process %q (PID %d) has anonymous Read-Write-Execute (RWX) memory region (0x%x-0x%x), indicative of in-memory shellcode injection", info.Comm, info.PID, m.StartAddr, m.EndAddr),
+			Score:       85,
+			Severity:    report.SeverityAlert,
+			IsPathBased: false,
+			IsStrong:    true,
+		}
+	}
+	return nil
+}
+
 // CheckMasquerading detects processes masquerading as kernel threads or system daemons.
 func CheckMasquerading(info *ProcessInfo, cfg *config.Config) *ProcessSignal {
 	score := cfg.Scan.ScoreProcMasquerade
@@ -711,6 +805,15 @@ func hookValueSeen(v string) bool {
 	return strings.TrimSpace(v) != ""
 }
 
+// knownSandboxShims are bare-name LD_PRELOAD values set by an application's
+// own sandbox framework and resolved through the ld.so cache — never a
+// path the invoking user controls. Firefox sets LD_PRELOAD=libmozsandbox.so
+// in every content process for its seccomp sandbox broker, which otherwise
+// trips the non-absolute-path tier on stock installs.
+var knownSandboxShims = map[string]bool{
+	"libmozsandbox.so": true,
+}
+
 // classifyLinkerHook inspects a dynamic linker hook value (LD_PRELOAD / LD_AUDIT) and
 // returns a suspicion tier with a plain-English reason:
 //
@@ -738,6 +841,12 @@ func classifyLinkerHook(value string) (int, string) {
 	for _, raw := range strings.FieldsFunc(clean, func(r rune) bool { return r == ':' || r == ' ' || r == '\t' }) {
 		p := filepath.Clean(strings.TrimSpace(raw))
 		if p == "" || p == "." {
+			continue
+		}
+		// Bare sandbox-shim names resolve through the ld.so cache to the
+		// application's own libraries; only exempt the exact bare name so a
+		// staged /tmp/libmozsandbox.so still flags as volatile.
+		if !filepath.IsAbs(p) && knownSandboxShims[strings.ToLower(p)] {
 			continue
 		}
 		if !filepath.IsAbs(p) {

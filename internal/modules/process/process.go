@@ -218,6 +218,9 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 		if sigs := CheckFilelessExecution(info, cfg); len(sigs) > 0 {
 			signals = append(signals, sigs...)
 		}
+		if s := CheckAnonymousRWXInjection(info, cfg); s != nil {
+			signals = append(signals, s)
+		}
 		if s := CheckMasquerading(info, cfg); s != nil {
 			signals = append(signals, s)
 		}

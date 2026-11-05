@@ -1025,3 +1025,140 @@ func TestReadProcessInfo_EnvironParsing(t *testing.T) {
 		t.Errorf("expected JUSTKEY to be present in Environ map")
 	}
 }
+
+func TestCheckAnonymousRWXInjection(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// 1. JIT process (node) with anonymous RWX: must NOT be flagged
+	jitProc := &process.ProcessInfo{
+		PID:  101,
+		Comm: "node",
+		Exe:  "/usr/bin/node",
+		Maps: []process.MapEntry{
+			{StartAddr: 0x7f000000, EndAddr: 0x7f001000, Perms: "rwxp", Pathname: ""},
+			{StartAddr: 0x7f001000, EndAddr: 0x7f002000, Perms: "rwxp", Pathname: "[anon:v8-jit]"},
+		},
+	}
+	if sig := process.CheckAnonymousRWXInjection(jitProc, cfg); sig != nil {
+		t.Errorf("expected nil for JIT runtime with RWX mapping, got %+v", sig)
+	}
+
+	// 2. Non-JIT daemon (sshd) with normal W^X memory: must NOT be flagged
+	cleanDaemon := &process.ProcessInfo{
+		PID:  102,
+		Comm: "sshd",
+		Exe:  "/usr/sbin/sshd",
+		Maps: []process.MapEntry{
+			{StartAddr: 0x55550000, EndAddr: 0x55560000, Perms: "r-xp", Pathname: "/usr/sbin/sshd"},
+			{StartAddr: 0x55570000, EndAddr: 0x55580000, Perms: "rw-p", Pathname: "/usr/sbin/sshd"},
+			{StartAddr: 0x7fff0000, EndAddr: 0x7fff1000, Perms: "rw-p", Pathname: "[stack]"},
+			{StartAddr: 0x7fff2000, EndAddr: 0x7fff3000, Perms: "r--p", Pathname: ""},
+		},
+	}
+	if sig := process.CheckAnonymousRWXInjection(cleanDaemon, cfg); sig != nil {
+		t.Errorf("expected nil for normal daemon with W^X memory, got %+v", sig)
+	}
+
+	// 3. Non-JIT daemon (nginx) with anonymous RWX memory: MUST trigger ALERT
+	compromisedDaemon := &process.ProcessInfo{
+		PID:  103,
+		Comm: "nginx",
+		Exe:  "/usr/sbin/nginx",
+		Maps: []process.MapEntry{
+			{StartAddr: 0x55550000, EndAddr: 0x55560000, Perms: "r-xp", Pathname: "/usr/sbin/nginx"},
+			{StartAddr: 0x7f500000, EndAddr: 0x7f510000, Perms: "rwxp", Pathname: ""},
+		},
+	}
+	sig := process.CheckAnonymousRWXInjection(compromisedDaemon, cfg)
+	if sig == nil {
+		t.Fatalf("expected signal for non-JIT daemon with anonymous RWX memory, got nil")
+	}
+	if sig.RuleName != "Process_Anonymous_RWX_Memory_Injection" {
+		t.Errorf("expected Process_Anonymous_RWX_Memory_Injection, got %s", sig.RuleName)
+	}
+	if sig.Severity != report.SeverityAlert {
+		t.Errorf("expected ALERT severity, got %v", sig.Severity)
+	}
+	if !sig.IsStrong {
+		t.Errorf("expected IsStrong to be true")
+	}
+}
+
+func TestCheckAnonymousRWXInjection_BrowserContentProcesses(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	anonRWX := []process.MapEntry{
+		{StartAddr: 0x7f500000, EndAddr: 0x7f510000, Perms: "rwxp", Pathname: ""},
+	}
+
+	// Firefox content processes rename their comm via PR_SET_NAME ("Web
+	// Content", "WebExtensions", ...) so the binary-name exemption never
+	// matches, and Exe can be unreadable at scan time. Their JIT regions are
+	// legitimate and must not alert.
+	firefoxFamily := []struct {
+		comm string
+		exe  string
+	}{
+		{"Web Content", ""},
+		{"WebExtensions", ""},
+		{"Privileged Cont", ""},
+		{"Socket Process", ""},
+		{"web content", "/usr/lib/firefox/firefox"},
+		{"Web Content", "/usr/lib/firefox-esr/firefox-esr"},
+	}
+	for _, tc := range firefoxFamily {
+		info := &process.ProcessInfo{PID: 200, Comm: tc.comm, Exe: tc.exe, Maps: anonRWX}
+		if sig := process.CheckAnonymousRWXInjection(info, cfg); sig != nil {
+			t.Errorf("comm=%q exe=%q: expected nil (browser JIT), got %+v", tc.comm, tc.exe, sig)
+		}
+	}
+
+	// Control: identical RWX mapping on a non-browser comm must still alert.
+	info := &process.ProcessInfo{PID: 201, Comm: "Web Content Loader", Exe: "", Maps: anonRWX}
+	if sig := process.CheckAnonymousRWXInjection(info, cfg); sig == nil {
+		t.Error("expected signal for look-alike comm outside the exemption set")
+	}
+}
+
+func TestClassifyLinkerHook_FirefoxSandboxShim(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// Firefox sets LD_PRELOAD=libmozsandbox.so (bare ld.so-cache name) in
+	// every content process; it must not trip the non-absolute-path tier.
+	firefoxBroker := &process.ProcessInfo{
+		PID:  300,
+		Comm: "Web Content",
+		Environ: map[string]string{
+			"LD_PRELOAD": "libmozsandbox.so",
+		},
+	}
+	if sigs := process.CheckProcessEnviron(firefoxBroker, cfg); len(sigs) != 0 {
+		t.Fatalf("expected no signals for Firefox sandbox shim preload, got %+v", sigs)
+	}
+
+	// Control 1: an attacker staging the same name under /tmp still flags
+	// (path prefix is never shim-exempt).
+	staged := &process.ProcessInfo{
+		PID:  301,
+		Comm: "evil_app",
+		Environ: map[string]string{
+			"LD_PRELOAD": "/tmp/libmozsandbox.so",
+		},
+	}
+	sigs := process.CheckProcessEnviron(staged, cfg)
+	if len(sigs) == 0 || sigs[0].RuleName != "Process_Environ_LDPreload" {
+		t.Fatalf("expected LDPreload alert for staged volatile shim, got %+v", sigs)
+	}
+
+	// Control 2: any other bare library name remains non-absolute-suspicious.
+	unknownBare := &process.ProcessInfo{
+		PID:  302,
+		Comm: "evil_app",
+		Environ: map[string]string{
+			"LD_PRELOAD": "libhook.so",
+		},
+	}
+	if sigs := process.CheckProcessEnviron(unknownBare, cfg); len(sigs) == 0 {
+		t.Fatal("expected alert for non-absolute unknown preload")
+	}
+}

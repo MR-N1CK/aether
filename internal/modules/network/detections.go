@@ -28,6 +28,35 @@ var defaultRawSocketAllowlist = map[string]bool{
 	"arping":           true,
 }
 
+var interactiveShellBinaries = map[string]bool{
+	"sh":   true,
+	"bash": true,
+	"dash": true,
+	"zsh":  true,
+	"ksh":  true,
+	"csh":  true,
+	"tcsh": true,
+	"ash":  true,
+	"fish": true,
+}
+
+func isInteractiveShellProcess(owner *ProcessSocketOwner) bool {
+	if owner == nil || owner.IsKernel {
+		return false
+	}
+	comm := strings.ToLower(strings.TrimSpace(owner.Comm))
+	if interactiveShellBinaries[comm] {
+		return true
+	}
+	if owner.ExePath != "" {
+		exeBase := strings.ToLower(filepath.Base(owner.ExePath))
+		if interactiveShellBinaries[exeBase] {
+			return true
+		}
+	}
+	return false
+}
+
 func isRawSocketAllowed(owner *ProcessSocketOwner) bool {
 	if owner == nil {
 		return false
@@ -193,6 +222,32 @@ func EvaluateNetworkDetections(
 					findings = append(findings, f)
 				}
 			}
+		}
+
+		// 1b. Active Outbound Interactive Reverse Shell Connection
+		if s.RemIP != nil && s.State == "ESTABLISHED" && !isLoopbackIP(s.RemIP) && isInteractiveShellProcess(s.Owner) {
+			reason := fmt.Sprintf("Interactive shell process %q (PID %d, %s) maintains active outbound network connection to %s:%d (active reverse shell)",
+				s.Owner.Comm, s.Owner.PID, s.Owner.ExePath, s.RemIP, s.RemPort)
+			f := report.NewFinding("network", report.SeverityAlert, fmt.Sprintf("/proc/net/%s", s.Protocol), reason, "Network_Outbound_Interactive_Shell_Connection")
+			f.Metadata["remote_ip"] = s.RemIP.String()
+			f.Metadata["remote_port"] = s.RemPort
+			f.Metadata["local_ip"] = s.LocalIP.String()
+			f.Metadata["local_port"] = s.LocalPort
+			f.Metadata["state"] = s.State
+			f.Metadata["protocol"] = s.Protocol
+			f.Metadata["pid"] = s.Owner.PID
+			f.Metadata["comm"] = s.Owner.Comm
+			f.Metadata["exe"] = s.Owner.ExePath
+			f.Metadata["score"] = 95
+			if f.EvidenceRecord != nil {
+				f.EvidenceRecord.PID = s.Owner.PID
+				f.EvidenceRecord.Comm = s.Owner.Comm
+				f.EvidenceRecord.TargetPath = s.Owner.ExePath
+				f.EvidenceRecord.SocketInfo = fmt.Sprintf("%s:%d -> %s:%d", s.LocalIP, s.LocalPort, s.RemIP, s.RemPort)
+				f.EvidenceRecord.MountNamespace = s.Owner.MntNs
+				f.EvidenceRecord.EvidenceStrength = report.StrengthDirect
+			}
+			findings = append(findings, f)
 		}
 
 		// 2. Loopback Listeners (Grouped into one INFO finding)

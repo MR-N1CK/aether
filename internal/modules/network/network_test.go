@@ -2,6 +2,7 @@ package network_test
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -484,5 +485,87 @@ func TestNetwork_LoopbackListeners_GroupedIntoOneFinding(t *testing.T) {
 	listenersList, ok := lf.Metadata["listeners"].([]map[string]interface{})
 	if !ok || len(listenersList) != 3 {
 		t.Errorf("expected 3 listener entries in metadata, got: %v", lf.Metadata["listeners"])
+	}
+}
+
+func TestNetwork_OutboundInteractiveShellConnection(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cov := &network.NetworkCoverage{}
+
+	sockets := []network.SocketEntry{
+		// 1. Normal daemon connection: established connection to external IP
+		{
+			Protocol:  "tcp",
+			LocalIP:   net.ParseIP("192.168.1.50"),
+			LocalPort: 45678,
+			RemIP:     net.ParseIP("93.184.216.34"),
+			RemPort:   443,
+			State:     "ESTABLISHED",
+			Owner: &network.ProcessSocketOwner{
+				PID:     1200,
+				Comm:    "curl",
+				ExePath: "/usr/bin/curl",
+			},
+		},
+		// 2. Interactive bash reverse shell: established connection to external IP
+		{
+			Protocol:  "tcp",
+			LocalIP:   net.ParseIP("192.168.1.50"),
+			LocalPort: 34567,
+			RemIP:     net.ParseIP("198.51.100.22"),
+			RemPort:   4444,
+			State:     "ESTABLISHED",
+			Owner: &network.ProcessSocketOwner{
+				PID:     1337,
+				Comm:    "bash",
+				ExePath: "/usr/bin/bash",
+			},
+		},
+		// 3. Interactive sh shell connection to loopback: not flagged as external reverse shell
+		{
+			Protocol:  "tcp",
+			LocalIP:   net.ParseIP("127.0.0.1"),
+			LocalPort: 54321,
+			RemIP:     net.ParseIP("127.0.0.1"),
+			RemPort:   8080,
+			State:     "ESTABLISHED",
+			Owner: &network.ProcessSocketOwner{
+				PID:     1338,
+				Comm:    "sh",
+				ExePath: "/bin/sh",
+			},
+		},
+	}
+
+	findings := network.EvaluateNetworkDetections(
+		context.Background(),
+		sockets,
+		true,
+		cfg,
+		nil,
+		cov,
+		slog.Default(),
+	)
+
+	var revShellFindings []report.Finding
+	for _, f := range findings {
+		if f.RuleName == "Network_Outbound_Interactive_Shell_Connection" {
+			revShellFindings = append(revShellFindings, f)
+		}
+	}
+
+	if len(revShellFindings) != 1 {
+		t.Fatalf("expected 1 reverse shell finding, got %d", len(revShellFindings))
+	}
+
+	rf := revShellFindings[0]
+	if rf.Severity != report.SeverityAlert {
+		t.Errorf("expected ALERT severity, got %v", rf.Severity)
+	}
+	if rf.Metadata["pid"] != 1337 || rf.Metadata["comm"] != "bash" {
+		t.Errorf("expected PID 1337 and comm bash, got PID %v comm %v", rf.Metadata["pid"], rf.Metadata["comm"])
+	}
+	if rf.Metadata["score"] != 95 {
+		t.Errorf("expected score 95, got %v", rf.Metadata["score"])
 	}
 }

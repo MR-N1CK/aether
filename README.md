@@ -23,7 +23,7 @@ Every capability listed below is implemented in this repository and validated by
 
 ### 2. Verified Heuristic & YARA-X Signature Rules
 
-> **Build Notice**: The named YARA rules below run **only in YARA builds** (`make build-yara` or `make build-yara-static` with `-tags yara`), which link `libyara_x_capi`. The default binary (`bin/aether` compiled via pure Go `make build`) evaluates native pure-Go regex heuristics ([`internal/scanner/heuristics.go`](internal/scanner/heuristics.go)).
+> **Build Notice**: The embedded threat signatures below are active in **every build**. Default binaries (`make build`, `CGO_ENABLED=0`) evaluate them with the **pure-Go fallback signature engine** ([`internal/yara/fallback_engine.go`](internal/yara/fallback_engine.go)), a dependency-free interpreter for the embedded rule subset; YARA builds (`make build-yara` / `make build-yara-static` with `-tags yara`, linking `libyara_x_capi`) evaluate the same rule source with **YARA-X** ([`internal/yara/yarax_engine.go`](internal/yara/yarax_engine.go)). Both engines compile the identical embedded source ([`internal/yara/embedded_rules.go`](internal/yara/embedded_rules.go)), and a cross-engine parity test ([`internal/yara/fallback_parity_test.go`](internal/yara/fallback_parity_test.go)) guarantees identical verdicts. In addition to signatures, the default build always evaluates native pure-Go regex heuristics ([`internal/scanner/heuristics.go`](internal/scanner/heuristics.go)).
 >
 > **Signature Note**: Rootkit and known-family detection rules (such as `Linux_Rootkit_Diamorphine_Reptile_Strings`, `Linux_Webshell_PHP_Known_Families`, and `Linux_Implant_RedTeam_Persistence_Framework`) are string matches for known samples and repository artifacts only; they are not generic behavioral kernel hooks.
 
@@ -213,4 +213,4 @@ make test-yara
 
 ## License
 
-License: TBD (owner to choose)
+License: Apache-2.0 (see [LICENSE](LICENSE)).

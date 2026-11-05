@@ -119,6 +119,22 @@ type EvidenceRecord struct {
 	ConfidenceRationale   string                `json:"confidence_rationale"`             // Plain-English justification
 }
 
+// SnippetLine is one rendered line of matched-file context.
+type SnippetLine struct {
+	Number  int    `json:"number"`   // 1-based source line number
+	Text    string `json:"text"`     // Truncated line content (max 240 chars)
+	IsMatch bool   `json:"is_match"` // True for the line containing the match
+}
+
+// SnippetContext captures the matched line plus surrounding context from the
+// in-memory scan buffer at detection time. It is forensic-read-only: the
+// capture never re-opens the target file.
+type SnippetContext struct {
+	Lines      []SnippetLine `json:"lines"`
+	MatchIndex int           `json:"match_index"` // Index into Lines of the match line
+	MatchCol   int           `json:"match_col"`   // 0-based rune column where the match starts
+}
+
 // MITREMapping associates a finding with an enterprise MITRE ATT&CK technique.
 type MITREMapping struct {
 	Tactic        string `json:"tactic"`
@@ -160,6 +176,7 @@ type Finding struct {
 	EvidenceRecord      *EvidenceRecord        `json:"evidence_record,omitempty"`
 	EvidenceStrength    EvidenceStrength       `json:"evidence_strength,omitempty"`
 	ConfidenceRationale string                 `json:"confidence_rationale,omitempty"`
+	Snippet             *SnippetContext        `json:"snippet,omitempty"`
 }
 
 // NewFinding creates a populated Finding with the current local timestamp (with timezone offset).
@@ -267,7 +284,7 @@ func PopulateFindingDetails(f *Finding) {
 
 	case strings.Contains(rule, "redteam") || strings.Contains(rule, "persistence_framework") || strings.Contains(rule, "ghostshell") || strings.Contains(rule, "kali_master"):
 		f.Title = "Red-Team Stealth Implant & Persistence Framework"
-		f.Why = "The script contains signatures of an automated red-team persistence framework (such as GhostShell/Kali-Master), including stealth procfs process hiding, fake systemd/cron hooks, and persistent reverse shell listeners."
+		f.Why = "The script contains signatures of an automated red-team persistence framework (such as Ghost-Framework or automated persistence toolkits), including stealth procfs process hiding, fake systemd/cron hooks, and persistent reverse shell listeners."
 		f.MITRE = []MITREMapping{
 			{Tactic: "Persistence", Technique: "T1547", TechniqueName: "Boot or Logon Autostart Execution"},
 			{Tactic: "Defense Evasion", Technique: "T1564.001", TechniqueName: "Hidden Files and Directories"},

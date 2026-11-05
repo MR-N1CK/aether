@@ -517,6 +517,14 @@ func registerProcessRules() {
 		[]string{"Inspect the mapping's permissions and content where accessible.", "Correlate with network and persistence findings."},
 		ConfidenceMedium)
 
+	m("Process_Anonymous_RWX_Memory_Injection",
+		"Anonymous Read-Write-Execute (RWX) Memory Injection",
+		"A non-JIT process has an anonymous memory region with simultaneous Read, Write, and Execute (rwx) permissions. Standard compiled binaries enforce W^X (Write XOR Execute); anonymous RWX memory in standard daemons or system utilities indicates in-memory shellcode or reflective DLL/ELF injection.",
+		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1620", TechniqueName: "Reflective Code Loading"}, {Tactic: "Execution", Technique: "T1055", TechniqueName: "Process Injection"}},
+		[]string{"Capture process memory dump (/proc/<pid>/mem) for offline forensic analysis.", "Immediately terminate the compromised process (`kill -9 <PID>`).", "Inspect the parent process and network connections for the initial compromise vector."},
+		ConfidenceHigh,
+		StrengthDirect)
+
 	m("Process_Kernel_Thread_Masquerade",
 		"Process Masquerading as Kernel Thread",
 		"A user-space process uses bracketed naming (e.g. [kworker/...]) but has user-space memory mappings, masquerading as a kernel thread.",
@@ -582,6 +590,14 @@ func registerNetworkRules() {
 		[]MITREMapping{{Tactic: "Credential Access", Technique: "T1040", TechniqueName: "Network Sniffing"}},
 		[]string{"Inspect the process binary and command line.", "Terminate unauthorized packet-capturing processes.", "Audit CAP_NET_RAW grants."},
 		ConfidenceMedium)
+
+	m("Network_Outbound_Interactive_Shell_Connection",
+		"Active Outbound Interactive Reverse Shell Connection",
+		"An interactive command shell (bash, sh, dash, zsh) process maintains an active outbound network connection. Command shells do not establish direct network connections during legitimate operation; this pattern represents an active interactive reverse shell.",
+		[]MITREMapping{{Tactic: "Execution", Technique: "T1059.004", TechniqueName: "Unix Shell"}, {Tactic: "Command and Control", Technique: "T1071", TechniqueName: "Application Layer Protocol"}},
+		[]string{"Immediately terminate the rogue shell process (`kill -9 <PID>`).", "Inspect /proc/<pid>/fd and open network sockets to identify the remote C2 controller.", "Sever network connections and quarantine the affected host."},
+		ConfidenceHigh,
+		StrengthDirect)
 
 	m("Network_Loopback_Listener",
 		"Local Loopback Network Listener",
@@ -1051,7 +1067,7 @@ func registerScannerRules() {
 		[]MITREMapping{{Tactic: "Exfiltration", Technique: "T1041", TechniqueName: "Exfiltration Over C2 Channel"}},
 		[]string{"Inspect firewall logs for the exfiltration destination and quarantine the client script."},
 		ConfidenceHigh,
-		StrengthDirect)
+		StrengthContextual)
 
 	m("Linux_Malware_Data_Exfiltration_Server",
 		"Data Exfiltration Collection Server (YARA)",
@@ -1099,7 +1115,7 @@ func registerScannerRules() {
 		[]MITREMapping{{Tactic: "Persistence", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}, {Tactic: "Defense Evasion", Technique: "T1574.006", TechniqueName: "Dynamic Linker Hijacking"}},
 		[]string{"Inspect /etc/ld.so.preload, /etc/ld.so.audit, and environment configurations for rogue library paths.", "Verify integrity and package ownership of preloaded or audit libraries.", "Remove unauthorized LD_PRELOAD / LD_AUDIT entries."},
 		ConfidenceHigh,
-		StrengthDirect)
+		StrengthContextual)
 
 	m("Linux_Persistence_PAM_Exec_Suspicious",
 		"Suspicious PAM Authentication Hook (pam_exec) (YARA)",

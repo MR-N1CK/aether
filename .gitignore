@@ -2,3 +2,6 @@ bin/
 /dist/
 /aether-report.html
 /clean-with-yara.html
+/portfolio/
+/.zcode/
+/.agents/

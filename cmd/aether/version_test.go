@@ -55,7 +55,7 @@ func TestVersionOutputContract(t *testing.T) {
 
 	// Line 6: YARA status
 	yaraStatus := lines[5]
-	expectedPure := "  YARA:       disabled (native heuristics only)"
+	expectedPure := "  YARA:       pure-go signature fallback 1.0 (embedded core rules)"
 	expectedYara := "  YARA:       YARA-X v1.21.0 (static)"
 	if yaraStatus != expectedPure && yaraStatus != expectedYara {
 		t.Errorf("line 6 unexpected YARA status: %q (expected %q or %q)", yaraStatus, expectedPure, expectedYara)

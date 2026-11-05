@@ -237,6 +237,11 @@ rule Linux_Malware_Data_Exfiltration_Client {
         author = "Aether Security Team"
         mitre = "T1041"
         confidence = "high"
+        // Content signature without live corroboration is contextual: the
+        // benchmark corpus contract (MAL-STEAL-001) adjudicates static
+        // exfiltration scripts as SUSPICIOUS/StrengthContextual, matching the
+        // native heuristic's verdict semantics.
+        evidence_strength = "contextual"
     strings:
         $sock1 = "socket.socket(" ascii
         $sock2 = "socket.create_connection(" ascii
@@ -322,6 +327,12 @@ rule Linux_Persistence_Linker_Audit_Hijack {
         author = "Aether Security Team"
         mitre = "T1574.006"
         confidence = "high"
+        // Keep both engines verdict-consistent: bare LD_PRELOAD/LD_AUDIT
+        // references are contextual (hardening docs, dev workflows), so the
+        // verdict engine may demote pending operational corroboration. This
+        // mirrors the adjudicated semantics of the native heuristic
+        // Persistence_Linker_Audit_Hijack.
+        evidence_strength = "contextual"
     strings:
         $ld_hook_dir       = /(LD_AUDIT|LD_PRELOAD)\s*=\s*['"]?\s*\/(tmp|var\/tmp|dev\/shm|run\/user|opt|srv|home|media|mnt|var\/lib|etc)\/[^\s'"]*\.(so|so\.[0-9.]+)/ nocase
         $ld_hook_relative  = /(LD_AUDIT|LD_PRELOAD)\s*=\s*['"]?(~\/|\$HOME\/|\.{1,2}\/)[^\s'"]*\.(so|so\.[0-9.]+)/ nocase

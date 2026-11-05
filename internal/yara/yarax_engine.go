@@ -377,11 +377,17 @@ func (s *yaraxWorkerScanner) Scan(target ScanTarget) ([]RuleMatch, error) {
 
 		score, sev, isStrong, conf := ScoreFromMeta(metaMap, 50, warningScore, strongScore, alertScore)
 
-		// Collect matched string identifiers (capped at 20, never content or offsets)
+		// Collect matched string identifiers (capped at 20, never content)
+		// plus the earliest match offset for snippet capture.
 		var matchedStrings []string
+		firstOffset := -1
 		for _, p := range r.Patterns() {
-			if len(p.Matches()) > 0 {
+			ms := p.Matches()
+			if len(ms) > 0 {
 				matchedStrings = append(matchedStrings, p.Identifier())
+				if off := int(ms[0].Offset()); off >= 0 && (firstOffset == -1 || off < firstOffset) {
+					firstOffset = off
+				}
 				if len(matchedStrings) >= 20 {
 					break
 				}
@@ -393,6 +399,7 @@ func (s *yaraxWorkerScanner) Scan(target ScanTarget) ([]RuleMatch, error) {
 			Namespace:      r.Namespace(),
 			Tags:           tags,
 			MatchedStrings: matchedStrings,
+			FirstOffset:    firstOffset,
 			Score:          score,
 			Severity:       sev,
 			IsStrong:       isStrong,

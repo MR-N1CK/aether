@@ -34,6 +34,7 @@ type RuleMatch struct {
 	Namespace      string                 `json:"namespace,omitempty"`
 	Tags           []string               `json:"tags,omitempty"`
 	MatchedStrings []string               `json:"matched_strings,omitempty"` // String identifiers only (never matched content), max 20
+	FirstOffset    int                    `json:"first_offset"`              // Earliest pattern match byte offset in the scanned buffer; -1 = unavailable
 	Score          int                    `json:"score"`
 	Severity       report.Severity        `json:"severity"`
 	IsStrong       bool                   `json:"is_strong"`

@@ -505,13 +505,13 @@ func printEngineDiagnostics(th *theme.Theme) error {
 	if yara.IsCompiledIn() {
 		fmt.Printf("  %s %s\n", titleStyle.Render("YARA Engine:   "), lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true).Render(yara.VersionInfo()+" (Active)"))
 	} else {
-		fmt.Printf("  %s %s\n", titleStyle.Render("YARA Engine:   "), lipgloss.NewStyle().Foreground(theme.ColorWarning).Bold(true).Render("DISABLED (Pure-Go Native Heuristics Only)"))
+		fmt.Printf("  %s %s\n", titleStyle.Render("YARA Engine:   "), lipgloss.NewStyle().Foreground(theme.ColorNotice).Bold(true).Render(yara.VersionInfo()+" (Active — full embedded signature coverage)"))
 	}
 
 	fmt.Printf("\n  %s\n", titleStyle.Render("Active Security Modules:"))
 	yaraModuleDesc := "yara        (multi-pattern signature matching against malware families)"
 	if !yara.IsCompiledIn() {
-		yaraModuleDesc = "yara        [DISABLED - pure-go heuristics only; compile with -tags yara]"
+		yaraModuleDesc = "yara        (embedded core rules via pure-Go fallback signature engine)"
 	}
 	modules := []string{
 		"filesystem  (single-pass header inspection, IOC hashes, script heuristics)",

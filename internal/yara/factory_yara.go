@@ -27,3 +27,8 @@ func IsCompiledIn() bool {
 func ValidateRulesDir(dir string) (*ValidationResult, error) {
 	return YaraXValidateRulesDir(dir)
 }
+
+// SignatureEngineKind identifies which signature backend this binary runs.
+func SignatureEngineKind() string {
+	return "yara-x"
+}

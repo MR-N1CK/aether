@@ -1222,9 +1222,11 @@ func CheckSuspiciousScriptContent(path string, data []byte, pkgDB pkgdb.PackageD
 }
 
 // CheckTrojanedPackageBinary checks whether a file in standard system directories
-// has an MD5 checksum mismatch against the package manager database.
-func CheckTrojanedPackageBinary(path string, actualMD5 string, pkgDB pkgdb.PackageDB, cfg *config.Config) *HeuristicMatch {
-	if pkgDB == nil || actualMD5 == "" {
+// has a checksum mismatch against the package manager database. MD5 digests
+// (dpkg, older RPM) are verified first; when the package records only SHA-256
+// file digests (rpm >= 4.15 default on Fedora/RHEL 9+), actualSHA256 is used.
+func CheckTrojanedPackageBinary(path string, actualMD5 string, actualSHA256 string, pkgDB pkgdb.PackageDB, cfg *config.Config) *HeuristicMatch {
+	if pkgDB == nil || (actualMD5 == "" && actualSHA256 == "") {
 		return nil
 	}
 	cleaned := filepath.Clean(path)
@@ -1234,6 +1236,7 @@ func CheckTrojanedPackageBinary(path string, actualMD5 string, pkgDB pkgdb.Packa
 		"/usr/bin",
 		"/usr/sbin",
 		"/usr/lib",
+		"/usr/lib64",
 		"/usr/libexec",
 		"/lib",
 		"/lib64",
@@ -1260,6 +1263,25 @@ func CheckTrojanedPackageBinary(path string, actualMD5 string, pkgDB pkgdb.Packa
 		return &HeuristicMatch{
 			Name:     "Trojaned_Package_Binary_Modified",
 			Reason:   fmt.Sprintf("System binary MD5 mismatch against package database (expected: %s, actual: %s)", expectedMD5, actualMD5),
+			Score:    score,
+			Severity: report.SeverityAlert,
+		}
+	}
+	if hasDigest {
+		return nil // MD5 digest recorded and matched; SHA-256 not consulted
+	}
+
+	// No MD5 digest recorded for this file: try SHA-256 (rpm >= 4.15 default
+	// on Fedora/RHEL 9+).
+	matchSHA, expectedSHA, hasSHA := pkgDB.VerifyDigestSHA256(cleaned, actualSHA256)
+	if hasSHA && !matchSHA {
+		score := config.DefaultScoreTrojanedPackageBinary
+		if cfg != nil && cfg.Scan.ScoreTrojanedPackageBinary > 0 {
+			score = cfg.Scan.ScoreTrojanedPackageBinary
+		}
+		return &HeuristicMatch{
+			Name:     "Trojaned_Package_Binary_Modified",
+			Reason:   fmt.Sprintf("System binary SHA-256 mismatch against package database (expected: %s, actual: %s)", expectedSHA, actualSHA256),
 			Score:    score,
 			Severity: report.SeverityAlert,
 		}

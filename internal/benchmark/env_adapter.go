@@ -78,6 +78,10 @@ func (m *MockPackageDB) VerifyDigest(path string, actualMD5 string) (bool, strin
 	return true, "", false
 }
 
+func (m *MockPackageDB) VerifyDigestSHA256(path string, actualSHA256 string) (bool, string, bool) {
+	return true, "", false
+}
+
 // SetAvailable configures whether the mock database reports as available.
 func (m *MockPackageDB) SetAvailable(available bool, note string) {
 	m.mu.Lock()

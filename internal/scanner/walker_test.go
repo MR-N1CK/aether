@@ -2332,6 +2332,10 @@ func (m *mockPkgDB) VerifyDigest(path string, actualMD5 string) (bool, string, b
 	return true, "", false
 }
 
+func (m *mockPkgDB) VerifyDigestSHA256(path string, actualSHA256 string) (bool, string, bool) {
+	return true, "", false
+}
+
 func TestScanner_YARA_PackageOwnership_Downgrade(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetFile := filepath.Join(tmpDir, "packaged_tool.sh")

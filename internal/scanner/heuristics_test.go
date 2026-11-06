@@ -486,6 +486,10 @@ func (m *mockTestPkgDB) VerifyDigest(path string, actualMD5 string) (bool, strin
 	return true, "", false
 }
 
+func (m *mockTestPkgDB) VerifyDigestSHA256(path string, actualSHA256 string) (bool, string, bool) {
+	return true, "", false
+}
+
 func (m *mockTestPkgDB) PackageCount() int {
 	return len(m.owned)
 }
@@ -570,13 +574,13 @@ func TestCheckTrojanedPackageBinary(t *testing.T) {
 	}
 
 	// 1. Exact matching digest -> nil (clean)
-	mMatch := scanner.CheckTrojanedPackageBinary("/usr/bin/ls", "d41d8cd98f00b204e9800998ecf8427e", mockDB, cfg)
+	mMatch := scanner.CheckTrojanedPackageBinary("/usr/bin/ls", "d41d8cd98f00b204e9800998ecf8427e", "", mockDB, cfg)
 	if mMatch != nil {
 		t.Errorf("expected nil for matching binary checksum, got: %+v", mMatch)
 	}
 
 	// 2. Mismatching digest on standard system binary -> ALERT (score 95)
-	mMismatch := scanner.CheckTrojanedPackageBinary("/usr/bin/ls", "ffffffffffffffffffffffffffffffff", mockDB, cfg)
+	mMismatch := scanner.CheckTrojanedPackageBinary("/usr/bin/ls", "ffffffffffffffffffffffffffffffff", "", mockDB, cfg)
 	if mMismatch == nil {
 		t.Fatalf("expected heuristic match for trojaned system binary, got nil")
 	}
@@ -585,33 +589,33 @@ func TestCheckTrojanedPackageBinary(t *testing.T) {
 	}
 
 	// 3. Binary not in standard system directory -> nil (skipped)
-	mNonSys := scanner.CheckTrojanedPackageBinary("/opt/custom/tool", "ffffffffffffffffffffffffffffffff", mockDB, cfg)
+	mNonSys := scanner.CheckTrojanedPackageBinary("/opt/custom/tool", "ffffffffffffffffffffffffffffffff", "", mockDB, cfg)
 	if mNonSys != nil {
 		t.Errorf("expected nil for non-system path, got: %+v", mNonSys)
 	}
 
 	// 4. File in system dir with no package DB digest recorded -> nil (skipped)
-	mNoDigest := scanner.CheckTrojanedPackageBinary("/usr/bin/unrecorded", "ffffffffffffffffffffffffffffffff", mockDB, cfg)
+	mNoDigest := scanner.CheckTrojanedPackageBinary("/usr/bin/unrecorded", "ffffffffffffffffffffffffffffffff", "", mockDB, cfg)
 	if mNoDigest != nil {
 		t.Errorf("expected nil for unrecorded binary, got: %+v", mNoDigest)
 	}
 
 	// 5. Nil pkgDB -> nil
-	mNilDB := scanner.CheckTrojanedPackageBinary("/usr/bin/ls", "ffffffffffffffffffffffffffffffff", nil, cfg)
+	mNilDB := scanner.CheckTrojanedPackageBinary("/usr/bin/ls", "ffffffffffffffffffffffffffffffff", "", nil, cfg)
 	if mNilDB != nil {
 		t.Errorf("expected nil for nil pkgDB, got: %+v", mNilDB)
 	}
 
 	// 6. Kernel/initramfs trees under /boot are now in scope: a mismatched
 	// digest must alert, a matching one must stay silent.
-	mBootMismatch := scanner.CheckTrojanedPackageBinary("/boot/vmlinuz-6.8.0", "ffffffffffffffffffffffffffffffff", mockDB, cfg)
+	mBootMismatch := scanner.CheckTrojanedPackageBinary("/boot/vmlinuz-6.8.0", "ffffffffffffffffffffffffffffffff", "", mockDB, cfg)
 	if mBootMismatch == nil {
 		t.Fatal("expected detection for trojaned kernel image under /boot")
 	}
 	if mBootMismatch.Severity != report.SeverityAlert {
 		t.Errorf("expected ALERT for /boot kernel mismatch, got %s", mBootMismatch.Severity)
 	}
-	mBootMatch := scanner.CheckTrojanedPackageBinary("/boot/vmlinuz-6.8.0", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", mockDB, cfg)
+	mBootMatch := scanner.CheckTrojanedPackageBinary("/boot/vmlinuz-6.8.0", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "", mockDB, cfg)
 	if mBootMatch != nil {
 		t.Errorf("expected nil for matching kernel image, got: %+v", mBootMatch)
 	}
@@ -971,3 +975,51 @@ func TestCheckAllSuspiciousScriptContent_ConfigAndLocalContextGating(t *testing.
 		}
 	}
 }
+
+func TestCheckTrojanedPackageBinary_SHA256Fallback(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+
+	// RPM >= 4.15 records SHA-256 file digests; the package has no MD5 entry.
+	shaDB := &shaOnlyPkgDB{
+		digests: map[string]string{"/usr/bin/signed": "cafebabe"},
+	}
+
+	// Mismatch: trojaned binary must alert citing SHA-256.
+	m := scanner.CheckTrojanedPackageBinary("/usr/bin/signed", "ffffffffffffffffffffffffffffffff", "deadbeef", shaDB, cfg)
+	if m == nil {
+		t.Fatal("expected SHA-256 mismatch alert, got nil")
+	}
+	if !strings.Contains(m.Reason, "SHA-256 mismatch") {
+		t.Errorf("expected SHA-256 mismatch reason, got: %s", m.Reason)
+	}
+
+	// Match: clean binary stays silent.
+	if m := scanner.CheckTrojanedPackageBinary("/usr/bin/signed", "ffffffffffffffffffffffffffffffff", "cafebabe", shaDB, cfg); m != nil {
+		t.Fatalf("expected no alert on SHA-256 match, got %+v", m)
+	}
+}
+
+// shaOnlyPkgDB simulates an RPM database that records only SHA-256 digests.
+type shaOnlyPkgDB struct {
+	digests map[string]string
+}
+
+func (m *shaOnlyPkgDB) Owner(path string) (string, bool) {
+	_, ok := m.digests[path]
+	return "coreutils", ok
+}
+
+func (m *shaOnlyPkgDB) VerifyDigest(path string, actualMD5 string) (bool, string, bool) {
+	return true, "", false // no MD5 digests recorded
+}
+
+func (m *shaOnlyPkgDB) VerifyDigestSHA256(path string, actualSHA256 string) (bool, string, bool) {
+	expected, ok := m.digests[path]
+	if !ok {
+		return true, "", false
+	}
+	return strings.EqualFold(expected, actualSHA256), expected, true
+}
+
+func (m *shaOnlyPkgDB) IsAvailable() bool  { return true }
+func (m *shaOnlyPkgDB) StatusNote() string { return "rpm-sha256" }

@@ -2,11 +2,14 @@ package pkgdb
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	rpmdb "github.com/knqyf263/go-rpmdb/pkg"
 
 	"aether/internal/safeopen"
 )
@@ -18,6 +21,10 @@ type PackageDB interface {
 	// VerifyDigest verifies whether actualMD5 matches the expected package checksum.
 	// Returns (match, expectedMD5, hasDigest).
 	VerifyDigest(path string, actualMD5 string) (bool, string, bool)
+	// VerifyDigestSHA256 verifies whether actualSHA256 matches the expected
+	// package checksum for databases recording SHA-256 file digests (the
+	// rpm >= 4.15 default on Fedora/RHEL 9+). Returns (match, expected, hasDigest).
+	VerifyDigestSHA256(path string, actualSHA256 string) (bool, string, bool)
 	// IsAvailable returns true if a supported package database was found and loaded.
 	IsAvailable() bool
 	// StatusNote returns informational notes about the package DB state (e.g. RPM unavailable).
@@ -26,20 +33,22 @@ type PackageDB interface {
 
 // DB is a thread-safe, pure Go package database reader.
 type DB struct {
-	rootFS     string
-	once       sync.Once
-	available  bool
-	statusNote string
-	ownerMap   map[string]string // normalized path -> package name
-	digestMap  map[string]string // normalized path -> expected md5 hash
+	rootFS          string
+	once            sync.Once
+	available       bool
+	statusNote      string
+	ownerMap        map[string]string // normalized path -> package name
+	digestMap       map[string]string // normalized path -> expected md5 hash
+	digestSHA256Map map[string]string // normalized path -> expected sha256 hash (RPM)
 }
 
 // New creates a new PackageDB rooted at rootFS (empty string for system root "/").
 func New(rootFS string) *DB {
 	return &DB{
-		rootFS:    rootFS,
-		ownerMap:  make(map[string]string),
-		digestMap: make(map[string]string),
+		rootFS:          rootFS,
+		ownerMap:        make(map[string]string),
+		digestMap:       make(map[string]string),
+		digestSHA256Map: make(map[string]string),
 	}
 }
 
@@ -84,6 +93,7 @@ func isSystemBinaryPath(norm string) bool {
 		strings.HasPrefix(norm, "/bin/") ||
 		strings.HasPrefix(norm, "/sbin/") ||
 		strings.HasPrefix(norm, "/usr/lib/") ||
+		strings.HasPrefix(norm, "/usr/lib64/") ||
 		strings.HasPrefix(norm, "/usr/libexec/") ||
 		strings.HasPrefix(norm, "/lib/") ||
 		strings.HasPrefix(norm, "/lib64/")
@@ -130,12 +140,14 @@ func (d *DB) init() {
 			return
 		}
 
-		// 4. Check for RPM (/var/lib/rpm)
-		rpmDir := d.resolve("/var/lib/rpm")
-		if stat, err := os.Stat(rpmDir); err == nil && stat.IsDir() {
-			d.available = false
-			d.statusNote = "RPM package database pure-Go reader unavailable; skipping package ownership scoring"
-			return
+		// 4. Check for RPM (RPM >= 4.18 keeps the db under /usr/lib/sysimage/rpm;
+		//    older releases use /var/lib/rpm).
+		for _, rpmDirVirt := range []string{"/usr/lib/sysimage/rpm", "/var/lib/rpm"} {
+			rpmDir := d.resolve(rpmDirVirt)
+			if stat, err := os.Stat(rpmDir); err == nil && stat.IsDir() {
+				d.loadRpm(rpmDir)
+				return
+			}
 		}
 
 		d.available = false
@@ -422,6 +434,144 @@ func (d *DB) parseApkInstalled(r io.Reader) {
 	}
 }
 
+// rpmDatabaseCandidates lists the on-disk rpmdb file names in preference
+// order. rpmdb.Open auto-detects the SQLite3, NDB, and BerkeleyDB formats,
+// so only the file name matters.
+var rpmDatabaseCandidates = []string{"rpmdb.sqlite", "Packages.db", "Packages"}
+
+// loadRpm probes an RPM database directory for a readable rpmdb file and
+// loads ownership + digest maps from it. Returns true on success; every exit
+// path sets available and statusNote.
+func (d *DB) loadRpm(rpmDir string) bool {
+	for _, candidate := range rpmDatabaseCandidates {
+		hostPath := filepath.Join(rpmDir, candidate)
+		if stat, err := os.Stat(hostPath); err != nil || stat.IsDir() {
+			continue
+		}
+		if d.tryLoadRpmDB(hostPath) {
+			return true
+		}
+		return false // first present candidate is authoritative; report its failure
+	}
+	d.available = false
+	d.statusNote = "RPM database directory found but no readable rpmdb (tried rpmdb.sqlite, Packages.db, Packages)"
+	return false
+}
+
+// tryLoadRpmDB opens one rpmdb file and populates the maps from it.
+func (d *DB) tryLoadRpmDB(hostPath string) bool {
+	db, err := rpmdb.Open(hostPath)
+	if err != nil {
+		d.available = false
+		d.statusNote = "Failed to open RPM database: " + err.Error()
+		return false
+	}
+	defer db.Close()
+
+	pkgs, err := db.ListPackages()
+	if err != nil {
+		d.available = false
+		d.statusNote = "Failed to list RPM packages: " + err.Error()
+		return false
+	}
+
+	owner, md5s, sha256s := buildRpmMaps(convertRpmPackages(pkgs))
+	d.ownerMap = owner
+	d.digestMap = md5s
+	d.digestSHA256Map = sha256s
+
+	d.available = len(d.ownerMap) > 0
+	if d.available {
+		d.statusNote = fmt.Sprintf("RPM database loaded (%d packages)", len(pkgs))
+	} else {
+		d.statusNote = "RPM database empty"
+	}
+	return true
+}
+
+// rpmFile is the loader-internal normalized form of one installed file.
+type rpmFile struct {
+	path       string
+	digest     string
+	digestAlgo rpmdb.DigestAlgorithm
+}
+
+// rpmPkg is one installed package with its normalized file list.
+type rpmPkg struct {
+	name  string
+	files []rpmFile
+}
+
+// convertRpmPackages adapts go-rpmdb package values into the internal form,
+// pairing each installed file path with its digest and the package's digest
+// algorithm. Malformed headers skip the package without failing the load.
+func convertRpmPackages(pkgs []*rpmdb.PackageInfo) []rpmPkg {
+	out := make([]rpmPkg, 0, len(pkgs))
+	for _, p := range pkgs {
+		if p == nil {
+			continue
+		}
+		pkg := rpmPkg{name: p.Name}
+		files, err := p.InstalledFiles()
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			pkg.files = append(pkg.files, rpmFile{
+				path:       f.Path,
+				digest:     f.Digest,
+				digestAlgo: p.DigestAlgorithm,
+			})
+		}
+		out = append(out, pkg)
+	}
+	return out
+}
+
+// buildRpmMaps inserts RPM file ownership (dual-key: normalized + cleaned)
+// and digests. Digests are stored per algorithm — MD5 into the dpkg-shared
+// digestMap, SHA-256 into digestSHA256Map — and filtered to system binary
+// paths so huge packages (kernel, glibc) keep memory bounded.
+func buildRpmMaps(pkgs []rpmPkg) (owner, md5s, sha256s map[string]string) {
+	owner = make(map[string]string)
+	md5s = make(map[string]string)
+	sha256s = make(map[string]string)
+
+	for _, pkg := range pkgs {
+		for _, f := range pkg.files {
+			if f.path == "" || f.path == "/" {
+				continue
+			}
+			norm := NormalizePath(f.path)
+			owner[norm] = pkg.name
+			cleaned := filepath.Clean(f.path)
+			if cleaned != norm {
+				owner[cleaned] = pkg.name
+			}
+			if !isSystemBinaryPath(norm) {
+				continue
+			}
+			digest := strings.ToLower(strings.TrimSpace(f.digest))
+			if digest == "" {
+				continue
+			}
+			switch f.digestAlgo {
+			case rpmdb.PGPHASHALGO_MD5:
+				md5s[norm] = digest
+				if cleaned != norm {
+					md5s[cleaned] = digest
+				}
+			case rpmdb.PGPHASHALGO_SHA256:
+				sha256s[norm] = digest
+				if cleaned != norm {
+					sha256s[cleaned] = digest
+				}
+			}
+		}
+	}
+	return owner, md5s, sha256s
+}
+
 // Owner returns the package owning path (normalizing merged-/usr).
 func (d *DB) Owner(path string) (string, bool) {
 	d.init()
@@ -473,4 +623,24 @@ func (d *DB) VerifyDigest(path string, actualMD5 string) (bool, string, bool) {
 		return true, "", false
 	}
 	return strings.EqualFold(expected, actualMD5), expected, true
+}
+
+// VerifyDigestSHA256 verifies whether actualSHA256 matches the expected
+// package checksum for databases recording SHA-256 file digests (the
+// rpm >= 4.15 default on Fedora/RHEL 9+). Returns (match, expected, hasDigest).
+func (d *DB) VerifyDigestSHA256(path string, actualSHA256 string) (bool, string, bool) {
+	d.init()
+	if !d.available || len(d.digestSHA256Map) == 0 {
+		return true, "", false
+	}
+	norm := NormalizePath(path)
+	expected, ok := d.digestSHA256Map[norm]
+	if !ok {
+		cleaned := filepath.Clean(path)
+		expected, ok = d.digestSHA256Map[cleaned]
+	}
+	if !ok {
+		return true, "", false
+	}
+	return strings.EqualFold(expected, actualSHA256), expected, true
 }

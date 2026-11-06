@@ -140,7 +140,7 @@ func (s *Scanner) inspectFileWithOversize(ctx context.Context, path string, ySca
 	hEntropyELF := CheckHighEntropyELF(virtPath, inspectData, s.cfg)
 	hEntropyScript := CheckHighEntropyScript(virtPath, inspectData, s.cfg)
 	hDecodes, decodeLayers, decodeYaraMatches := DecodeAndRescanWithYARA(ctx, virtPath, inspectData, s.pkgDB, s.cfg, s.memoryBudget, yScanner)
-	hTrojanPkg := CheckTrojanedPackageBinary(virtPath, hashRes.Hashes.MD5, s.pkgDB, s.cfg)
+	hTrojanPkg := CheckTrojanedPackageBinary(virtPath, hashRes.Hashes.MD5, hashRes.Hashes.SHA256, s.pkgDB, s.cfg)
 	hELFMatches := AnalyzeELFExecutable(virtPath, inspectData, uint32(mode), s.pkgDB, s.cfg)
 
 	if hELF != nil || hHidden != nil || hSUID != nil || hWorldWritable != nil || hKey != nil || len(hScripts) > 0 || hEntropyELF != nil || hEntropyScript != nil || len(hDecodes) > 0 || hTrojanPkg != nil || len(hELFMatches) > 0 || len(decodeYaraMatches) > 0 {

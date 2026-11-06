@@ -3,6 +3,7 @@ package pkgdb_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"aether/internal/pkgdb"
@@ -185,17 +186,17 @@ func TestPkgDB_RPMGracefulDegradation(t *testing.T) {
 	if err := os.MkdirAll(rpmDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	_ = os.WriteFile(filepath.Join(rpmDir, "rpmdb.sqlite"), []byte("sqlite_rpm"), 0644)
+	// Garbage bytes in an rpmdb candidate file: the loader must fail loudly
+	// (status note), keep the DB unavailable, and never panic.
+	_ = os.WriteFile(filepath.Join(rpmDir, "rpmdb.sqlite"), []byte("not actually a database"), 0644)
 
 	db := pkgdb.New(root)
 	if db.IsAvailable() {
-		t.Fatalf("expected RPM db to be unavailable in pure Go")
+		t.Fatalf("expected RPM db to be unavailable for a corrupt rpmdb file")
 	}
-	if !filepath.IsAbs(root) {
-		t.Errorf("root should be absolute")
-	}
-	if db.StatusNote() != "RPM package database pure-Go reader unavailable; skipping package ownership scoring" {
-		t.Errorf("unexpected status note: %s", db.StatusNote())
+	note := db.StatusNote()
+	if !strings.Contains(note, "Failed to open RPM database") {
+		t.Errorf("expected a loud open-failure note, got: %s", note)
 	}
 }
 

@@ -25,6 +25,10 @@ func (m *mockPkgDB) VerifyDigest(path string, actualMD5 string) (bool, string, b
 	return true, "", false
 }
 
+func (m *mockPkgDB) VerifyDigestSHA256(path string, actualSHA256 string) (bool, string, bool) {
+	return true, "", false
+}
+
 func TestDetermineVerdict_Matrix(t *testing.T) {
 	pkgDB := &mockPkgDB{
 		owners: map[string]string{

@@ -925,6 +925,10 @@ func (m *mockYaraPkgDB) VerifyDigest(path string, actualMD5 string) (bool, strin
 	return true, "", false
 }
 
+func (m *mockYaraPkgDB) VerifyDigestSHA256(path string, actualSHA256 string) (bool, string, bool) {
+	return true, "", false
+}
+
 func (m *mockYaraPkgDB) IsAvailable() bool  { return true }
 func (m *mockYaraPkgDB) StatusNote() string { return "mock db" }
 

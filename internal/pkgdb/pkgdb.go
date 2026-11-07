@@ -10,6 +10,11 @@ import (
 	"sync"
 
 	rpmdb "github.com/knqyf263/go-rpmdb/pkg"
+	// Register the pure-Go "sqlite" driver: go-rpmdb's sqlite backend calls
+	// sql.Open("sqlite", …) but ships no driver import of its own. Without
+	// this blank import every modern RPM database (rpmdb.sqlite, the
+	// Fedora/RHEL 9+ default) fails with sql: unknown driver "sqlite".
+	_ "modernc.org/sqlite"
 
 	"aether/internal/safeopen"
 )

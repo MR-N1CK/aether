@@ -24,6 +24,9 @@ import (
 )
 
 func TestPrivilegeBoundaryParity_Snapshot(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping DAC privilege-boundary assertions as root: root reads through file permissions, so the boundary under test does not exist (containers run as root)")
+	}
 	profilesDir := findTestProfilesDir(t)
 	profileDir := filepath.Join(profilesDir, realworld.ProfilePrivilegeRestricted)
 
@@ -157,6 +160,9 @@ func TestPrivilegeBoundaryParity_Snapshot(t *testing.T) {
 }
 
 func TestPrivilegeBoundaryParity_UnprivilegedVsElevated(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping unprivileged-vs-elevated parity as root: the unprivileged mode under test is indistinguishable from elevated mode when uid == 0 (containers run as root)")
+	}
 	tempDir := t.TempDir()
 	rootFS := filepath.Join(tempDir, "rootfs")
 	procDir := filepath.Join(tempDir, "proc")

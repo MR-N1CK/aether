@@ -23,6 +23,9 @@ func (r *privMemoryReporter) Summary() (int, int, int, int, int) { return 0, 0, 
 func (r *privMemoryReporter) Close() error                       { return nil }
 
 func TestProcessNonRootPermissionDenied(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping DAC permission-denied assertions as root: root reads through mode 0000 directories, so the boundary under test does not exist (containers run as root)")
+	}
 	root := t.TempDir()
 	proc := filepath.Join(root, "proc")
 	_ = os.MkdirAll(proc, 0755)

@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: debian:12-slim
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - name: Install prerequisites
         run: |
@@ -79,7 +79,79 @@ jobs:
         run: go build ./... && go vet ./...
 
       - name: Unit tests
-        run: go test ./... -timeout 20m
+        run: go test ./... -timeout 30m
+
+  # Fedora compatibility: rpm userspace activates TestPkgDB_RPMRealSystem and
+  # the rpm-owned ELF corpus scan (real rpmdb validation).
+  fedora:
+    name: Build & Test (fedora-41, container)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:41
+    timeout-minutes: 40
+    steps:
+      - name: Install prerequisites
+        run: dnf install -y --setopt=install_weak_deps=False ca-certificates git gcc
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build & vet
+        run: go build ./... && go vet ./...
+
+      - name: Unit tests
+        run: go test ./... -timeout 30m
+
+  # Arch compatibility: pacman userspace (base-devel ships gcc).
+  arch:
+    name: Build & Test (archlinux, container)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    timeout-minutes: 40
+    steps:
+      - name: Install prerequisites
+        run: pacman -Sy --noconfirm ca-certificates git
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build & vet
+        run: go build ./... && go vet ./...
+
+      - name: Unit tests
+        run: go test ./... -timeout 30m
+
+  # Alpine compatibility: musl userspace activates the apk backend. gcompat
+  # shims the runner's glibc node for container actions.
+  alpine:
+    name: Build & Test (alpine-3.20, container, musl)
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:3.20
+    timeout-minutes: 40
+    steps:
+      - name: Install prerequisites
+        run: apk add --no-cache gcompat libgcc ca-certificates git gcc musl-dev bash
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build & vet
+        run: go build ./... && go vet ./...
+
+      - name: Unit tests
+        run: go test ./... -timeout 30m
+
 
   # Detection accuracy contract: zero false positives on benign corpus,
   # >= 95% recall on malicious corpus, determinism, regression locks.

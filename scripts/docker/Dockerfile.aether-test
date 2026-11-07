@@ -1,0 +1,29 @@
+# Parameterized cross-distro test image for Aether (scripts/cross-distro.sh).
+#
+# The Go toolchain is copied from the official golang image because no distro
+# package satisfies go.mod's go 1.26.8 requirement. The BASE image supplies
+# the real distro userspace (package databases, coreutils, musl/glibc) that
+# the live-system tests exercise.
+#
+# Build args:
+#   GOIMAGE — toolchain source (golang:1.26; golang:1.26-alpine for musl hosts)
+#   BASE    — distro userspace image
+#   PRE     — distro package-manager command (apt-get update && apt-get install -y, dnf install -y, pacman -Sy --noconfirm, apk add --no-cache)
+#   PKGS    — packages to install (ca-certificates git gcc [+ musl-dev on Alpine])
+ARG GOIMAGE=golang:1.26
+ARG BASE=debian:12-slim
+
+FROM ${GOIMAGE} AS toolchain
+
+FROM ${BASE}
+ARG PRE
+ARG PKGS
+COPY --from=toolchain /usr/local/go /usr/local/go
+ENV PATH="/usr/local/go/bin:${PATH}" \
+    CGO_ENABLED=0 \
+    GOFLAGS="-buildvcs=false"
+# -buildvcs=false: host-mounted checkouts are owned by a different uid than
+# the container user, and git refuses VCS stamping there (exit status 128).
+# Release builds stamp versions via build-env.sh ldflags, not buildvcs.
+RUN ${PRE} ${PKGS}
+WORKDIR /app

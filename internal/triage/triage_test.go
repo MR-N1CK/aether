@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -295,6 +296,10 @@ func TestTriage_InsecurePermissions_Rejected(t *testing.T) {
 		},
 	}
 	data, _ := yaml.Marshal(&af)
+	// Pin umask: under a 022 umask (CI containers) WriteFile(0666) lands as
+	// 0644 and the insecure-permission precondition never materializes.
+	oldUmask := syscall.Umask(0)
+	defer syscall.Umask(oldUmask)
 	_ = os.WriteFile(ackPath, data, 0666) // group/world writable!
 
 	_, err := triage.LoadEngine(ackPath, "")

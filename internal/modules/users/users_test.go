@@ -430,6 +430,9 @@ lxd:x:999:charlie
 }
 
 func TestUsers_NonRoot_ShadowGapNote(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping shadow visibility-gap assertions as root: root reads shadow regardless of mode, so the gap under test does not exist (containers run as root)")
+	}
 	root := setupCleanEtc(t)
 	etc := filepath.Join(root, "etc")
 	// Make shadow unreadable (0000) simulating non-root lack of access

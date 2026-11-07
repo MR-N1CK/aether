@@ -38,7 +38,7 @@ else
 	YARA_EXTRA_LDFLAGS :=
 endif
 
-.PHONY: all build build-static build-pure build-yara-static build-cross test test-yara test-fixtures test-packaging benchmark lint clean package package-clean release-verify release help
+.PHONY: all build build-static build-pure build-yara-static build-cross test test-cross test-yara test-fixtures test-packaging benchmark lint clean package package-clean release-verify release help
 
 all: build
 
@@ -115,6 +115,9 @@ install: build
 
 test:
 	go test -timeout 20m -v ./...
+
+test-cross:
+	bash scripts/cross-distro.sh
 
 test-yara:
 	CGO_LDFLAGS="-Wl,-rpath,/usr/local/lib -Wl,-rpath,/usr/local/lib64 -Wl,-rpath,$(HOME)/.local/lib -Wl,-rpath,$(HOME)/.local/lib/x86_64-linux-gnu" go test -timeout 20m -v -tags yara ./...

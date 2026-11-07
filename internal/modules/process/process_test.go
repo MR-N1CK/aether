@@ -293,6 +293,14 @@ func TestRealProcessTempAndDeletedExecution(t *testing.T) {
 	if err != nil {
 		t.Skip("sleep binary not found on system, skipping live execution test")
 	}
+	// BusyBox systems (Alpine): /bin/sleep is a symlink to the multi-call
+	// busybox binary, which dispatches applets by argv[0]. A copy named
+	// anything else exits instantly with "applet not found", leaving a zombie
+	// whose procfs cannot support the detection chain under test.
+	if resolved, linkErr := filepath.EvalSymlinks(srcSleep); linkErr == nil &&
+		strings.HasSuffix(resolved, "/busybox") {
+		t.Skip("sleep is a BusyBox applet: copied multi-call binaries exit on argv[0] dispatch (Alpine/musl containers)")
+	}
 
 	tempDir := t.TempDir()
 	tempSleep := filepath.Join(tempDir, "aether_test_sleep")
@@ -467,17 +475,29 @@ func TestCheckDeletedExe_ReplacedOnDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Remove old binary and create new version
-	if err := os.Remove(binPath); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(binPath, []byte("version 2 new content"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
+	// Remove old binary and create new version.
+	// On some filesystems (OverlayFS inside containers, occasionally ext4)
+	// the recreated file can reuse the deleted file's inode number, making
+	// "replaced on disk" unobservable via inode identity. Retry until the
+	// inode differs so the classifier is exercised where detection is
+	// possible; skip where the filesystem deterministically reuses inodes.
 	var st2 unix.Stat_t
-	if err := unix.Stat(binPath, &st2); err != nil {
-		t.Fatal(err)
+	replaced := false
+	for attempt := 0; attempt < 8; attempt++ {
+		_ = os.Remove(binPath)
+		if err := os.WriteFile(binPath, []byte(fmt.Sprintf("version 2 new content %d", attempt)), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := unix.Stat(binPath, &st2); err != nil {
+			t.Fatal(err)
+		}
+		if st2.Ino != st1.Ino {
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		t.Skip("filesystem reuses inode numbers across replace at the same path (OverlayFS); replaced-on-disk classification is not observable here")
 	}
 
 	info := &process.ProcessInfo{

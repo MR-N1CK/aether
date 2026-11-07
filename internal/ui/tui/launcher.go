@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -67,6 +68,19 @@ type LauncherModel struct {
 	cpuCores    int
 	osArch      string
 	version     string
+	// animFrame drives the Command Center's staggered card reveal and the
+	// selected-card pulse. It advances on launcherTickMsg only when the
+	// theme renders color; monochrome/ASCII themes render fully revealed.
+	animFrame int
+}
+
+// launcherTickMsg advances the Command Center animation state.
+type launcherTickMsg time.Time
+
+func tickLauncher() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(t time.Time) tea.Msg {
+		return launcherTickMsg(t)
+	})
 }
 
 // NewLauncherModel creates an initialized LauncherModel with optional version string.
@@ -179,12 +193,19 @@ func NewLauncherModel(th *theme.Theme, ver ...string) LauncherModel {
 
 // Init initializes the Bubble Tea launcher.
 func (m LauncherModel) Init() tea.Cmd {
-	return textinput.Blink
+	if m.theme.NoColor {
+		return textinput.Blink
+	}
+	return tea.Batch(textinput.Blink, tickLauncher())
 }
 
 // Update handles UI events in the launcher.
 func (m LauncherModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case launcherTickMsg:
+		m.animFrame++
+		return m, tickLauncher()
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -280,14 +301,12 @@ func (m LauncherModel) View() string {
 	azureStyle := lipgloss.NewStyle().Foreground(theme.ColorAccent).Bold(true)
 	indigoStyle := lipgloss.NewStyle().Foreground(theme.ColorIndigo).Bold(true)
 	subStyle := lipgloss.NewStyle().Foreground(theme.ColorTextMute)
-	borderStyle := lipgloss.NewStyle().Foreground(theme.ColorBorder)
 
 	if m.theme.NoColor {
 		titleStyle = lipgloss.NewStyle().Bold(true)
 		azureStyle = lipgloss.NewStyle().Bold(true)
 		indigoStyle = lipgloss.NewStyle().Bold(true)
 		subStyle = lipgloss.NewStyle()
-		borderStyle = lipgloss.NewStyle()
 	}
 
 	// 1. Executive Header Box (Compact 2-line header that always stays visible)
@@ -300,9 +319,9 @@ func (m LauncherModel) View() string {
 
 	var privBadge string
 	if m.isRoot {
-		privBadge = lipgloss.NewStyle().Background(theme.ColorNotice).Foreground(lipgloss.Color("#000000")).Bold(true).Padding(0, 1).Render("● ROOT")
+		privBadge = lipgloss.NewStyle().Background(theme.ColorNotice).Foreground(lipgloss.Color("#000000")).Bold(true).Padding(0, 1).Render("● FULL ACCESS")
 	} else {
-		privBadge = lipgloss.NewStyle().Background(theme.ColorWarning).Foreground(lipgloss.Color("#000000")).Bold(true).Padding(0, 1).Render("▲ NON-ROOT")
+		privBadge = lipgloss.NewStyle().Background(theme.ColorWarning).Foreground(lipgloss.Color("#000000")).Bold(true).Padding(0, 1).Render("▲ LIMITED")
 	}
 
 	wBox := m.width - 2
@@ -315,7 +334,7 @@ func (m LauncherModel) View() string {
 
 	vStr := "v" + strings.TrimPrefix(m.version, "v")
 	headerTop := fmt.Sprintf("%s %s %s",
-		azureStyle.Render("AETHER"),
+		m.theme.RenderGradientText("AETHER", theme.AuroraRamp...),
 		indigoStyle.Render("COMMAND CENTER"),
 		subStyle.Render(vStr),
 	)
@@ -328,7 +347,11 @@ func (m LauncherModel) View() string {
 	}
 	headerLine1 := headerTop + strings.Repeat(" ", spacerLen) + headerBadges
 
-	headerLine2 := subStyle.Render(fmt.Sprintf("Host: %s (%s)  │  CPU: %d cores  │  Defensive Linux Threat Hunter", m.hostname, m.osArch, m.cpuCores))
+	headerInfo := "Defensive Linux Threat Hunter"
+	if !m.isRoot {
+		headerInfo += "  │  ▲ run with sudo for full coverage"
+	}
+	headerLine2 := subStyle.Render(fmt.Sprintf("Host: %s (%s)  │  CPU: %d cores  │  %s", m.hostname, m.osArch, m.cpuCores, headerInfo))
 
 	headerBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -344,37 +367,53 @@ func (m LauncherModel) View() string {
 	if m.state == launcherStateInputPath {
 		// Custom Path Input Modal
 		inputBoxContent := fmt.Sprintf(
-			" %s\n\n %s\n %s\n\n %s",
+			" %s\n\n %s\n %s\n\n %s\n %s",
 			titleStyle.Render("▤ TARGET DIRECTORY SCAN"),
 			subStyle.Render("Enter a specific folder or file path to hunt for threats:"),
 			m.textInput.View(),
+			subStyle.Render("Scans folder files only — live system checks stay off."),
 			subStyle.Render("Press Enter to launch scan  •  Esc to go back"),
 		)
 
 		inputModal := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(theme.ColorBorderLit).
+			Background(theme.ColorSurface).
 			Padding(1, 2).
 			Width(wBox).
 			Render(inputBoxContent)
 
 		b.WriteString(inputModal)
 		b.WriteString("\n")
-		return b.String()
+		return m.theme.AppContainer.Render(b.String())
 	}
 
-	// Menu Action Items
-	b.WriteString(" " + titleStyle.Render("SELECT AN ACTION:") + "\n")
+	// Menu Action Items — every action renders as a rounded card in the deck;
+	// the selected card carries the lit rail, gradient title, and pulse.
+	animated := !m.theme.NoColor
+	revealedOf := func(i int) bool {
+		if !animated {
+			return true
+		}
+		return m.animFrame >= i*2
+	}
 
 	for i, item := range m.items {
+		if !revealedOf(i) {
+			b.WriteString("\n")
+			continue
+		}
 		isSelected := i == m.cursor
 
 		if isSelected {
-			// Luminous rail + gradient title: the selected card glows.
+			// Luminous rail + gradient title; border pulses between two cyans.
+			borderColor := theme.ColorBorderLit
+			if animated && (m.animFrame/6)%2 == 1 {
+				borderColor = "#7DD3FC"
+			}
 			selector := lipgloss.NewStyle().Foreground(theme.ColorBorderLit).Bold(true).Render("▌") + azureStyle.Render("▶ ")
 			keyBadge := lipgloss.NewStyle().Background(theme.ColorAccent).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(item.keyNumber)
-			gradTheme := theme.NewTheme(false)
-			itemTitle := gradTheme.RenderGradientText(item.title, "#38BDF8", "#F8FAFC")
+			itemTitle := m.theme.RenderGradientText(item.title, theme.AuroraRamp...)
 			var tagBadge string
 			if item.tag != "" {
 				tagBadge = " " + lipgloss.NewStyle().Background(theme.ColorIndigo).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(item.tag)
@@ -385,7 +424,8 @@ func (m LauncherModel) View() string {
 
 			cardText := lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(theme.ColorBorderLit).
+				BorderForeground(borderColor).
+				Background(theme.ColorRaised).
 				Padding(0, 1).
 				Width(wBox).
 				Render(line1 + "\n" + line2)
@@ -395,20 +435,22 @@ func (m LauncherModel) View() string {
 			keyBadge := subStyle.Render("[" + item.keyNumber + "]")
 			itemTitle := titleStyle.Render(item.title)
 
-			// Clean compact row for unselected items. Truncation is applied to the
-			// raw description text BEFORE styling so multi-byte runes and ANSI
-			// sequences are never split mid-sequence, and the untouched item
-			// description is preserved across re-renders.
+			// Quiet single-line row with a dim rail — the findings-feed visual
+			// language. Keeps the whole deck inside small terminals (the
+			// selected card above is the only bordered element). Truncation is
+			// applied to the raw description text BEFORE styling so multi-byte
+			// runes and ANSI sequences are never split mid-sequence.
 			descText := item.description
 			prefixW := lipgloss.Width(keyBadge) + 1 + lipgloss.Width(item.icon) + 1 + lipgloss.Width(item.title) + 2
-			descBudget := wBox - prefixW
+			descBudget := wBox - prefixW - 2 // dim rail prefix
 			if descBudget < 1 {
 				descBudget = 1
 			}
 			if lipgloss.Width(descText) > descBudget {
 				descText = runewidth.Truncate(descText, descBudget-1, "…")
 			}
-			row := fmt.Sprintf("   %s %s %-32s %s", keyBadge, item.icon, itemTitle, subStyle.Render(descText))
+			rail := subStyle.Render("│")
+			row := fmt.Sprintf("%s  %s %s %-32s %s", rail, keyBadge, item.icon, itemTitle, subStyle.Render(descText))
 			if lipgloss.Width(row) > wBox {
 				row = runewidth.Truncate(row, wBox-1, "…")
 			}
@@ -416,12 +458,14 @@ func (m LauncherModel) View() string {
 		}
 	}
 
-	// 3. Compact Footer shortcuts
-	footer := subStyle.Render("[↑/↓ or j/k] Navigate  •  [1-7] Quick Select  •  [Enter] Launch  •  [q] Exit")
-	b.WriteString(footer + "\n")
+	// 3. Footer shortcuts — same visual language as the scan screens.
+	footer := m.theme.KeyHint.Render("[↑/↓ or j/k] Navigate   ") +
+		m.theme.KeyHint.Render("[1-7] Quick Select   ") +
+		m.theme.KeyHint.Render("[Enter] Launch   ") +
+		m.theme.KeyHint.Render("[q] Exit")
+	b.WriteString("\n" + footer + "\n")
 
-	_ = borderStyle
-	return b.String()
+	return m.theme.AppContainer.Render(b.String())
 }
 
 // RunInteractiveLauncher executes the Bubble Tea interactive Command Center.

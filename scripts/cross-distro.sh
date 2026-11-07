@@ -38,10 +38,17 @@ goimage_for() {
 
 pre_for() {
 	case "$1" in
-	debian | ubuntu) echo "apt-get update && apt-get install -y" ;;
+	debian | ubuntu) echo "apt-get install -y" ;;
 	fedora) echo "dnf install -y" ;;
-	arch) echo "pacman -Sy --noconfirm" ;;
+	arch) echo "pacman -S --noconfirm" ;;
 	alpine) echo "apk add --no-cache" ;;
+	esac
+}
+
+update_for() {
+	case "$1" in
+	debian | ubuntu) echo "apt-get update" ;;
+	*) echo "" ;;
 	esac
 }
 
@@ -86,6 +93,7 @@ for distro in "${SELECTED[@]}"; do
 	if ! docker build \
 		--build-arg "GOIMAGE=$(goimage_for "$distro")" \
 		--build-arg "BASE=$(base_for "$distro")" \
+		--build-arg "UPDATE=$(update_for "$distro")" \
 		--build-arg "PRE=$(pre_for "$distro")" \
 		--build-arg "PKGS=$(pkgs_for "$distro")" \
 		-f "$DOCKERFILE" -t "$image" "$REPO_ROOT"; then

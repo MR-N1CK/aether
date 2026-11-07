@@ -8,14 +8,22 @@
 # Build args:
 #   GOIMAGE — toolchain source (golang:1.26; golang:1.26-alpine for musl hosts)
 #   BASE    — distro userspace image
-#   PRE     — distro package-manager command (apt-get update && apt-get install -y, dnf install -y, pacman -Sy --noconfirm, apk add --no-cache)
-#   PKGS    — packages to install (ca-certificates git gcc [+ musl-dev on Alpine])
+#   UPDATE  — optional package-index refresh command ("apt-get update" for
+#             Debian/Ubuntu; empty for dnf/pacman/apk which refresh inline)
+#   PRE     — distro package-manager install command
+#             (apt-get install -y, dnf install -y, pacman -S --noconfirm, apk add)
+#   PKGS    — packages to install (ca-certificates git gcc [+ musl-dev bash on Alpine])
+#
+# NOTE: no build-arg may contain shell operators (&&, ;). BuildKit's RUN
+# expansion mangles them — observed as "apt-get update" receiving the package
+# list as arguments (2026-11-07). Keep UPDATE/PRE single-command.
 ARG GOIMAGE=golang:1.26
 ARG BASE=debian:12-slim
 
 FROM ${GOIMAGE} AS toolchain
 
 FROM ${BASE}
+ARG UPDATE
 ARG PRE
 ARG PKGS
 COPY --from=toolchain /usr/local/go /usr/local/go
@@ -25,5 +33,5 @@ ENV PATH="/usr/local/go/bin:${PATH}" \
 # -buildvcs=false: host-mounted checkouts are owned by a different uid than
 # the container user, and git refuses VCS stamping there (exit status 128).
 # Release builds stamp versions via build-env.sh ldflags, not buildvcs.
-RUN ${PRE} ${PKGS}
+RUN if [ -n "${UPDATE}" ]; then ${UPDATE}; fi; ${PRE} ${PKGS}
 WORKDIR /app

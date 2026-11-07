@@ -60,22 +60,23 @@ var ASCIIBorder = lipgloss.Border{
 	BottomRight: "+",
 }
 
-// Palette definitions - Master-tier Obsidian Studio 4-Tier Elevation Ladder
+// Palette definitions — Deep Ocean Teal: deep navy surfaces, electric teal
+// accents, ice-white text. Mission-control dark with high readability.
 var (
-	ColorObsidian   = lipgloss.Color("#05070B") // Deepest void obsidian (tier 0 root container)
-	ColorVoid       = lipgloss.Color("#05070B") // Tier 0: Root void canvas
-	ColorSurface    = lipgloss.Color("#0A0E15") // Tier 1: Panels and standard card background
-	ColorRaised     = lipgloss.Color("#10151F") // Tier 2: Focused panels, headers, floating cards
-	ColorOverlay    = lipgloss.Color("#161C27") // Tier 3: Modals, active selections, dropdowns
-	ColorBorder     = lipgloss.Color("#1E293B") // Subtle slate hairline border
-	ColorBorderLit  = lipgloss.Color("#38BDF8") // Focused sky cyan border & luminous rail
-	ColorActiveRail = lipgloss.Color("#38BDF8") // Luminous active pane rail
-	ColorTextPrim   = lipgloss.Color("#F8FAFC") // Crisp platinum white text
-	ColorTextSec    = lipgloss.Color("#E2E8F0") // Soft titanium slate text
-	ColorTextMute   = lipgloss.Color("#8B9BB4") // Soft slate gray (WCAG AA on obsidian)
-	ColorAccent     = lipgloss.Color("#0284C7") // Deep Sky Cyan / Steel
-	ColorIndigo     = lipgloss.Color("#6366F1") // Electric Indigo
-	ColorCyan       = lipgloss.Color("#38BDF8") // Telemetry cyan
+	ColorObsidian   = lipgloss.Color("#0B1220") // Tier 0 root void canvas (deep navy)
+	ColorVoid       = lipgloss.Color("#0B1220") // Deepest void obsidian (tier 0 root container)
+	ColorSurface    = lipgloss.Color("#101828") // Tier 1: Panels and standard card background
+	ColorRaised     = lipgloss.Color("#16203A") // Tier 2: Focused panels, headers, floating cards
+	ColorOverlay    = lipgloss.Color("#1D2A45") // Tier 3: Modals, active selections, dropdowns
+	ColorBorder     = lipgloss.Color("#24334F") // Subtle navy hairline border
+	ColorBorderLit  = lipgloss.Color("#22D3EE") // Focused electric teal border & luminous rail
+	ColorActiveRail = lipgloss.Color("#22D3EE") // Luminous active pane rail
+	ColorTextPrim   = lipgloss.Color("#E6EDF7") // Ice white text
+	ColorTextSec    = lipgloss.Color("#C9D6E8") // Soft titanium text
+	ColorTextMute   = lipgloss.Color("#8CA0B8") // Muted slate (WCAG AA on navy)
+	ColorAccent     = lipgloss.Color("#0E7490") // Deep steel teal
+	ColorIndigo     = lipgloss.Color("#818CF8") // Electric indigo
+	ColorCyan       = lipgloss.Color("#22D3EE") // Telemetry teal
 
 	// Executive severity colors - restrained, distinct, high-contrast.
 	// Canonical tokens live in internal/report/palette.go and are shared by
@@ -440,7 +441,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 
 	t.TabInactive = lipgloss.NewStyle().
 		Foreground(ColorTextMute).
-		Background(lipgloss.Color("#1E293B")).
+		Background(lipgloss.Color("#24334F")).
 		Padding(0, 1)
 
 	t.ToastBox = lipgloss.NewStyle().
@@ -484,7 +485,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 	t.PillNeutral = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(ColorTextPrim).
-		Background(lipgloss.Color("#1E293B")).
+		Background(lipgloss.Color("#24334F")).
 		Padding(0, 1)
 
 	t.PillKey = lipgloss.NewStyle().
@@ -547,7 +548,7 @@ func NewTheme(noColor bool, ascii ...bool) *Theme {
 
 	t.TabBadgeInactive = lipgloss.NewStyle().
 		Foreground(ColorTextMute).
-		Background(lipgloss.Color("#1E293B")).
+		Background(lipgloss.Color("#24334F")).
 		Padding(0, 1)
 
 	return t
@@ -872,8 +873,8 @@ func (t *Theme) RenderGradientText(text string, hexColors ...string) string {
 	return out.String()
 }
 
-// Aurora accent ramp (DESIGN.md §1): deep steel → telemetry cyan → platinum.
-var AuroraRamp = []string{"#0284C7", "#38BDF8", "#F8FAFC"}
+// Aurora accent ramp (DESIGN.md §1): deep steel teal → electric teal → ice.
+var AuroraRamp = []string{"#0E7490", "#22D3EE", "#E0FEFF"}
 
 // RenderGradientBar renders a high-precision eighth-block progress bar whose
 // fill columns are tinted along the given hex-color ramp — the Aurora Command

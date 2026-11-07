@@ -155,7 +155,7 @@ func RenderFindingCard(w io.Writer, f report.Finding, th *theme.Theme) {
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#F8FAFC"))
+		Foreground(lipgloss.Color("#E6EDF7"))
 
 	keyStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -163,7 +163,7 @@ func RenderFindingCard(w io.Writer, f report.Finding, th *theme.Theme) {
 		Width(12)
 
 	valStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E2E8F0"))
+		Foreground(lipgloss.Color("#C9D6E8"))
 
 	var lines []string
 	// Value-column wrapping keeps every line inside the terminal so the
@@ -244,7 +244,7 @@ func RenderFindingCard(w io.Writer, f report.Finding, th *theme.Theme) {
 	if f.Evidence != "" {
 		evStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FDE047")).
-			Background(lipgloss.Color("#1E293B")).
+			Background(lipgloss.Color("#24334F")).
 			Padding(0, 1)
 		evWrapped := WrapWords(f.Evidence, valueW-2)
 		lines = append(lines, fmt.Sprintf("%s %s", keyStyle.Render("Evidence:"), evStyle.Render(evWrapped[0])))
@@ -320,7 +320,7 @@ func RenderExecutiveAssessmentCard(w io.Writer, ass realworld.ComprehensiveSyste
 	case realworld.PostureAttentionRequired:
 		color = lipgloss.Color("#F59E0B")
 	case realworld.PostureLimitedVisibility:
-		color = lipgloss.Color("#38BDF8")
+		color = lipgloss.Color("#22D3EE")
 	default:
 		color = lipgloss.Color("#10B981")
 	}
@@ -333,7 +333,7 @@ func RenderExecutiveAssessmentCard(w io.Writer, ass realworld.ComprehensiveSyste
 		Render(fmt.Sprintf("POSTURE: %s", ass.Posture))
 
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#94A3B8")).Width(16)
-	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F8FAFC"))
+	valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E6EDF7"))
 
 	var lines []string
 	lines = append(lines, badge)
@@ -354,7 +354,7 @@ func RenderExecutiveAssessmentCard(w io.Writer, ass realworld.ComprehensiveSyste
 		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ADE80")).Render("Action Recommendations:"))
 		for _, act := range ass.NextActions {
 			pTag := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FBBF24")).Render(fmt.Sprintf("[P%d]", act.Priority))
-			cmdTag := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Render(act.Command)
+			cmdTag := lipgloss.NewStyle().Foreground(lipgloss.Color("#22D3EE")).Render(act.Command)
 			lines = append(lines, fmt.Sprintf("  • %s %-30s -> %s", pTag, act.Title, cmdTag))
 		}
 	}

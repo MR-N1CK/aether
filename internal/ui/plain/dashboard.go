@@ -72,14 +72,14 @@ func (d *LiveDashboard) RenderProgress(filesScanned int64, filesPerSec float64, 
 		return
 	}
 
-	spinStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true).Render(spinner)
+	spinStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22D3EE")).Bold(true).Render(spinner)
 	modStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")).Bold(true).Render(activeModule)
-	statsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F8FAFC")).Render(fmt.Sprintf("%d files (%.0f/s, %s)", filesScanned, filesPerSec, elapsed.Round(time.Second)))
+	statsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E6EDF7")).Render(fmt.Sprintf("%d files (%.0f/s, %s)", filesScanned, filesPerSec, elapsed.Round(time.Second)))
 
 	badgeAlert := lipgloss.NewStyle().Background(lipgloss.Color("#F43F5E")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Alerts", d.alerts))
 	badgeWarn := lipgloss.NewStyle().Background(lipgloss.Color("#FBBF24")).Foreground(lipgloss.Color("#000000")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Warnings", d.warnings))
 	badgeNotice := lipgloss.NewStyle().Background(lipgloss.Color("#34D399")).Foreground(lipgloss.Color("#000000")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Notices", d.notices))
-	badgeInfo := lipgloss.NewStyle().Background(lipgloss.Color("#1E293B")).Foreground(lipgloss.Color("#F8FAFC")).Padding(0, 1).Render(fmt.Sprintf("%d Infos", d.infos))
+	badgeInfo := lipgloss.NewStyle().Background(lipgloss.Color("#24334F")).Foreground(lipgloss.Color("#E6EDF7")).Padding(0, 1).Render(fmt.Sprintf("%d Infos", d.infos))
 
 	line := fmt.Sprintf("\r %s  [%s] %s  │  %s %s %s %s   ",
 		spinStyle, modStyle, statsStyle,

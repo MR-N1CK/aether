@@ -14,19 +14,21 @@ Code references: `internal/ui/theme/theme.go`, `internal/report/palette.go`,
 
 ## 1. Color system
 
-### Elevation ladder (TUI surfaces)
+### Elevation ladder (TUI surfaces) — Deep Ocean Teal
 | Token | Hex | Role |
 |---|---|---|
-| `ColorObsidian` | `#05070B` | Tier 0 — root void canvas |
-| `ColorSurface`  | `#0A0E15` | Tier 1 — panels, standard cards |
-| `ColorRaised`   | `#10151F` | Tier 2 — headers, floating cards |
-| `ColorOverlay`  | `#161C27` | Tier 3 — modals, active selections |
-| `ColorBorder`   | `#1E293B` | Hairline borders |
+| `ColorVoid`     | `#0B1220` | Tier 0 — root void canvas (deep navy) |
+| `ColorSurface`  | `#101828` | Tier 1 — panels, standard cards |
+| `ColorRaised`   | `#16203A` | Tier 2 — headers, floating cards |
+| `ColorOverlay`  | `#1D2A45` | Tier 3 — modals, active selections |
+| `ColorBorder`   | `#24334F` | Hairline borders |
 
 ### Accent ramp (Aurora gradient — meters, rails, logo)
 3 stops, always cold→bright, never decorative:
-`#0284C7` (deep steel) → `#38BDF8` (telemetry cyan) → `#F8FAFC` (platinum).
+`#0E7490` (deep steel teal) → `#22D3EE` (electric teal) → `#E0FEFF` (ice).
 Implemented by `theme.RenderGradientBar` / `theme.RenderGradientText`.
+The HTML report mirrors this system: navy glass surfaces, teal accent
+(`--accent: #22d3ee`), violet washes replaced by teal washes.
 
 ### Severity palette (canonical, shared by TUI + plain + HTML)
 Defined once in `internal/report/palette.go`:

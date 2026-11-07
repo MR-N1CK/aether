@@ -68,7 +68,7 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 		riskColor = lipgloss.Color("#FBBF24")
 		postureTitle = fmt.Sprintf("ATTENTION REQUIRED — %d Warning(s) & %d Notice(s) Detected", ev.Warnings, ev.Notices)
 	case realworld.PostureLimitedVisibility:
-		riskColor = lipgloss.Color("#38BDF8")
+		riskColor = lipgloss.Color("#22D3EE")
 		postureTitle = "LIMITED VISIBILITY — Subsystems Uninspected Due to Permissions"
 	default:
 		riskColor = lipgloss.Color("#34D399")
@@ -173,7 +173,7 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 		Width(18)
 
 	valStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F8FAFC"))
+		Foreground(lipgloss.Color("#E6EDF7"))
 
 	verdictContentW := ContentWidth(w, DefaultContentWidth) - 8 // border + Padding(1,2)
 	verdictValW := verdictContentW - 19                         // key column (18) + space
@@ -186,7 +186,7 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 
 	badgeAlert := lipgloss.NewStyle().Background(lipgloss.Color("#F43F5E")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Alerts", ev.Alerts))
 	badgeWarn := lipgloss.NewStyle().Background(lipgloss.Color("#D97706")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Warnings", ev.Warnings))
-	badgeNotice := lipgloss.NewStyle().Background(lipgloss.Color("#0284C7")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Notices", ev.Notices))
+	badgeNotice := lipgloss.NewStyle().Background(lipgloss.Color("#0E7490")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1).Render(fmt.Sprintf("%d Notices", ev.Notices))
 	badgeInfo := lipgloss.NewStyle().Background(lipgloss.Color("#334155")).Foreground(lipgloss.Color("#FFFFFF")).Padding(0, 1).Render(fmt.Sprintf("%d Infos", ev.Infos))
 
 	var lines []string
@@ -250,13 +250,13 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 
 	if len(ev.TopRules) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#38BDF8")).Render("Top Triggered Detection Rules:"))
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#22D3EE")).Render("Top Triggered Detection Rules:"))
 		for i, tr := range ev.TopRules {
 			if i >= 5 {
 				break
 			}
 			rSev := lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8")).Render(fmt.Sprintf("[%s]", tr.Severity))
-			rName := lipgloss.NewStyle().Foreground(lipgloss.Color("#E2E8F0")).Render(tr.RuleName)
+			rName := lipgloss.NewStyle().Foreground(lipgloss.Color("#C9D6E8")).Render(tr.RuleName)
 			rCnt := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FDE047")).Render(fmt.Sprintf("%d occurrences", tr.Count))
 			lines = append(lines, fmt.Sprintf("  • %s %-45s %s", rSev, rName, rCnt))
 		}
@@ -267,7 +267,7 @@ func RenderExecutiveVerdict(w io.Writer, ev events.ScanFinished, th *theme.Theme
 		lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ADE80")).Render("Prioritized Action Recommendations:"))
 		for _, act := range ass.NextActions {
 			pBadge := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FBBF24")).Render(fmt.Sprintf("[P%d]", act.Priority))
-			cmdBadge := lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Render(act.Command)
+			cmdBadge := lipgloss.NewStyle().Foreground(lipgloss.Color("#22D3EE")).Render(act.Command)
 			lines = append(lines, fmt.Sprintf("  • %s %-32s -> %s", pBadge, act.Title, cmdBadge))
 		}
 	}

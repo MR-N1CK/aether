@@ -66,13 +66,13 @@ func RenderScanHeader(w io.Writer, ev events.ScanStarted, th *theme.Theme) {
 	// Rich Lipgloss Box Header
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#38BDF8"))
+		Foreground(lipgloss.Color("#22D3EE"))
 
 	subStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#8B949E"))
 
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#38BDF8")).
+		Foreground(lipgloss.Color("#22D3EE")).
 		Bold(true)
 
 	valStyle := lipgloss.NewStyle().
@@ -83,7 +83,7 @@ func RenderScanHeader(w io.Writer, ev events.ScanStarted, th *theme.Theme) {
 		modeLabel = "FULL REAL-WORLD AUDIT"
 	}
 	badgeMode := lipgloss.NewStyle().
-		Background(lipgloss.Color("#0284C7")).
+		Background(lipgloss.Color("#0E7490")).
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Padding(0, 1).
 		Bold(true).
@@ -111,7 +111,7 @@ func RenderScanHeader(w io.Writer, ev events.ScanStarted, th *theme.Theme) {
 
 	card := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#38BDF8")).
+		BorderForeground(lipgloss.Color("#22D3EE")).
 		Padding(0, 2).
 		MarginBottom(1).
 		Render(boxContent)

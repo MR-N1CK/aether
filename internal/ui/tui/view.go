@@ -86,10 +86,10 @@ func (m Model) renderSplash() string {
 		logoStyle = lipgloss.NewStyle().Bold(true)
 	} else if m.splashFrame <= 6 {
 		// Phase 1: Deep Navy wipe
-		logoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2563EB")).Bold(true)
+		logoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#0E7490")).Bold(true)
 	} else if m.splashFrame <= 12 {
 		// Phase 2: Bright Cyan
-		logoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
+		logoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#22D3EE")).Bold(true)
 	} else {
 		// Phase 3: Crisp Platinum White / Azure Glow
 		logoStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
@@ -674,7 +674,7 @@ func (m Model) renderBrandHeader(width int, statusText string) string {
 	if m.theme.ASCII {
 		brandPrefix = "* "
 	}
-	gradientLogo := m.theme.RenderGradientText(brandPrefix+"A E T H E R", "#0284C7", "#38BDF8", "#F8FAFC")
+	gradientLogo := m.theme.RenderGradientText(brandPrefix+"A E T H E R", "#0E7490", "#22D3EE", "#E6EDF7")
 	title := gradientLogo + "  " + m.theme.BrandTagline.Render(":: DEFENSIVE LINUX THREAT HUNTING ENGINE")
 
 	targetPath := "Root Filesystem (/)"

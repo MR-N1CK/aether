@@ -29,7 +29,11 @@ func buildDefaultModules(cfg *config.Config, rootFS string, iocEng ioc.Engine, b
 	containerMod := container.NewModuleWithRoots(rootFS, "", iocEng, bus, logger)
 
 	isCustom := cfg.Scan.ExplicitPaths || (len(cfg.Scan.Paths) > 0 && !slicesEqual(cfg.Scan.Paths, config.DefaultScanPaths()))
-	if cfg.Scan.Quick || cfg.Scan.Full {
+	// Quick/Full profiles select the full module set only when scanning the
+	// default targets. An explicit user path always wins: `scan --quick <dir>`
+	// means "scan this directory", so it runs filesystem-only — the same
+	// semantics the launcher's Target Directory Scan already had.
+	if cfg.Scan.Full || (cfg.Scan.Quick && !cfg.Scan.ExplicitPaths) {
 		isCustom = false
 	}
 

@@ -122,6 +122,22 @@ make build-yara-static
 
 ## CLI Usage Guide
 
+**The zero-argument flow** — this is how the tool is meant to be used day to day:
+
+```bash
+sudo aether        # Command Center: pick Quick Scan / Deep Hunt / Target Folder / Setup / Report
+```
+
+Scan semantics by invocation (no flags needed to remember):
+
+| Command | What runs |
+| :--- | :--- |
+| `aether scan --quick` | Full live-module hunt of high-risk locations |
+| `aether scan --quick /some/dir` | **That directory's files only** (filesystem module) |
+| `aether scan /some/dir` | Same — explicit paths always mean filesystem-only |
+| `aether scan --full` | Everything, everywhere |
+| any + `--modules process,persistence,…` | Override the module selection explicitly |
+
 ```bash
 # 1. Open Interactive Command Center (when run with no arguments in a TTY)
 aether
@@ -132,11 +148,11 @@ aether scan --quick --plain
 # 3. Full deep system scan with self-contained HTML report
 aether scan --full --html-out /tmp/aether-report.html
 
-# 4. Target a specific directory or script
+# 4. Target a specific directory or script (filesystem-only by design)
 aether scan --plain /path/to/target
 
-# 5. Interactive Bubbletea TUI scan
-aether scan --quick --tui
+# 5. TUI launches automatically in a terminal (--plain forces text output)
+aether scan --quick   # interactive TUI launches automatically in a terminal (--plain forces text output)
 
 # 6. Acknowledge a known benign finding (pins file/line hash to suppress alerts)
 aether ack /path/to/file --reason "Approved internal administration script"
@@ -183,8 +199,10 @@ aether intel import /path/to/local-feed.txt       # offline import path
 - **Verified Environment**:
   - Kali Linux, kernel `7.1.5+kali`, `amd64` (x86_64)
 
+- **Cross-Distro Test Matrix**: the full suite runs inside containers on Debian 12, Ubuntu 24.04, Fedora 41 (rpm userspace — validates the RPM backend against a real rpmdb), Arch Linux (pacman), and Alpine (apk, musl). Run locally with `make test-cross` or `scripts/cross-distro.sh [--distro <name>]`; the same matrix runs in CI as container jobs.
+
 - **Not Yet Tested**:
-  - Ubuntu, Debian, Arch Linux, `arm64` (aarch64), Linux kernels 5.x / 6.x
+  - `arm64` (aarch64) containers locally (CI covers aarch64 via `ubuntu-24.04-arm`), Linux kernels 5.x / 6.x
 
 ---
 

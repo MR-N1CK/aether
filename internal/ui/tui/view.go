@@ -1726,13 +1726,24 @@ func (m Model) renderFinished() string {
 	// 5. Findings Feed Table + Live Preview
 	b.WriteString(m.renderFindingsFeed(cardWidth) + "\n")
 
+	// 5b. Report-ready announcement: every scan auto-writes the executive
+	// HTML report; surface it so users never have to find it themselves.
+	if m.htmlReportPath != "" {
+		b.WriteString(fmt.Sprintf("%s  %s   %s\n",
+			m.theme.KeyHint.Render("Executive report:"),
+			m.theme.FindingPath.Render(m.htmlReportPath),
+			m.theme.KeyHint.Render("[o] open in browser"),
+		))
+	}
+
 	// 6. Navigation Footer
-	footerText := fmt.Sprintf("%s Nav   %s Dossier   %s Filter   %s Yank   %s Shortcuts   %s Exit",
+	footerText := fmt.Sprintf("%s Nav   %s Dossier   %s Filter   %s Yank   %s Shortcuts   %s Report   %s Exit",
 		m.theme.KeyHint.Render("[j/k]"),
 		m.theme.KeyHint.Render("[Enter]"),
 		m.theme.KeyHint.Render("[/]"),
 		m.theme.KeyHint.Render("[y/h/c]"),
 		m.theme.KeyHint.Render("[?]"),
+		m.theme.KeyHint.Render("[o]"),
 		m.theme.KeyHint.Render("[q]"),
 	)
 	if m.isFiltering {

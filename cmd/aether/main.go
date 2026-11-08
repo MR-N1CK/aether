@@ -1115,7 +1115,7 @@ Indicators are deduplicated and saved as static forensic rules for subsequent sc
 	updateCmd.GroupID = "admin"
 	versionCmd.GroupID = "admin"
 
-	rootCmd.AddCommand(scanCmd, quickCmd, fullCmd, setupCmd, ackCmd, updateCmd, versionCmd, demoCmd, rulesCmd, intelCmd)
+	rootCmd.AddCommand(scanCmd, quickCmd, fullCmd, setupCmd, ackCmd, updateCmd, versionCmd, demoCmd, rulesCmd, intelCmd, doctorCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

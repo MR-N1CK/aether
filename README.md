@@ -139,6 +139,9 @@ Scan semantics by invocation (no flags needed to remember):
 | any + `--modules process,persistence,…` | Override the module selection explicitly |
 
 ```bash
+# 0. Verify installation health (privileges, signatures, package DB, engine self-test)
+aether doctor
+
 # 1. Open Interactive Command Center (when run with no arguments in a TTY)
 aether
 

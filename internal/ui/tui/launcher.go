@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -201,6 +203,9 @@ func (m LauncherModel) Init() tea.Cmd {
 
 // Update handles UI events in the launcher.
 func (m LauncherModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Heartbeat for the stall watchdog: a healthy Command Center processes
+	// ticks (120ms), keys, and resizes constantly.
+	launcherLastMsg.Store(time.Now().UnixNano())
 	switch msg := msg.(type) {
 	case launcherTickMsg:
 		m.animFrame++
@@ -468,11 +473,65 @@ func (m LauncherModel) View() string {
 	return m.theme.AppContainer.Render(b.String())
 }
 
+// launcherStallTimeout is the watchdog threshold: the Command Center's tick
+// fires every 120ms, so a healthy program processes messages constantly. No
+// message for this long means the event/input loop is stalled — observed as
+// "menu renders one frame, arrow keys echo as literal text" under some
+// sudo/terminal combinations (2026-11-07). The watchdog converts that silent
+// freeze into a loud, guided exit.
+const launcherStallTimeout = 8 * time.Second
+
+// launcherLastMsg is shared across the value-copied model instances so the
+// watchdog goroutine can observe Update activity from outside the program.
+var launcherLastMsg atomic.Int64
+
+// launcherStalled reports whether the Command Center event loop stalled.
+var launcherStalled atomic.Bool
+
+// launcherWatchdog monitors message activity and quits the program with a
+// stall flag when the event loop goes silent beyond the threshold.
+func launcherWatchdog(p *tea.Program, done <-chan struct{}) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			last := time.Unix(0, launcherLastMsg.Load())
+			if time.Since(last) > launcherStallTimeout {
+				launcherStalled.Store(true)
+				p.Quit()
+				return
+			}
+		}
+	}
+}
+
 // RunInteractiveLauncher executes the Bubble Tea interactive Command Center.
 func RunInteractiveLauncher(th *theme.Theme, ver ...string) (LauncherResult, error) {
+	launcherStalled.Store(false)
+	launcherLastMsg.Store(time.Now().UnixNano())
+
 	m := NewLauncherModel(th, ver...)
 	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	done := make(chan struct{})
+	// The watchdog keys off tick heartbeats; monochrome themes don't tick, so
+	// there is nothing to monitor there (and nothing to stall).
+	if !th.NoColor {
+		go launcherWatchdog(p, done)
+	}
+
 	finalModel, err := p.Run()
+	close(done)
+
+	if launcherStalled.Load() {
+		return LauncherResult{Action: ActionExit}, errors.New(
+			"command center input stalled — the terminal did not deliver keyboard events " +
+				"(seen with some sudo/terminal combinations). Use 'aether scan --quick --plain' instead, " +
+				"or run the launcher inside 'script -qec \"aether\" /dev/null'")
+	}
 	if err != nil {
 		return LauncherResult{Action: ActionExit}, err
 	}

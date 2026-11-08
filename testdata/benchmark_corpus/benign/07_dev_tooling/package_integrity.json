@@ -1,0 +1,10 @@
+{
+  "name": "internal-web-tools",
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "dependencies": { "express": "4.19.2" } },
+    "node_modules/express": {
+      "integrity": "sha512-pQ3xR9sT2mK8vLwY5nJ1hC4dE6fG7aB0zX9cV2bN3mQ5rT8uW1yA4eH6jK0lZ3sD7fG2hJ9kL5vBqN8wM2xC4z=="
+    }
+  }
+}

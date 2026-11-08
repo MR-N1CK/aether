@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-BROWSER-001",
+  "name": "Vendor Software Update Agent",
+  "category": "BENIGN",
+  "subcategory": "browsers",
+  "target_path": "browser_update_check.sh",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

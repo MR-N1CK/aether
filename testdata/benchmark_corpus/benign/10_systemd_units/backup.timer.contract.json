@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-SYSTEMD-001",
+  "name": "Backup Schedule Timer",
+  "category": "BENIGN",
+  "subcategory": "systemd_units",
+  "target_path": "backup.timer",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

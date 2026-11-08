@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-SSH-001",
+  "name": "SSHD Hardening Configuration",
+  "category": "BENIGN",
+  "subcategory": "ssh_config",
+  "target_path": "sshd_hardening.conf",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

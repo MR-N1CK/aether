@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-ADMIN-001",
+  "name": "Log Rotation Script",
+  "category": "BENIGN",
+  "subcategory": "admin_scripts",
+  "target_path": "rotate_logs.sh",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

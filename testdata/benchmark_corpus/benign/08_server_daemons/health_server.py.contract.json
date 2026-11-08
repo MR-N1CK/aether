@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-DAEMON-002",
+  "name": "Local Health Probe Server",
+  "category": "BENIGN",
+  "subcategory": "server_daemons",
+  "target_path": "health_server.py",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

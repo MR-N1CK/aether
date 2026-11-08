@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-DEVTOOL-002",
+  "name": "Package Lockfile Integrity Hashes",
+  "category": "BENIGN",
+  "subcategory": "dev_tooling",
+  "target_path": "package_integrity.json",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

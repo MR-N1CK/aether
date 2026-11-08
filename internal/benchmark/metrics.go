@@ -2,6 +2,7 @@ package benchmark
 
 import (
 	"math"
+	"sort"
 
 	"aether/internal/report"
 )
@@ -27,6 +28,16 @@ func (m *MetricsCalculator) CalculateMetrics(cases []BenchmarkCorpusCase, result
 	var catCTotal, catCCorrect int
 	var catETotal, catECorrect int
 	detectedMalSubclasses := make(map[string]bool)
+	ruleStats := make(map[string]*RuleFPStat)
+
+	ruleStatFor := func(name string) *RuleFPStat {
+		st, ok := ruleStats[name]
+		if !ok {
+			st = &RuleFPStat{RuleName: name}
+			ruleStats[name] = st
+		}
+		return st
+	}
 
 	for _, r := range results {
 		c, ok := caseMap[r.CaseID]
@@ -34,6 +45,23 @@ func (m *MetricsCalculator) CalculateMetrics(cases []BenchmarkCorpusCase, result
 			continue
 		}
 
+		// 0. Per-rule behavior tracking: every rule that fired gets credit or
+		// scrutiny depending on the ground truth and the case's adjudication.
+		isMaliciousGroundTruth := c.Expected.ExpectedVerdict == report.VerdictMalicious
+		for _, name := range r.ActualRules {
+			st := ruleStatFor(name)
+			if isMaliciousGroundTruth {
+				st.MaliciousHits++
+			} else {
+				st.BenignHits++
+			}
+			switch r.FailureClassification {
+			case "FALSE_POSITIVE":
+				st.FalsePositives++
+			case "OVER_ESCALATION":
+				st.OverEscalations++
+			}
+		}
 		// 1. Binary Threat Classification (Ground Truth MALICIOUS vs Non-MALICIOUS)
 		if c.Expected.ExpectedVerdict == report.VerdictMalicious {
 			if r.ActualVerdict == report.VerdictMalicious {
@@ -137,6 +165,30 @@ func (m *MetricsCalculator) CalculateMetrics(cases []BenchmarkCorpusCase, result
 	} else {
 		metrics.AbstentionAccuracy = (float64(catECorrect) / float64(catETotal)) * 100.0
 	}
+
+	// 8. Per-rule accuracy report card: FP-rate per rule, sorted worst-first
+	// so tuning candidates surface at the top. Deterministic total order
+	// (FP count → benign hits → name) — the determinism gate byte-compares
+	// benchmark reports across runs.
+	ruleAccuracy := make([]RuleFPStat, 0, len(ruleStats))
+	for _, st := range ruleStats {
+		if st.BenignHits > 0 {
+			st.FPRatePercent = sanitizeFloat((float64(st.FalsePositives+st.OverEscalations) / float64(st.BenignHits)) * 100.0)
+		}
+		ruleAccuracy = append(ruleAccuracy, *st)
+	}
+	sort.SliceStable(ruleAccuracy, func(i, j int) bool {
+		fi := ruleAccuracy[i].FalsePositives + ruleAccuracy[i].OverEscalations
+		fj := ruleAccuracy[j].FalsePositives + ruleAccuracy[j].OverEscalations
+		if fi != fj {
+			return fi > fj
+		}
+		if ruleAccuracy[i].BenignHits != ruleAccuracy[j].BenignHits {
+			return ruleAccuracy[i].BenignHits > ruleAccuracy[j].BenignHits
+		}
+		return ruleAccuracy[i].RuleName < ruleAccuracy[j].RuleName
+	})
+	metrics.RuleAccuracy = ruleAccuracy
 
 	// Ensure all floats are sanitized
 	metrics.Precision = sanitizeFloat(metrics.Precision)

@@ -90,6 +90,21 @@ func (e *ReportExporter) GenerateMarkdownSummary(rep BenchmarkReport) string {
 		sb.WriteString("\n")
 	}
 
+	// 3. Per-Rule Accuracy Report Card — the data-driven rule-tuning surface.
+	sb.WriteString("## 3. Per-Rule Accuracy Report Card\n\n")
+	if len(m.RuleAccuracy) == 0 {
+		sb.WriteString("_No rules fired during this benchmark run._\n\n")
+	} else {
+		sb.WriteString("| Rule | Fires on Benign | Fires on Malicious | FP Adjudications | Over-Escalations | Benign FP Rate | Status |\n")
+		sb.WriteString("| :--- | :---: | :---: | :---: | :---: | :---: | :---: |\n")
+		for _, rs := range m.RuleAccuracy {
+			sb.WriteString(fmt.Sprintf("| `%s` | %d | %d | %d | %d | `%.1f%%` | %s |\n",
+				rs.RuleName, rs.BenignHits, rs.MaliciousHits, rs.FalsePositives, rs.OverEscalations,
+				rs.FPRatePercent, statusBadge(rs.Status() == "OK")))
+		}
+		sb.WriteString("\n> **Status legend**: `OK` = zero benign triggers · `WATCH` = fires on benign fixtures but every adjudication passed · `REVIEW` = at least one FP or over-escalation adjudication — tuning candidate.\n\n")
+	}
+
 	return sb.String()
 }
 

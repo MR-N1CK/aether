@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-ADMIN-002",
+  "name": "Nightly Home Backup Script",
+  "category": "BENIGN",
+  "subcategory": "admin_scripts",
+  "target_path": "backup_home.sh",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

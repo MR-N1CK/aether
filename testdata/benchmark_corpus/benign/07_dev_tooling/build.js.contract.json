@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-DEVTOOL-001",
+  "name": "Node Build Orchestrator",
+  "category": "BENIGN",
+  "subcategory": "dev_tooling",
+  "target_path": "build.js",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

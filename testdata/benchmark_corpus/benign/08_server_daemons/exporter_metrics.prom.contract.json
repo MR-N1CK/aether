@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-DAEMON-003",
+  "name": "Prometheus Exporter Metrics File",
+  "category": "BENIGN",
+  "subcategory": "server_daemons",
+  "target_path": "exporter_metrics.prom",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

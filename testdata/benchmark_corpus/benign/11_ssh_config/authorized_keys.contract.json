@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-SSH-002",
+  "name": "Authorized Public Keys (Team Access)",
+  "category": "BENIGN",
+  "subcategory": "ssh_config",
+  "target_path": "authorized_keys",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

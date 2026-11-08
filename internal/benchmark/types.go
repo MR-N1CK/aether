@@ -110,6 +110,33 @@ type BenchmarkMetrics struct {
 	SuspiciousTriageAccuracy float64 `json:"suspicious_triage_accuracy"`
 	AbstentionAccuracy       float64 `json:"abstention_accuracy"`
 	EvasionResilienceScore   float64 `json:"evasion_resilience_score"`
+	RuleAccuracy             []RuleFPStat `json:"rule_accuracy,omitempty"`
+}
+
+// RuleFPStat tracks one detection rule's behavior across the corpus: how
+// often it fired on benign vs malicious fixtures, and how often its fire was
+// adjudicated a false positive or an over-escalation. This is the data
+// behind data-driven rule tuning — a rule whose benign-hit count grows
+// without recall credit is a tuning candidate, not a guessing candidate.
+type RuleFPStat struct {
+	RuleName        string  `json:"rule_name"`
+	BenignHits      int     `json:"benign_hits"`
+	MaliciousHits   int     `json:"malicious_hits"`
+	FalsePositives  int     `json:"false_positives"`
+	OverEscalations int     `json:"over_escalations"`
+	FPRatePercent   float64 `json:"fp_rate_percent"`
+}
+
+// RuleFPStatStatus classifies a rule's measured behavior for the report card.
+func (s RuleFPStat) Status() string {
+	switch {
+	case s.FalsePositives > 0 || s.OverEscalations > 0:
+		return "REVIEW"
+	case s.BenignHits > 0:
+		return "WATCH"
+	default:
+		return "OK"
+	}
 }
 
 // BenchmarkReport encapsulates the serialized benchmark suite execution output.

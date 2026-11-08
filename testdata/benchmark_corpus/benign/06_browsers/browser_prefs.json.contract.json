@@ -1,0 +1,14 @@
+{
+  "id": "BENIGN-BROWSER-002",
+  "name": "Browser Preferences with Integrity Manifest",
+  "category": "BENIGN",
+  "subcategory": "browsers",
+  "target_path": "browser_prefs.json",
+  "is_package_owned": false,
+  "expected": {
+    "verdict": "SAFE",
+    "allowed_severities": ["INFO", "NOTICE"],
+    "evidence_strength": "StrengthContextual",
+    "min_confidence": "LOW"
+  }
+}

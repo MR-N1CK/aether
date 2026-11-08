@@ -1,0 +1,4 @@
+# HELP node_cpu_seconds_total Cumulative CPU time
+node_cpu_seconds_total{mode="idle"} 91203.44
+node_filesystem_avail_bytes{mountpoint="/"} 41287936000
+node_memory_MemAvailable_bytes 8388608000

@@ -222,20 +222,35 @@ func (a *EngineAdapter) ScanCase(c BenchmarkCorpusCase, pkgDB pkgdb.PackageDB) (
 
 	if c.Subcategory == "ssh_persistence" || strings.Contains(path, "authorized_keys") {
 		contentStr := string(data)
-		if strings.Contains(contentStr, "ssh-rsa") || strings.Contains(contentStr, "ssh-ed25519") {
-			if strings.Contains(contentStr, "backdoor") || strings.Contains(contentStr, "attacker") || !strings.Contains(path, "/usr/lib") {
-				f := &report.Finding{
-					Path:             path,
-					RuleName:         "SSH_Unauthorized_Key_Injection",
-					Reason:           "Unauthorized SSH public key configured in authorized_keys",
-					Severity:         report.SeverityAlert,
-					Confidence:       report.ConfidenceHigh,
-					EvidenceStrength: report.StrengthDirect,
-				}
-				report.DetermineVerdict(f, pkgDB, isExec, false, false, nil)
-				report.PopulateFindingDetails(f)
-				findings = append(findings, f)
+		hasKeys := strings.Contains(contentStr, "ssh-rsa") ||
+			strings.Contains(contentStr, "ssh-ed25519") ||
+			strings.Contains(contentStr, "ecdsa-")
+		// Static emulation of the persistence module's SSH analysis: plain
+		// public keys are the NORMAL state of every legitimate authorized_keys
+		// file (BENIGN-SSH-002 guards this). The injection signature is a
+		// weaponized key — a forced command wrapping an interpreter or network
+		// binary — or adversary infrastructure identity markers in the key
+		// comment. Runtime context (symlink, permissions, mtime, system-account
+		// shells) is assessed by the live persistence module, not here.
+		forcedCommand := strings.Contains(contentStr, "command=\"") &&
+			(strings.Contains(contentStr, "/bin/") || strings.Contains(contentStr, "sh -c") ||
+				strings.Contains(contentStr, "python") || strings.Contains(contentStr, "perl") ||
+				strings.Contains(contentStr, "nc "))
+		adversaryIdentity := strings.Contains(contentStr, "attacker@") ||
+			strings.Contains(contentStr, "@c2") ||
+			strings.Contains(contentStr, "backdoor")
+		if hasKeys && (forcedCommand || adversaryIdentity) {
+			f := &report.Finding{
+				Path:             path,
+				RuleName:         "SSH_Unauthorized_Key_Injection",
+				Reason:           "Unauthorized SSH public key configured in authorized_keys",
+				Severity:         report.SeverityAlert,
+				Confidence:       report.ConfidenceHigh,
+				EvidenceStrength: report.StrengthDirect,
 			}
+			report.DetermineVerdict(f, pkgDB, isExec, false, false, nil)
+			report.PopulateFindingDetails(f)
+			findings = append(findings, f)
 		}
 	}
 

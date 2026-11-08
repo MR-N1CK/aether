@@ -1125,6 +1125,70 @@ func registerScannerRules() {
 		ConfidenceHigh,
 		StrengthContextual)
 
+	m("Linux_Persistence_Cron_Volatile_Execution",
+		"Cron Persistence Executing From Volatile Directory (YARA)",
+		"YARA rule matched cron configuration or installation commands executing payloads from /tmp, /var/tmp, or /dev/shm — volatile directories where binaries are commonly staged and where survival across reboots is improbable for legitimate software.",
+		[]MITREMapping{{Tactic: "Persistence", Technique: "T1053.003", TechniqueName: "Cron"}, {Tactic: "Execution", Technique: "T1059.004", TechniqueName: "Unix Shell"}},
+		[]string{"Inspect the referenced cron file and the payload directory for the staged binary.", "Capture the payload for analysis before removal.", "Remove the cron entry and quarantine the payload."},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("Linux_Backdoor_SSH_AuthorizedKeys_Command",
+		"SSH Authorized Keys With Forced Command Execution (YARA)",
+		"YARA rule matched an authorized_keys entry whose key options force command execution through a shell, interpreter, or network binary — the standard backdoor pattern for turning any SSH key into persistent remote code execution.",
+		[]MITREMapping{{Tactic: "Persistence", Technique: "T1098.004", TechniqueName: "SSH Authorized Keys"}, {Tactic: "Defense Evasion", Technique: "T1098.004", TechniqueName: "SSH Authorized Keys"}},
+		[]string{"Remove the unauthorized key entry from authorized_keys.", "Audit all users' authorized_keys files for additional injected keys.", "Rotate the affected account credentials and review SSH session logs."},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("Linux_Malware_Botnet_Framework_Strings",
+		"Offensive Framework Payload Artifacts (YARA)",
+		"YARA rule matched artifacts of offensive frameworks: msfvenom Linux payload generation, meterpreter session markers, or multi-handler setup scripts.",
+		[]MITREMapping{{Tactic: "Command and Control", Technique: "T1071", TechniqueName: "Application Layer Protocol"}, {Tactic: "Execution", Technique: "T1059.004", TechniqueName: "Unix Shell"}},
+		[]string{"Locate and quarantine the referenced payload binary.", "Review shell histories and process executions for framework usage.", "Block the associated C2 endpoints at the perimeter."},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("Linux_Evasion_History_AntiForensics",
+		"Shell History Anti-Forensics (YARA)",
+		"YARA rule matched shell history anti-forensics: HISTFILE redirected to /dev/null, HISTFILE unset, or history cleared in combination with history-file deletion — standard pre-operation hygiene for interactive intruders.",
+		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1070.003", TechniqueName: "Clear Command History"}},
+		[]string{"Review the invoking account's shell initialization files for anti-forensic modifications.", "Correlate the timeframe with authentication logs and command accounting (auditd/audit.log).", "Restore the shell configuration from a known-good baseline."},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("Linux_Privilege_Sudoers_NOPASSWD_Inject",
+		"Sudoers NOPASSWD Root Grant Injection (YARA)",
+		"YARA rule matched shell commands writing a NOPASSWD ALL grant into /etc/sudoers or /etc/sudoers.d — instant persistent root for the attacking account.",
+		[]MITREMapping{{Tactic: "Privilege Escalation", Technique: "T1548.003", TechniqueName: "Sudo and Sudo Caching"}, {Tactic: "Persistence", Technique: "T1548.003", TechniqueName: "Sudo and Sudo Caching"}},
+		[]string{"Inspect /etc/sudoers and /etc/sudoers.d/* for the injected grant and remove it.", "Determine the invoking account and treat it as compromised.", "Audit sudoers modifications against change management records."},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("Linux_Credential_Shadow_Dump",
+		"Credential Shadow File Harvesting (YARA)",
+		"YARA rule matched /etc/shadow harvesting or offline cracking preparation (unshadow, john, hashcat with shadow inputs) — credential access material collection.",
+		[]MITREMapping{{Tactic: "Credential Access", Technique: "T1003.008", TechniqueName: "/etc/passwd and /etc/shadow"}},
+		[]string{"Rotate every password represented in the shadow file immediately.", "Verify no copy of the shadow file left the host (egress review).", "Enable auditd watches on /etc/shadow for future access attempts."},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("Linux_Impact_Wiper_Destructive_Commands",
+		"Disk Wiper / Mass Destruction Commands (YARA)",
+		"YARA rule matched destructive disk operations: no-preserve-root recursion, shred against raw devices, or dd overwriting physical disks — ransomware-scale destruction or post-exploitation vandalism.",
+		[]MITREMapping{{Tactic: "Impact", Technique: "T1485", TechniqueName: "Data Destruction"}},
+		[]string{"Isolate the host from networks and backups immediately — destruction may be ongoing.", "Preserve the invoking process context before terminating it.", "Restore from offline backups after verifying the intrusion vector is closed."},
+		ConfidenceHigh,
+		StrengthDirect)
+
+	m("Linux_Backdoor_Setuid_Shell",
+		"Setuid Shell Backdoor (YARA)",
+		"YARA rule matched a shell binary copied to a volatile path and granted setuid root, or a direct setuid grant on a system shell — a persistent privilege-escalation backdoor.",
+		[]MITREMapping{{Tactic: "Privilege Escalation", Technique: "T1548.001", TechniqueName: "Setuid and Setgid"}, {Tactic: "Persistence", Technique: "T1548.001", TechniqueName: "Setuid and Setgid"}},
+		[]string{"Remove the setuid bit and quarantine the copied shell binary.", "Audit the filesystem for additional setuid copies: find / -perm -4000 -type f.", "Identify the creating process and account from audit logs."},
+		ConfidenceHigh,
+		StrengthDirect)
+
 	m("Linux_Persistence_PAM_Exec_Suspicious",
 		"Suspicious PAM Authentication Hook (pam_exec) (YARA)",
 		"YARA rule matched PAM configuration directing authentication hooks to volatile or unprivileged paths.",

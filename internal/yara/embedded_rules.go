@@ -371,4 +371,134 @@ rule Linux_Persistence_PAM_Exec_Suspicious {
     condition:
         filesize < 1MB and $pam
 }
+
+rule Linux_Persistence_Cron_Volatile_Execution {
+    meta:
+        description = "Detects cron entries or cron-install commands executing payloads from volatile directories"
+        severity = "warning"
+        score = 70
+        author = "Aether Security Team"
+        mitre = "T1053.003"
+        confidence = "high"
+    strings:
+        $cron_volatile = /(echo|cat|cp|install)[\s\S]{0,100}(\/etc\/cron|\/var\/spool\/cron|crontab)[\s\S]{0,100}\/(tmp|var\/tmp|dev\/shm)\// nocase
+        $cron_pipe_exec = /(curl|wget)[\s\S]{0,120}\|[\s\S]{0,20}(ba|z|da)?sh[\s\S]{0,100}(crontab|\/etc\/cron)/ nocase
+    condition:
+        filesize < 1MB and any of them
+}
+
+rule Linux_Backdoor_SSH_AuthorizedKeys_Command {
+    meta:
+        description = "Detects authorized_keys entries wrapping forced commands through interpreters or network binaries"
+        severity = "alert"
+        score = 90
+        author = "Aether Security Team"
+        mitre = "T1098.004"
+        confidence = "high"
+    strings:
+        $is_authkeys = /(ssh-(rsa|ed25519)|ecdsa-|AAAA)/ nocase
+        $forced_binsh = /command="[^"]*\/bin\/(ba|z|da)?sh/ nocase
+        $forced_exec = /command="[^"]*(python|perl|nc|ncat|busybox)/ nocase
+    condition:
+        filesize < 1MB and $is_authkeys and 1 of ($forced_*)
+}
+
+rule Linux_Malware_Botnet_Framework_Strings {
+    meta:
+        description = "Detects offensive framework artifacts: msfvenom Linux payloads, meterpreter sessions, and handler setup scripts"
+        severity = "alert"
+        score = 90
+        author = "Aether Security Team"
+        mitre = "T1071"
+        confidence = "high"
+    strings:
+        $msfvenom_linux = "msfvenom -p linux/"
+        $meterpreter_prompt = "meterpreter > " nocase
+        $msf_handler = "use exploit/multi/handler" nocase
+        $msf_stage = "windows/x64/meterpreter/reverse_tcp" nocase
+    condition:
+        filesize < 5MB and any of them
+}
+
+rule Linux_Evasion_History_AntiForensics {
+    meta:
+        description = "Detects shell history anti-forensics: null HISTFILE, history clearing paired with history-file deletion"
+        severity = "warning"
+        score = 60
+        author = "Aether Security Team"
+        mitre = "T1070.003"
+        confidence = "high"
+    strings:
+        $hist_null = "HISTFILE=/dev/null" nocase
+        $hist_unset = /unset\s+HISTFILE/ nocase
+        $hist_off = "set +o history" nocase
+        $hist_wipe = /history\s+-c[\s\S]{0,40}(rm|shred)[\s\S]{0,40}\.bash_history/ nocase
+    condition:
+        filesize < 512KB and any of them
+}
+
+rule Linux_Privilege_Sudoers_NOPASSWD_Inject {
+    meta:
+        description = "Detects shell commands injecting NOPASSWD root grants into the sudoers configuration"
+        severity = "alert"
+        score = 85
+        author = "Aether Security Team"
+        mitre = "T1548.003"
+        confidence = "high"
+    strings:
+        $sudoers_write = /(echo|tee|cp|tee -a)[\s\S]{0,80}(\/etc\/sudoers|\/etc\/sudoers\.d)/ nocase
+        $nopasswd_all = /NOPASSWD:\s*ALL/ nocase
+    condition:
+        filesize < 1MB and $sudoers_write and $nopasswd_all
+}
+
+rule Linux_Credential_Shadow_Dump {
+    meta:
+        description = "Detects /etc/shadow harvesting and offline cracking preparation (unshadow, john, hashcat)"
+        severity = "alert"
+        score = 85
+        author = "Aether Security Team"
+        mitre = "T1003.008"
+        confidence = "high"
+    strings:
+        $shadow_cat = /cat\s+\/etc\/shadow/ nocase
+        $shadow_copy = /(cp|mv|curl|scp)[\s\S]{0,30}\/etc\/shadow/ nocase
+        $unshadow = "unshadow" nocase
+        $hashcat_shadow = /hashcat[\s\S]{0,40}(-m\s*1800|shadow)/ nocase
+        $john_shadow = /john[\s\S]{0,60}shadow/ nocase
+    condition:
+        filesize < 1MB and any of them
+}
+
+rule Linux_Impact_Wiper_Destructive_Commands {
+    meta:
+        description = "Detects disk-wiping and mass destruction commands: no-preserve-root recursion, shred and dd against raw devices"
+        severity = "warning"
+        score = 75
+        author = "Aether Security Team"
+        mitre = "T1485"
+        confidence = "medium"
+    strings:
+        $no_preserve_root = "rm -rf --no-preserve-root" nocase
+        $shred_device = /shred[\s\S]{0,60}\/dev\/(sd|hd|nvme|vd)/ nocase
+        $dd_wipe_device = /dd\s+if=\/dev\/(zero|urandom)[\s\S]{0,60}of=\/dev\/(sd|hd|nvme|vd)/ nocase
+    condition:
+        filesize < 1MB and any of them
+}
+
+rule Linux_Backdoor_Setuid_Shell {
+    meta:
+        description = "Detects setuid shell backdoors: copying a shell binary and granting it setuid root"
+        severity = "alert"
+        score = 90
+        author = "Aether Security Team"
+        mitre = "T1548.001"
+        confidence = "high"
+    strings:
+        $setuid_bash_direct = /chmod\s+(u\+s|4755)\s+\/bin\/(ba|z|da)?sh/ nocase
+        $copy_bash_volatile = /cp\s+\/bin\/(ba|z|da)?sh\s+\/(tmp|var\/tmp|dev\/shm|home)\// nocase
+        $setuid_grant = /chmod\s+(u\+s|4755)\s+\// nocase
+    condition:
+        filesize < 1MB and ($setuid_bash_direct or ($copy_bash_volatile and $setuid_grant))
+}
 `

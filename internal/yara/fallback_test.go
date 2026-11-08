@@ -237,7 +237,7 @@ func TestFallback_CoverageAndStatus(t *testing.T) {
 		t.Fatal("expected Enabled = true")
 	}
 	status := e.StatusString()
-	if !strings.Contains(status, "pure-Go fallback") || !strings.Contains(status, "17 rules") {
+	if !strings.Contains(status, "pure-Go fallback") || !strings.Contains(status, "25 rules") {
 		t.Errorf("unexpected StatusString: %q", status)
 	}
 	cov := e.Coverage()

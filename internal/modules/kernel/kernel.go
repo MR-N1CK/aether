@@ -100,6 +100,12 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 		moduleFindings := CheckHiddenModules(ctx, m.procRoot, m.sysRoot, m.rootFS, m.testDelay, m.pkgDB, &cov, m.logger)
 		allFindings = append(allFindings, moduleFindings...)
 
+		// 1b. Three-way kallsyms reconciliation: loaded-code symbol owners
+		// invisible to BOTH module lists are the DKOM unlink signature —
+		// catches rootkits that evade the two-pass check entirely.
+		kallsymsFindings := CheckKallsymsHiddenModules(m.procRoot, m.sysRoot, &cov, m.logger)
+		allFindings = append(allFindings, kallsymsFindings...)
+
 		// 2. Taint bitmask decoding (/proc/sys/kernel/tainted)
 		taintFindings := CheckTainted(m.procRoot, &cov, m.logger)
 		allFindings = append(allFindings, taintFindings...)

@@ -20,7 +20,12 @@ import (
 )
 
 const (
-	maxDecodeDepth       = 3
+	// maxDecodeDepth bounds the deobfuscation BFS. Depth 5 catches nested
+	// chains such as base64(gzip(base64(gzip(payload)))) — common in staged
+	// droppers — while the candidate cap (50), match cap (20), per-candidate
+	// 32MB decompression cap, memory budget, and context cancellation bound
+	// the compute cost.
+	maxDecodeDepth       = 5
 	maxDecompressedBytes = 32 * 1024 * 1024 // 32 MB safety cap
 	minCandidateLen      = 16
 )

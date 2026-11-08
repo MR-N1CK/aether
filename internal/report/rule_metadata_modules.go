@@ -632,6 +632,14 @@ func registerKernelRules() {
 		ConfidenceHigh,
 		StrengthDirect)
 
+	m("Kernel_Module_Hidden_Kallsyms",
+		"Kernel Module Hidden From Module Lists (Kallsyms Signature)",
+		"Loaded kernel code symbols owned by a module are present in /proc/kallsyms while the module itself is absent from both /proc/modules and /sys/module. The symbol table is populated independently of the module lists, so this three-way mismatch is the signature of direct kernel object manipulation (DKOM) — a rootkit unlinking its module from every visibility surface while its code remains loaded.",
+		[]MITREMapping{{Tactic: "Defense Evasion", Technique: "T1014", TechniqueName: "Rootkit"}},
+		[]string{"Capture volatile kernel evidence immediately (/proc/kallsyms, /proc/modules, /sys/module) before reboot.", "Compare the hidden module name against /lib/modules and package databases.", "If unverified, treat the host as compromised: isolate from the network and perform forensic memory acquisition.", "Reboot only after evidence collection — a reboot unloads the hidden module and destroys the signature."},
+		ConfidenceHigh,
+		StrengthDirect)
+
 	m("Kernel_Modprobe_Install_Command",
 		"Suspicious Command in Modprobe Install Hook",
 		"A modprobe configuration file under /etc/modprobe.d contains an install directive that executes an arbitrary or suspicious command when a kernel module is loaded.",

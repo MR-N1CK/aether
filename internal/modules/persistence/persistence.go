@@ -257,9 +257,88 @@ func (m *Module) Run(ctx context.Context, cfg *config.Config, rep report.Reporte
 	return nil
 }
 
+// multiVectorStrength classifies the evidential weight of a multi-vector
+// correlation hit for one payload path.
+//
+// Calibration (2026-11 review): "unowned" alone is common for legitimate user
+// tooling (cargo/rustup/nvm launchers in hidden home paths referenced by a
+// user systemd unit + an XDG autostart entry + a profile), and unprivileged
+// scans cannot stat other users' files, which masquerades as unreadable rather
+// than missing. So a payload wired ONLY from user-session reference files,
+// present on disk, and inside a user home tree is downgraded to a
+// WARNING-level SUSPICIOUS observation instead of a MALICIOUS alert.
+//
+// Escalation back to a full-strength ALERT happens when ANY of:
+//   - at least one reference file is admin-managed (anything under /etc,
+//     /var, /usr, /lib, or /root — root is an administrator account);
+//   - the payload is genuinely missing from disk (stat says ENOENT);
+//   - the payload lives outside user home trees (hidden system dirs like
+//     /usr/lib/.system-cache are never user-session territory).
+type multiVectorStrength struct {
+	strong    bool
+	downgrade bool
+}
+
+// classifyMultiVectorPayload decides ALERT vs downgraded-WARNING for one
+// correlated payload. artMap maps artifact class -> referencing source files.
+// isMissing is the os.Stat IsNotExist result for the payload on the inspected
+// (possibly offline-root) filesystem.
+func classifyMultiVectorPayload(p string, artMap map[string]map[string]bool, isMissing bool) multiVectorStrength {
+	// Hidden system path (outside user home trees): always strong.
+	inUserHome := strings.HasPrefix(p, "/home/") || strings.HasPrefix(p, "/root/") ||
+		strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "$HOME/") || strings.HasPrefix(p, "${HOME}/")
+	if !inUserHome {
+		return multiVectorStrength{strong: true}
+	}
+
+	// Payload genuinely absent from disk: the hooks reference something that
+	// was dropped or removed — treat as strong regardless of mechanism mix.
+	if isMissing {
+		return multiVectorStrength{strong: true}
+	}
+
+	// Strong unless EVERY mechanism is wired exclusively from user-session
+	// reference files (under /home/<user>/ or a home-relative path). The
+	// referencing file's location, not the artifact class, decides: a systemd
+	// unit under /etc/systemd/system is admin-managed, while the same-named
+	// unit under /home/<u>/.config/systemd/user is the user's own session
+	// unit. The artifact class tag alone cannot tell them apart.
+	for _, files := range artMap {
+		allUserWired := len(files) > 0
+		for file := range files {
+			if !isUserSessionRefFile(file) {
+				allUserWired = false
+				break
+			}
+		}
+		if !allUserWired {
+			return multiVectorStrength{strong: true}
+		}
+	}
+
+	// User-home payload, present on disk, referenced only from user-session
+	// files: downgrade.
+	return multiVectorStrength{strong: false, downgrade: true}
+}
+
+// isUserSessionRefFile reports whether a persistence reference file lives in a
+// user's home tree (their own session configuration, not admin-managed).
+// /root is deliberately excluded: root is an administrator account, so anything
+// wired from /root keeps full strength.
+func isUserSessionRefFile(file string) bool {
+	clean := filepath.Clean(file)
+	return strings.HasPrefix(clean, "/home/") ||
+		strings.HasPrefix(clean, "~/") ||
+		strings.HasPrefix(clean, "$HOME/") ||
+		strings.HasPrefix(clean, "${HOME}/")
+}
+
 func correlateMultiVectorPersistence(allFindings []report.Finding, rootFS string, pkgDB pkgdb.PackageDB) []report.Finding {
 	// target -> map[artifact]map[file]bool
 	targetRefs := make(map[string]map[string]map[string]bool)
+	// targetMissing records whether os.Stat reported genuine ENOENT for a
+	// payload path (EACCES is NOT missing — it is a visibility gap).
+	targetMissing := make(map[string]bool)
 
 	for _, f := range allFindings {
 		// Determine artifact type
@@ -344,6 +423,9 @@ func correlateMultiVectorPersistence(allFindings []report.Finding, rootFS string
 				continue
 			}
 
+			if isMissing {
+				targetMissing[p] = true
+			}
 			if targetRefs[p] == nil {
 				targetRefs[p] = make(map[string]map[string]bool)
 			}
@@ -386,17 +468,38 @@ func correlateMultiVectorPersistence(allFindings []report.Finding, rootFS string
 			sort.Strings(artList)
 			sort.Strings(fileList)
 
-			reason := fmt.Sprintf("Multi-vector persistence: payload %s referenced across %d distinct persistence mechanisms: %s (files: %s)",
-				p, len(artList), strings.Join(artList, ", "), strings.Join(fileList, ", "))
+			strength := classifyMultiVectorPayload(p, artMap, targetMissing[p])
 
-			f := report.NewFinding("persistence", report.SeverityAlert, p, reason, "Persistence_Multi_Vector_Persistence")
-			f.Metadata["score"] = 95
-			f.Metadata["high_confidence"] = true
+			sev := report.SeverityAlert
+			score := 95
+			highConf := true
+			distinctStrong := len(artList)
+			payloadNote := ""
+			if strength.downgrade {
+				// User-home payload, present on disk, referenced only by
+				// user-session mechanisms (profile/xdg_autostart): keep the
+				// observation visible but stop short of MALICIOUS/CRITICAL.
+				sev = report.SeverityWarning
+				score = 65
+				highConf = false
+				distinctStrong = 0
+				payloadNote = " [downgraded: user-home payload present on disk, referenced only by user-session mechanisms; re-run as root to confirm full visibility]"
+			}
+
+			reason := fmt.Sprintf("Multi-vector persistence: payload %s referenced across %d distinct persistence mechanisms: %s (files: %s)%s",
+				p, len(artList), strings.Join(artList, ", "), strings.Join(fileList, ", "), payloadNote)
+
+			f := report.NewFinding("persistence", sev, p, reason, "Persistence_Multi_Vector_Persistence")
+			f.Metadata["score"] = score
+			f.Metadata["high_confidence"] = highConf
 			f.Metadata["payload"] = p
 			f.Metadata["mechanisms"] = artList
 			f.Metadata["referencing_files"] = fileList
 			f.Metadata["classes_count"] = len(artList)
-			f.Metadata["distinct_strong_classes"] = len(artList)
+			f.Metadata["distinct_strong_classes"] = distinctStrong
+			if strength.downgrade {
+				f.Metadata["user_session_only"] = true
+			}
 
 			results = append(results, f)
 		}

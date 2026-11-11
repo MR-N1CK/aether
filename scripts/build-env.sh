@@ -7,8 +7,16 @@
 
 set -euo pipefail
 
-# Release Version
-export VERSION="${VERSION:-1.0.0}"
+# Release Version — derived from the latest git tag so release artifacts
+# always carry their tag's version (v1.1.0 -> 1.1.0). Override with
+# VERSION=... to pin; falls back to 1.0.0 when no tag exists.
+if [ -z "${VERSION:-}" ]; then
+    if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+        export VERSION="$(git describe --tags --abbrev=0 | sed 's/^v//')"
+    else
+        export VERSION="1.0.0"
+    fi
+fi
 
 # Git Commit Metadata
 if [ -z "${COMMIT:-}" ]; then

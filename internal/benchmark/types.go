@@ -97,19 +97,19 @@ type BenchmarkResult struct {
 
 // BenchmarkMetrics stores aggregated statistical measurements with zero-denominator safety.
 type BenchmarkMetrics struct {
-	TotalCases               int     `json:"total_cases"`
-	TruePositives            int     `json:"true_positives"`
-	TrueNegatives            int     `json:"true_negatives"`
-	FalsePositives           int     `json:"false_positives"`
-	FalseNegatives           int     `json:"false_negatives"`
-	Precision                float64 `json:"precision"`
-	Recall                   float64 `json:"recall"`
-	F1Score                  float64 `json:"f1_score"`
-	FalsePositiveRate        float64 `json:"false_positive_rate"`
-	DetectionCoverageIndex   float64 `json:"detection_coverage_index"`
-	SuspiciousTriageAccuracy float64 `json:"suspicious_triage_accuracy"`
-	AbstentionAccuracy       float64 `json:"abstention_accuracy"`
-	EvasionResilienceScore   float64 `json:"evasion_resilience_score"`
+	TotalCases               int          `json:"total_cases"`
+	TruePositives            int          `json:"true_positives"`
+	TrueNegatives            int          `json:"true_negatives"`
+	FalsePositives           int          `json:"false_positives"`
+	FalseNegatives           int          `json:"false_negatives"`
+	Precision                float64      `json:"precision"`
+	Recall                   float64      `json:"recall"`
+	F1Score                  float64      `json:"f1_score"`
+	FalsePositiveRate        float64      `json:"false_positive_rate"`
+	DetectionCoverageIndex   float64      `json:"detection_coverage_index"`
+	SuspiciousTriageAccuracy float64      `json:"suspicious_triage_accuracy"`
+	AbstentionAccuracy       float64      `json:"abstention_accuracy"`
+	EvasionResilienceScore   float64      `json:"evasion_resilience_score"`
 	RuleAccuracy             []RuleFPStat `json:"rule_accuracy,omitempty"`
 }
 

@@ -1,14 +1,48 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="366" height="20" role="img" aria-label="accuracy: precision 100.0%, recall 100.0%, false positives 0.0% across 32 scenarios">
-  <title>Aether detection accuracy: precision 100.0%, recall 100.0%, zero false positives across 32 benchmark scenarios</title>
-  <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
-  <clipPath id="r"><rect width="366" height="20" rx="3" fill="#fff"/></clipPath>
-  <g clip-path="url(#r)">
-    <rect width="96" height="20" fill="#0E7490"/>
-    <rect x="96" width="270" height="20" fill="#101828"/>
-    <rect width="366" height="20" fill="url(#s)" fill-opacity=".1"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="410" height="24" role="img" aria-label="Detection Accuracy: 100% Precision · 100% Recall · 0 False Positives (32/32 Scenarios)">
+  <title>Aether Detection Accuracy: 100% Precision, 100% Recall, 0 False Positives across 32 benchmark scenarios</title>
+  <defs>
+    <linearGradient id="headerGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+    <clipPath id="rounded">
+      <rect width="410" height="24" rx="4" fill="#fff"/>
+    </clipPath>
+    <style>
+      .pulse-dot {
+        animation: pulseDot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        transform-origin: 14px 12px;
+      }
+      @keyframes pulseDot {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(1.3); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .pulse-dot { animation: none; }
+      }
+    </style>
+  </defs>
+
+  <g clip-path="url(#rounded)">
+    <!-- Left Header Box (Accent Cyan) -->
+    <rect width="112" height="24" fill="url(#headerGrad)"/>
+    <!-- Right Data Box (Deep Obsidian) -->
+    <rect x="112" width="298" height="24" fill="#0a0f1d"/>
+    <!-- Top Highlight Inset -->
+    <line x1="0" y1="0.5" x2="410" y2="0.5" stroke="#ffffff" stroke-opacity="0.15"/>
+    <rect width="410" height="24" fill="none" stroke="#1e293b" stroke-width="1"/>
   </g>
-  <g fill="#E6EDF7" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="110" text-rendering="geometricPrecision">
-    <text transform="scale(.1)" x="480" y="150" fill="#fff" font-weight="bold">ACCURACY</text>
-    <text transform="scale(.1)" x="630" y="150" fill="#67E8F9">precision 100.0% · recall 100.0% · false positives 0.0% · 32 scenarios</text>
+
+  <!-- Left Header Content -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif" font-size="10.5" font-weight="700">
+    <circle cx="14" cy="12" r="3.5" fill="#34d399" class="pulse-dot"/>
+    <text x="26" y="15.5" fill="#ffffff" letter-spacing="0.8">ACCURACY</text>
+  </g>
+
+  <!-- Right Metric Content -->
+  <g font-family="'JetBrains Mono', 'Fira Code', ui-monospace, Menlo, Consolas, monospace" font-size="10.5" font-weight="600">
+    <text x="124" y="15.5" fill="#38bdf8" letter-spacing="0.2">
+      100% PRECISION <tspan fill="#64748b">·</tspan> 100% RECALL <tspan fill="#64748b">·</tspan> <tspan fill="#34d399">0 FP</tspan> <tspan fill="#64748b">(32/32)</tspan>
+    </text>
   </g>
 </svg>

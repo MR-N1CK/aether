@@ -1,10 +1,107 @@
-# Aether: High-Assurance Linux Threat Hunting & Forensics Engine
+<div align="center">
 
-**Aether** is a fast, read-only Linux threat hunting and incident response tool written in **Go** with embedded **YARA-X** signature evaluation. It is designed to inspect Linux endpoints for active compromises, web shells, reverse shells, ransomware encryptors, data exfiltration stealers, rogue persistence mechanisms, unauthorized accounts, and kernel rootkits.
+```
+   █████╗ ███████╗████████╗██╗  ██╗███████╗██████╗ 
+  ██╔══██╗██╔════╝╚══██╔══╝██║  ██║██╔════╝██╔══██╗
+  ███████║█████╗     ██║   ███████║█████╗  ██████╔╝
+  ██╔══██║██╔══╝     ██║   ██╔══██║██╔══╝  ██╔══██╗
+  ██║  ██║███████╗   ██║   ██║  ██║███████╗██║  ██║
+  ╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
+```
+
+### High-Assurance Linux Threat Hunting & Incident Response Engine
+
+<p align="center">
+  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge" alt="License" /></a>
+  <a href="https://attack.mitre.org/"><img src="https://img.shields.io/badge/MITRE_ATT%26CK-Enriched-red.svg?style=for-the-badge" alt="MITRE ATT&CK" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/Engine-YARA--X-orange.svg?style=for-the-badge" alt="YARA-X" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/Platform-Linux_x86__64_%7C_arm64-black.svg?style=for-the-badge&logo=linux" alt="Platform" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/Telemetry-Air--Gapped_/_Zero_Outbound-success.svg?style=for-the-badge" alt="Air-Gapped" /></a>
+</p>
+
+<p align="center">
+  <b>Aether</b> is an ultra-fast, read-only Linux host compromise-assessment and forensic auditing engine.<br/>
+  Combines direct low-level <code>procfs</code> inspection, multi-vector persistence correlation, and native <b>YARA-X</b> threat signatures.
+</p>
+
+</div>
 
 ---
 
-## Verified Capabilities & Codebase References
+## ⚡ Key Highlights
+
+* 🛡️ **Zero-Footprint Read-Only Invariant:** Initiates file reads with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOATIME`. Guarantees zero disk modification, preserving pristine forensic timestamp integrity (`mtime`/`ctime`).
+* 🔍 **Deep In-Memory Detection:** Detects memory-only binaries (`/memfd:`), deleted-on-disk execution markers (`(deleted)`), process masquerading, and unlinked `/proc` PIDs.
+* 🧠 **Dual Signature Evaluation:** Evaluates embedded threat signatures out of the box via a pure-Go fallback interpreter, or links natively with **YARA-X** (`libyara_x_capi`).
+* 📦 **Integrity Validation via Package DBs:** Directly audits system binaries against local package manager databases (**dpkg**, **rpm**, **pacman**, and **apk**) detecting trojaned or hash-mismatched core utilities.
+* 📊 **Multi-Interface Reporting:** Interactive TUI command center (Bubbletea/Lipgloss) with forensic threat dossier modals, high-contrast ANSI terminal output, SIEM-ready JSON streaming, and standalone HTML forensic reports.
+
+---
+
+## 🏗️ Architecture & Forensic Coverage
+
+```
++-----------------------------------------------------------------------------------+
+|                                 AETHER ENGINE                                    |
++-----------------------------------------------------------------------------------+
+       |                  |                  |                  |                  |
+       v                  v                  v                  v                  v
++--------------+   +--------------+   +--------------+   +--------------+   +--------------+
+|   PROCESS    |   | PERSISTENCE  |   |    USERS     |   |   NETWORK    |   |    KERNEL    |
+|  INSPECTION  |   | CORRELATION  |   |    AUDIT     |   |    SOCKETS   |   |   MODULES    |
++--------------+   +--------------+   +--------------+   +--------------+   +--------------+
+| • memfd exec |   | • Systemd    |   | • UID 0 dupes|   | • Raw sockets|   | • Hidden LKM |
+| • Masquerade |   | • Cron spools|   | • /etc/shadow|   | • Wildcard IP|   | • Taint flags|
+| • Deleted ELF|   | • SSH keys   |   | • Wheel/sudo |   | • Promiscuous|   | • modprobe.d |
++--------------+   +--------------+   +--------------+   +--------------+   +--------------+
+       \                  \                  |                  /                  /
+        +------------------------------------+------------------------------------+
+                                             |
+                                             v
+                      +---------------------------------------------+
+                      |     YARA-X & HEURISTIC SIGNATURE ENGINE     |
+                      |  • Web Shells   • Reverse Shells  • Rootkits|
+                      +---------------------------------------------+
+                                             |
+                                             v
+                      +---------------------------------------------+
+                      |     MITRE ATT&CK ENRICHMENT & REPORTING     |
+                      |  • TUI Command Center  • HTML  • JSON SIEM  |
+                      +---------------------------------------------+
+```
+
+---
+
+## 🚀 Quick Start
+
+### 1. Build from Source
+```bash
+git clone https://github.com/MR-N1CK/aether.git
+cd aether
+
+# Build standard standalone binary (Zero CGO, Pure Go)
+make build
+
+# Run built-in self-diagnostics
+./bin/aether doctor
+```
+
+### 2. Run a Compromise Assessment
+```bash
+# Launch interactive TUI scanner
+sudo ./bin/aether
+
+# Quick non-interactive CLI scan with HTML report generation
+sudo ./bin/aether scan --quick --plain --html-out report.html
+
+# Stream forensic telemetry to SIEM (JSON)
+sudo ./bin/aether scan --all --json-out /var/log/aether_audit.json
+```
+
+---
+
+## 🛡️ Verified Capabilities & Codebase References
 
 Every capability listed below is implemented in this repository and validated by automated unit and integration tests.
 
@@ -70,7 +167,7 @@ Findings are enriched with MITRE ATT&CK tactical classifications, explanations, 
 
 ---
 
-## Installation & Setup
+## 📦 Installation & Setup
 
 ### Hardened Installation Workflow (`install.sh`)
 The repository includes a security-hardened installation script ([`install.sh`](install.sh)) with separation of privileges:
@@ -120,7 +217,7 @@ make build-yara-static
 
 ---
 
-## CLI Usage Guide
+## 💻 CLI Usage Guide
 
 **The zero-argument flow** — this is how the tool is meant to be used day to day:
 
@@ -154,13 +251,10 @@ aether scan --full --html-out /tmp/aether-report.html
 # 4. Target a specific directory or script (filesystem-only by design)
 aether scan --plain /path/to/target
 
-# 5. TUI launches automatically in a terminal (--plain forces text output)
-aether scan --quick   # interactive TUI launches automatically in a terminal (--plain forces text output)
-
-# 6. Acknowledge a known benign finding (pins file/line hash to suppress alerts)
+# 5. Acknowledge a known benign finding (pins file/line hash to suppress alerts)
 aether ack /path/to/file --reason "Approved internal administration script"
 
-# 7. Refresh YARA ruleset and (optionally) a remote intel feed
+# 6. Refresh YARA ruleset and (optionally) a remote intel feed
 sudo aether update                                # re-download YARA-Forge Core ruleset
 sudo aether update --intel-url https://example.com/feeds/hashlist.txt   # HTTPS feeds only
 aether intel import /path/to/local-feed.txt       # offline import path
@@ -168,7 +262,7 @@ aether intel import /path/to/local-feed.txt       # offline import path
 
 ---
 
-## Forensic Integrity & File Access Semantics
+## 🔒 Forensic Integrity & File Access Semantics
 
 - **Read-Only Invariant**: Aether never writes to, modifies, deletes, or executes inspected files. File modification time (`mtime`) and metadata change time (`ctime`) are **never** altered.
 - **Access Time (`atime`) Behavior**:
@@ -179,7 +273,7 @@ aether intel import /path/to/local-feed.txt       # offline import path
 
 ---
 
-## Trust Model
+## 🛡️ Trust Model
 
 1. **Air-Gapped Operation**: Aether performs zero outbound network requests and requires no cloud connectivity or telemetry ingestion.
 2. **YARA Rule Security & Qualification**: Custom rule directories supplied via `--rules-dir` are subjected to strict root-safety qualification ([`internal/yara/lib_trust.go`](internal/yara/lib_trust.go)). Rules located in non-root-owned or world-writable paths are rejected unless `--trust-rules-dir` is explicitly passed. Rule files are also checked to prevent self-detection on rule signature strings. Tested in [`internal/yara/lib_trust_test.go`](internal/yara/lib_trust_test.go).
@@ -188,7 +282,7 @@ aether intel import /path/to/local-feed.txt       # offline import path
 
 ---
 
-## Limitations
+## ⚠️ Limitations
 
 1. **Non-Root Coverage Constraints**: When executed as an unprivileged user, Aether cannot read `/etc/shadow`, root-only cron spool files, or other users' private `/proc/<PID>` entries (especially when `hidepid` is active). Coverage limits are reported explicitly in the output summary.
 2. **Static Inspection Scope**: Aether performs static and structural analysis. It does not perform dynamic binary emulation, sandboxing, or unpack runtime-packed executables in memory unless the binary or memory dump is accessible on disk or via `/proc/<PID>/mem`.
@@ -197,7 +291,7 @@ aether intel import /path/to/local-feed.txt       # offline import path
 
 ---
 
-## Tested On
+## 🧪 Tested On
 
 - **Verified Environment**:
   - Kali Linux, kernel `7.1.5+kali`, `amd64` (x86_64)
@@ -209,13 +303,13 @@ aether intel import /path/to/local-feed.txt       # offline import path
 
 ---
 
-## Development & AI Guidelines
+## 🤖 Development & AI Guidelines
 
 Instructions for autonomous AI agents, language models, and developers maintaining or extending this codebase are located in [**`AGENTS.md`**](AGENTS.md).
 
 ---
 
-## Test Suite Execution
+## 🔬 Test Suite Execution
 
 Run all automated test suites across the repository:
 
@@ -232,6 +326,6 @@ make test-yara
 
 ---
 
-## License
+## 📜 License
 
-License: Apache-2.0 (see [LICENSE](LICENSE)).
+Licensed under the **Apache License, Version 2.0** — see [LICENSE](LICENSE) for details.

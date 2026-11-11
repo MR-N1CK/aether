@@ -24,6 +24,8 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/MR-N1CK/aether/releases/latest"><img src="https://img.shields.io/github/v/release/MR-N1CK/aether?style=flat-square&label=Release&color=22d3ee" alt="Latest Release"></a>
+  <a href="https://goreportcard.com/report/github.com/MR-N1CK/aether"><img src="https://goreportcard.com/badge/github.com/MR-N1CK/aether?style=flat-square" alt="Go Report Card"></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white&style=flat-square" alt="Requires Go 1.26+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square" alt="Apache License 2.0"></a>
   <a href="https://github.com/MR-N1CK/aether/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/CI-100%25_Passing-34d399?style=flat-square&logo=githubactions&logoColor=white" alt="CI 100% Passing"></a>
@@ -142,6 +144,17 @@ flowchart TD
 
 ---
 
+## Deep Dives
+
+| Document | Contents |
+| :--- | :--- |
+| [WALKTHROUGH.md](WALKTHROUGH.md) | Guided tour: first scan, reading findings, the dossier, triage |
+| [docs/BUILDING.md](docs/BUILDING.md) | Build modes, reproducible releases, cross-compilation |
+| [docs/ENGINES.md](docs/ENGINES.md) | Dual signature engine: YARA-X vs pure-Go fallback, parity guarantees |
+| [docs/RULES.md](docs/RULES.md) | Detection rules: families, MITRE mappings, authoring guidance |
+| [docs/TESTING.md](docs/TESTING.md) | Test strategy: accuracy benchmark, cross-distro matrix, race harness |
+| [DESIGN.md](DESIGN.md) | The Aurora Command Deck design system: tokens, motion, states |
+
 ## Technical Reference
 
 <details>
@@ -217,3 +230,9 @@ go test -v -run TestRealWorldScaleAndMemory ./test/realworld
 ## License
 
 Aether is released under the **[Apache License 2.0](LICENSE)**. Created by **[MR-N1CK](https://github.com/MR-N1CK)**.
+
+---
+
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=wave&color=0:0E7490,55:22D3EE,100:0B1220&height=110&section=footer&text=AETHER&fontColor=E6EDF7&fontSize=42&desc=mission-control%20threat%20hunting&descAlignY=72&descSize=16" alt="" width="100%">
+</p>

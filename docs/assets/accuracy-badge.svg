@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="366" height="20" role="img" aria-label="accuracy: precision 100.0%, recall 100.0%, false positives 0.0% across 32 scenarios">
+  <title>Aether detection accuracy: precision 100.0%, recall 100.0%, zero false positives across 32 benchmark scenarios</title>
+  <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
+  <clipPath id="r"><rect width="366" height="20" rx="3" fill="#fff"/></clipPath>
+  <g clip-path="url(#r)">
+    <rect width="96" height="20" fill="#0E7490"/>
+    <rect x="96" width="270" height="20" fill="#101828"/>
+    <rect width="366" height="20" fill="url(#s)" fill-opacity=".1"/>
+  </g>
+  <g fill="#E6EDF7" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="110" text-rendering="geometricPrecision">
+    <text transform="scale(.1)" x="480" y="150" fill="#fff" font-weight="bold">ACCURACY</text>
+    <text transform="scale(.1)" x="630" y="150" fill="#67E8F9">precision 100.0% · recall 100.0% · false positives 0.0% · 32 scenarios</text>
+  </g>
+</svg>

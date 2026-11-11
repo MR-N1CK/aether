@@ -10,8 +10,11 @@ Read [AGENTS.md](AGENTS.md). New heuristics belong in `internal/scanner/heuristi
 
 ```bash
 make test
+make benchmark
 gofmt -l .
 ```
+
+New detection behavior ships with fixtures on both sides of the false-positive boundary: a true-positive fixture in `testdata/benchmark_corpus/` (contract JSON + payload) **and** a benign lookalike that must stay clean. The benchmark emits a per-rule FP report card — rules with benign adjudications surface as `REVIEW` and block the accuracy gate.
 
 A YARA-linked build is optional. `make build` stays pure Go.
 

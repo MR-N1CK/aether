@@ -308,6 +308,3 @@ Created and maintained by **[MR-N1CK](https://github.com/MR-N1CK)**.
   <sub>Aether Threat &amp; Forensic Scanner &nbsp;·&nbsp; Zero Forensic Contamination &nbsp;·&nbsp; Read-Only Linux Incident Response</sub>
 </p>
 
-<p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:0B1220,55:0E7490,100:22D3EE&height=100&section=footer&text=AETHER&fontColor=E6EDF7&fontSize=38&desc=mission-control%20threat%20hunting&descAlignY=72&descSize=15" alt="" width="100%">
-</p>

@@ -1,331 +1,259 @@
-<div align="center">
+<p align="center">
+  <img src="docs/assets/social-card.svg" alt="Aether: read-only Linux compromise assessment. Process, persistence, users, network, kernel, and files. No sample execution and no outbound telemetry." width="880">
+</p>
 
-```
-   █████╗ ███████╗████████╗██╗  ██╗███████╗██████╗ 
-  ██╔══██╗██╔════╝╚══██╔══╝██║  ██║██╔════╝██╔══██╗
-  ███████║█████╗     ██║   ███████║█████╗  ██████╔╝
-  ██╔══██║██╔══╝     ██║   ██╔══██║██╔══╝  ██╔══██╗
-  ██║  ██║███████╗   ██║   ██║  ██║███████╗██║  ██║
-  ╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
-```
-
-### High-Assurance Linux Threat Hunting & Incident Response Engine
+<h1 align="center">Aether</h1>
 
 <p align="center">
-  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.22+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge" alt="License" /></a>
-  <a href="https://attack.mitre.org/"><img src="https://img.shields.io/badge/MITRE_ATT%26CK-Enriched-red.svg?style=for-the-badge" alt="MITRE ATT&CK" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/Engine-YARA--X-orange.svg?style=for-the-badge" alt="YARA-X" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/Platform-Linux_x86__64_%7C_arm64-black.svg?style=for-the-badge&logo=linux" alt="Platform" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/Telemetry-Air--Gapped_/_Zero_Outbound-success.svg?style=for-the-badge" alt="Air-Gapped" /></a>
+  Read-only Linux compromise assessment.<br>
+  Find out whether a host is clean, then read why — without executing a single suspect file.
 </p>
 
 <p align="center">
-  <b>Aether</b> is an ultra-fast, read-only Linux host compromise-assessment and forensic auditing engine.<br/>
-  Combines direct low-level <code>procfs</code> inspection, multi-vector persistence correlation, and native <b>YARA-X</b> threat signatures.
+  <a href="https://mr-n1ck.github.io/aether/"><strong>Open the interactive overview</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#run-it">Run it</a>
+  &nbsp;·&nbsp;
+  <a href="#what-a-scan-checks">What it checks</a>
+  &nbsp;·&nbsp;
+  <a href="#reference">Full reference</a>
 </p>
 
-</div>
+<p align="center">
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white" alt="Requires Go 1.26"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue" alt="Apache License 2.0"></a>
+  <a href="https://github.com/MR-N1CK/aether/actions/workflows/ci.yml"><img src="https://github.com/MR-N1CK/aether/actions/workflows/ci.yml/badge.svg" alt="Continuous integration"></a>
+  <a href="https://attack.mitre.org/"><img src="https://img.shields.io/badge/MITRE_ATT%26CK-mapped-red" alt="Findings map to MITRE ATT&CK"></a>
+  <a href="#limits"><img src="https://img.shields.io/badge/Telemetry-none_by_default-success" alt="No outbound telemetry unless you request an update"></a>
+</p>
 
 ---
 
-## ⚡ Key Highlights
+## What it is
 
-* 🛡️ **Zero-Footprint Read-Only Invariant:** Initiates file reads with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOATIME`. Guarantees zero disk modification, preserving pristine forensic timestamp integrity (`mtime`/`ctime`).
-* 🔍 **Deep In-Memory Detection:** Detects memory-only binaries (`/memfd:`), deleted-on-disk execution markers (`(deleted)`), process masquerading, and unlinked `/proc` PIDs.
-* 🧠 **Dual Signature Evaluation:** Evaluates embedded threat signatures out of the box via a pure-Go fallback interpreter, or links natively with **YARA-X** (`libyara_x_capi`).
-* 📦 **Integrity Validation via Package DBs:** Directly audits system binaries against local package manager databases (**dpkg**, **rpm**, **pacman**, and **apk**) detecting trojaned or hash-mismatched core utilities.
-* 📊 **Multi-Interface Reporting:** Interactive TUI command center (Bubbletea/Lipgloss) with forensic threat dossier modals, high-contrast ANSI terminal output, SIEM-ready JSON streaming, and standalone HTML forensic reports.
+Aether is a host scanner for incident response. Point it at a Linux system and it inspects processes, persistence, accounts, sockets, kernel modules, and files. Every finding is written in plain language, tagged with MITRE ATT&CK, and paired with containment steps.
 
----
+It is built for people who have to answer “are we clean?” on a machine they are allowed to assess: responders, detection engineers, and administrators doing a compromise check.
 
-## 🏗️ Architecture & Forensic Coverage
+| Question | Answer |
+| --- | --- |
+| Does it run the files it scans? | No. Inspection is static. |
+| Does it change the host? | It does not write, delete, or chmod inspected files, and it does not update `mtime` or `ctime`. |
+| Does it phone home? | Not during a scan. A network request happens only if you run `aether update` or pass an intel URL. |
+| What do you leave with? | A terminal view, plain text, JSON, or one offline HTML report. |
 
-```
-+-----------------------------------------------------------------------------------+
-|                                 AETHER ENGINE                                    |
-+-----------------------------------------------------------------------------------+
-       |                  |                  |                  |                  |
-       v                  v                  v                  v                  v
-+--------------+   +--------------+   +--------------+   +--------------+   +--------------+
-|   PROCESS    |   | PERSISTENCE  |   |    USERS     |   |   NETWORK    |   |    KERNEL    |
-|  INSPECTION  |   | CORRELATION  |   |    AUDIT     |   |    SOCKETS   |   |   MODULES    |
-+--------------+   +--------------+   +--------------+   +--------------+   +--------------+
-| • memfd exec |   | • Systemd    |   | • UID 0 dupes|   | • Raw sockets|   | • Hidden LKM |
-| • Masquerade |   | • Cron spools|   | • /etc/shadow|   | • Wildcard IP|   | • Taint flags|
-| • Deleted ELF|   | • SSH keys   |   | • Wheel/sudo |   | • Promiscuous|   | • modprobe.d |
-+--------------+   +--------------+   +--------------+   +--------------+   +--------------+
-       \                  \                  |                  /                  /
-        +------------------------------------+------------------------------------+
-                                             |
-                                             v
-                      +---------------------------------------------+
-                      |     YARA-X & HEURISTIC SIGNATURE ENGINE     |
-                      |  • Web Shells   • Reverse Shells  • Rootkits|
-                      +---------------------------------------------+
-                                             |
-                                             v
-                      +---------------------------------------------+
-                      |     MITRE ATT&CK ENRICHMENT & REPORTING     |
-                      |  • TUI Command Center  • HTML  • JSON SIEM  |
-                      +---------------------------------------------+
-```
+The visual system behind the terminal UI and the HTML report is documented in [DESIGN.md](DESIGN.md). The overview site uses the same palette: deep navy, teal for signal, rose for alerts.
 
----
+## Run it
 
-## 🚀 Quick Start
-
-### 1. Build from Source
 ```bash
 git clone https://github.com/MR-N1CK/aether.git
 cd aether
-
-# Build standard standalone binary (Zero CGO, Pure Go)
 make build
-
-# Run built-in self-diagnostics
 ./bin/aether doctor
-```
-
-### 2. Run a Compromise Assessment
-```bash
-# Launch interactive TUI scanner
 sudo ./bin/aether
+```
 
-# Quick non-interactive CLI scan with HTML report generation
+`doctor` checks the local engine. Running `aether` with no arguments in a terminal opens the command center. A file you can hand to someone else:
+
+```bash
 sudo ./bin/aether scan --quick --plain --html-out report.html
-
-# Stream forensic telemetry to SIEM (JSON)
-sudo ./bin/aether scan --all --json-out /var/log/aether_audit.json
 ```
 
----
+Pure Go is the default (`CGO_ENABLED=0`). `make build-yara` links YARA-X when `libyara_x_capi` is installed. Both paths evaluate the same embedded rules. Details are in the [reference](#reference).
 
-## 🛡️ Verified Capabilities & Codebase References
+## What a scan checks
 
-Every capability listed below is implemented in this repository and validated by automated unit and integration tests.
+| Area | What Aether looks for |
+| --- | --- |
+| Process | Memory-only binaries (`memfd`), deleted executables still running, masqueraded names, hidden PIDs |
+| Persistence | systemd units, cron and at, sudoers, shell profiles, SSH authorized keys |
+| Users | Extra UID 0, duplicate UIDs, empty or obsolete password hashes, privileged groups |
+| Network | Listeners mapped to a process, raw sockets, promiscuous interfaces |
+| Kernel | Modules present in `/proc` but missing from sysfs, taint flags, modprobe rules |
+| Files | Unexpected SUID binaries, world-writable config, webshells, reverse shells, droppers |
 
-### 1. Detection Modules & Forensic Auditing
+Heuristics run in every build. YARA-X evaluates the same rule source when you compile with `-tags yara`. Package databases (dpkg, rpm, pacman, apk) flag system binaries whose hashes no longer match the package manager.
 
-| Module | Implemented Capabilities | Implementation & Test Evidence |
-| :--- | :--- | :--- |
-| **`process`** | • Memory-only execution (`/memfd:`, anonymous memory descriptors)<br>• Execution of unlinked binaries (`(deleted)` target marker)<br>• Hidden process detection via two-pass `os.ReadDir` vs parallel `unix.Fstatat` probes with `/proc` `hidepid` detection<br>• Process `comm` vs `cmdline` vs `exe` name masquerading<br>• Process tree anomaly detection and allowlist matching | Implemented: [`internal/modules/process/process.go`](internal/modules/process/process.go), [`hidden_pid.go`](internal/modules/process/hidden_pid.go)<br>Tested: [`internal/modules/process/process_test.go`](internal/modules/process/process_test.go) |
-| **`persistence`** | • Systemd system and user units, unowned unit files, and autostart services<br>• Masked unit analysis (`/dev/null` symlink targets)<br>• System cron (`/etc/cron*`, `/etc/crontab`) and per-user spool crontabs (`/var/spool/cron/crontabs`)<br>• At-jobs and timer services<br>• Sudoers configurations (`/etc/sudoers`, `/etc/sudoers.d/*`)<br>• Shell login profiles (`.bashrc`, `.zshrc`, `/etc/profile.d/`)<br>• SSH authorized keys auditing (`~/.ssh/authorized_keys*`) and private keys in non-standard paths<br>• Multi-vector persistence correlation | Implemented: [`internal/modules/persistence/persistence.go`](internal/modules/persistence/persistence.go), [`systemd.go`](internal/modules/persistence/systemd.go), [`cron.go`](internal/modules/persistence/cron.go), [`ssh.go`](internal/modules/persistence/ssh.go)<br>Tested: [`internal/modules/persistence/persistence_test.go`](internal/modules/persistence/persistence_test.go) |
-| **`users`** | • Non-root accounts with UID 0<br>• Duplicate UIDs across `/etc/passwd`<br>• `/etc/shadow` password checks (empty passwords, obsolete DES/MD5 `$1$` hashes, locked account filtering)<br>• System accounts configured with interactive login shells<br>• Privileged group memberships (`sudo`, `wheel`, `docker`, `lxd`) | Implemented: [`internal/modules/users/users.go`](internal/modules/users/users.go)<br>Tested: [`internal/modules/users/users_test.go`](internal/modules/users/users_test.go) |
-| **`network`** | • Inode-to-process socket mapping across TCP, UDP, and Raw sockets<br>• Wildcard listener detection (`0.0.0.0`, `::`) with daemon allowlists<br>• Loopback listener reporting (`Network_Loopback_Listener`)<br>• Promiscuous packet sniffers and raw socket consumers via `/proc/net/raw` | Implemented: [`internal/modules/network/network.go`](internal/modules/network/network.go)<br>Tested: [`internal/modules/network/network_test.go`](internal/modules/network/network_test.go) |
-| **`kernel`** | • Loaded kernel module audit via `/proc/modules` vs `/sys/module`<br>• Hidden kernel module detection (two-pass state comparison with `coming`/`going` filter)<br>• Kernel taint flag decoding per Linux kernel documentation<br>• World-writable or non-standard modprobe configuration rules | Implemented: [`internal/modules/kernel/kernel.go`](internal/modules/kernel/kernel.go)<br>Tested: [`internal/modules/kernel/kernel_test.go`](internal/modules/kernel/kernel_test.go) |
-| **`filesystem` & `scanner`** | • SUID/SGID binary anomalies outside standard binary paths<br>• Hidden executables in system directories (`/bin`, `/sbin`, `/usr/bin`, `/etc`)<br>• Non-packaged ELF binaries in `/tmp`, `/var/tmp`, `/dev/shm`, and regular files in `/dev`<br>• Build tree artifact recognition to avoid false positives on legitimate compiler output<br>• World-writable configuration files in `/etc`<br>• Concurrent worker pool with dynamic memory budget enforcement | Implemented: [`internal/scanner/scanner.go`](internal/scanner/scanner.go), [`heuristics.go`](internal/scanner/heuristics.go), [`memory_budget.go`](internal/scanner/memory_budget.go)<br>Tested: [`internal/scanner/heuristics_test.go`](internal/scanner/heuristics_test.go), [`fixtures_test.go`](internal/scanner/fixtures_test.go) |
+## What you get back
 
----
+1. **Command center** — live module progress. Enter opens a dossier: why it matched, hashes, MITRE, containment.
+2. **Plain text** — `--plain`, for SSH and CI.
+3. **JSON** — `--json-out`, for a SIEM.
+4. **HTML** — `--html-out`, one file, no CDN, strict Content-Security-Policy.
 
-### 2. Verified Heuristic & YARA-X Signature Rules
+```mermaid
+flowchart LR
+  host[Linux host]
+  host --> read[Read-only modules]
+  read --> decide[Heuristics and YARA-X]
+  decide --> explain[MITRE enrichment]
+  explain --> out[TUI, text, JSON, HTML]
+```
 
-> **Build Notice**: The embedded threat signatures below are active in **every build**. Default binaries (`make build`, `CGO_ENABLED=0`) evaluate them with the **pure-Go fallback signature engine** ([`internal/yara/fallback_engine.go`](internal/yara/fallback_engine.go)), a dependency-free interpreter for the embedded rule subset; YARA builds (`make build-yara` / `make build-yara-static` with `-tags yara`, linking `libyara_x_capi`) evaluate the same rule source with **YARA-X** ([`internal/yara/yarax_engine.go`](internal/yara/yarax_engine.go)). Both engines compile the identical embedded source ([`internal/yara/embedded_rules.go`](internal/yara/embedded_rules.go)), and a cross-engine parity test ([`internal/yara/fallback_parity_test.go`](internal/yara/fallback_parity_test.go)) guarantees identical verdicts. In addition to signatures, the default build always evaluates native pure-Go regex heuristics ([`internal/scanner/heuristics.go`](internal/scanner/heuristics.go)).
->
-> **Signature Note**: Rootkit and known-family detection rules (such as `Linux_Rootkit_Diamorphine_Reptile_Strings`, `Linux_Webshell_PHP_Known_Families`, and `Linux_Implant_RedTeam_Persistence_Framework`) are string matches for known samples and repository artifacts only; they are not generic behavioral kernel hooks.
+## Limits
 
-| Category | Native Heuristics (Default Pure-Go Build) | Embedded YARA-X Rules (YARA Builds Only) | Source & Test Verification |
-| :--- | :--- | :--- | :--- |
-| **Reverse Shells** | • `Script_Reverse_Shell_Interactive`<br>• `Script_OpenSSL_Reverse_Shell`<br>• `Script_Netcat_Reverse_Shell`<br>• `Script_Socat_Reverse_Shell`<br>• `Script_Reverse_Shell_Inline` | • `Linux_Backdoor_Reverse_Shell_OneLiner`<br>• `Linux_Backdoor_Encrypted_Reverse_Shell` | Heuristics: [`internal/scanner/heuristics.go`](internal/scanner/heuristics.go), tested in [`heuristics_test.go`](internal/scanner/heuristics_test.go)<br>YARA: [`internal/yara/embedded_rules.go`](internal/yara/embedded_rules.go), tested in [`yarax_integration_test.go`](internal/yara/yarax_integration_test.go) |
-| **Ransomware & Stealers** | • `Script_Python_Ransomware_Encryptor`<br>• `Script_Data_Exfiltration_Stealer`<br>• `Script_C2_Exfiltration_Server` | • `Linux_Ransomware_Python_Locker`<br>• `Linux_Malware_Data_Exfiltration_Client`<br>• `Linux_Malware_Data_Exfiltration_Server` | Heuristics: [`internal/scanner/heuristics.go`](internal/scanner/heuristics.go), tested in [`heuristics_test.go`](internal/scanner/heuristics_test.go)<br>YARA: [`internal/yara/embedded_rules.go`](internal/yara/embedded_rules.go), tested in [`yarax_integration_test.go`](internal/yara/yarax_integration_test.go) |
-| **Web Shells & Backdoors** | • `Webshell_PHP_Generic_Backdoor` | • `Linux_Webshell_PHP_Generic_Backdoor`<br>• `Linux_Webshell_PHP_Known_Families`<br>• `Linux_Webshell_JSP_Runtime_Exec` | Heuristics: [`internal/scanner/heuristics.go`](internal/scanner/heuristics.go), tested in [`heuristics_test.go`](internal/scanner/heuristics_test.go)<br>YARA: [`internal/yara/embedded_rules.go`](internal/yara/embedded_rules.go), tested in [`yarax_integration_test.go`](internal/yara/yarax_integration_test.go) |
-| **Implants & Rootkits** | • `Script_RedTeam_Persistence_Framework`<br>• `Script_Process_Hiding_Procfs`<br>• `Script_Download_And_Execute` | • `Linux_Implant_RedTeam_Persistence_Framework`<br>• `Linux_Rootkit_LDPRELOAD_Hook_Artifact`<br>• `Linux_Rootkit_Diamorphine_Reptile_Strings`<br>• `Linux_Malware_Cryptominer_Stratum_Pool`<br>• `Linux_Dropper_Remote_Pipe_Shell_Execution` | Heuristics: [`internal/scanner/heuristics.go`](internal/scanner/heuristics.go), tested in [`heuristics_test.go`](internal/scanner/heuristics_test.go)<br>YARA: [`internal/yara/embedded_rules.go`](internal/yara/embedded_rules.go), tested in [`yarax_integration_test.go`](internal/yara/yarax_integration_test.go) |
+A quiet report is not proof the host is clean.
 
----
+- Without root, Aether cannot read `/etc/shadow`, root cron spools, or another user’s `/proc`. Coverage gaps are printed in the summary.
+- Packed binaries are not emulated.
+- A rootkit that disappears from both `/proc/modules` and sysfs needs a memory image.
+- Files over 50 MB are noted and skipped for hashing and YARA unless you raise `--max-filesize`.
 
-### 3. MITRE ATT&CK & Enrichment Pipeline
+## Repository map
 
-Findings are enriched with MITRE ATT&CK tactical classifications, explanations, and remediation guidance in [`internal/report/finding.go`](internal/report/finding.go):
+| Path | Why you would open it |
+| --- | --- |
+| [docs/index.html](docs/index.html) | Overview site source. Published at [mr-n1ck.github.io/aether](https://mr-n1ck.github.io/aether/). |
+| [cmd/aether](cmd/aether) | CLI entrypoint |
+| [internal/modules](internal/modules) | Process, persistence, users, network, kernel |
+| [internal/scanner](internal/scanner) | Filesystem walk and heuristics |
+| [internal/yara](internal/yara) | Embedded rules, pure-Go fallback, YARA-X |
+| [internal/report](internal/report) | Finding copy, MITRE, HTML and JSON |
+| [DESIGN.md](DESIGN.md) | Color, type, and motion |
+| [AGENTS.md](AGENTS.md) | Rules for changing detection safely |
+| [SECURITY.md](SECURITY.md) | How to report a vulnerability |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Tests and review expectations |
 
-- **Mapped Techniques**: `T1547` (Boot or Logon Autostart), `T1564.001` (Hidden Files/Directories), `T1552.004` (Private Keys), `T1059.004` (Unix Shell), `T1014` (Rootkit), `T1486` (Data Encrypted for Impact), `T1070.004` (File Deletion), `T1041` (Exfiltration Over C2 Channel), `T1005` (Data from Local System), `T1071.001` (Web Protocols), `T1573.002` (Asymmetric Cryptography), `T1105` (Ingress Tool Transfer), `T1505.003` (Web Shell), `T1548.001` (Setuid/Setgid), `T1620` (Reflective Code Loading).
-- **Test Evidence**: Verified in [`internal/report/reporter_test.go`](internal/report/reporter_test.go) and [`internal/scanner/heuristics_test.go`](internal/scanner/heuristics_test.go).
+## Reference
 
----
+The sections below are the engineering record: every capability, where it lives, and which test covers it.
 
-### 4. User Interfaces & Reporting
+<details>
+<summary><strong>Detection modules and evidence</strong></summary>
 
-1. **Interactive Terminal UI (TUI) & Command Center**:
-   - Built with Bubbletea and Lipgloss.
-   - Interactive launcher menu when run without arguments (`aether`).
-   - Live scanning telemetry, module progress indicators, and interactive finding navigation.
-   - **Forensic Threat Dossier Modal**: Pressing `[Enter]` on a finding displays threat assessment, cryptographic hashes, MITRE ATT&CK techniques, and containment steps.
-   - Evidence: Implemented in [`internal/ui/tui/launcher.go`](internal/ui/tui/launcher.go), [`model.go`](internal/ui/tui/model.go), [`view.go`](internal/ui/tui/view.go).
-2. **Plain Terminal Output (`--plain`)**:
-   - High-contrast ANSI formatted card output for standard terminal environments and CI/CD pipelines.
-   - Evidence: Implemented in [`internal/ui/plain/plain.go`](internal/ui/plain/plain.go), tested in [`ui_test.go`](internal/ui/plain/ui_test.go).
-3. **Structured JSON Output (`--json-out <file>`)**:
-   - Streamed event format for SIEM ingestion (Splunk, Elastic, Sentinel).
-   - Evidence: Implemented in [`internal/report/reporter.go`](internal/report/reporter.go), tested in [`reporter_test.go`](internal/report/reporter_test.go).
-4. **Self-Contained Offline HTML Report (`--html-out <file.html>`)**:
-   - Single-file report with zero external CDN dependencies, inline styles, inline SVG, and a strict Content-Security-Policy with cryptographic nonce (`crypto/rand`).
-   - Dynamic DOM-safe rendering (no `innerHTML`).
-   - Host/user redaction support (`--redact-hosts`).
-   - Evidence: Implemented in [`internal/report/html/html.go`](internal/report/html/html.go), tested in [`html_test.go`](internal/report/html/html_test.go).
-5. **Cryptographic Hash Display**:
-   - Streaming SHA-256, MD5, and SHA-1 hashing up to the maximum file size.
-   - Evidence: Implemented in [`internal/hasher/hasher.go`](internal/hasher/hasher.go), surfaced in HTML and TUI modal views.
+### Process
 
----
+Memory-only execution (`/memfd:`), unlinked binaries (`(deleted)`), hidden PIDs via a two-pass `os.ReadDir` versus `unix.Fstatat` probe with `hidepid` detection, `comm` versus `cmdline` versus `exe` masquerading, and process-tree anomalies.
 
-## 📦 Installation & Setup
+- Code: [internal/modules/process/process.go](internal/modules/process/process.go), [hidden_pid.go](internal/modules/process/hidden_pid.go)
+- Tests: [internal/modules/process/process_test.go](internal/modules/process/process_test.go)
 
-### Hardened Installation Workflow (`install.sh`)
-The repository includes a security-hardened installation script ([`install.sh`](install.sh)) with separation of privileges:
+### Persistence
 
-1. **Build Phase (Unprivileged user)**:
-   ```bash
-   ./install.sh build
-   ```
-   - Refuses execution if run as root.
-   - If `pkg-config` detects `yara_x_capi`, compiles `bin/aether-yara-static` (statically linking `libyara_x_capi.a`).
-   - Otherwise, compiles pure Go `bin/aether` and prints that YARA is not included.
+systemd system and user units, masked units, system cron, per-user crontabs, at jobs, sudoers, shell profiles, SSH authorized keys, and private keys in non-standard paths.
 
-2. **Install Phase (Root user with SHA-256 pin)**:
-   ```bash
-   # 1. Check binary hash and path
-   sha256sum bin/aether-yara-static
-   
-   # 2. Install with explicit SHA-256 confirmation
-   sudo ./install.sh install --sha256 <computed-sha256>
-   ```
-   - Verifies `bin/` directory and source binary are owned by `$SUDO_USER` and strictly non-group/world-writable.
-   - Requires `--sha256 <hash>` parameter matching the computed file hash.
-   - Installs to `/usr/local/bin/aether` (`root:root`, mode `0755`).
-   - Invokes `/usr/local/bin/aether setup --download-rules=false`.
+- Code: [internal/modules/persistence/persistence.go](internal/modules/persistence/persistence.go), [systemd.go](internal/modules/persistence/systemd.go), [cron.go](internal/modules/persistence/cron.go), [ssh.go](internal/modules/persistence/ssh.go)
+- Tests: [internal/modules/persistence/persistence_test.go](internal/modules/persistence/persistence_test.go)
 
-### What `aether setup` Creates
-[`internal/setup/setup.go`](internal/setup/setup.go) creates only directory structures (never chmods pre-existing directories):
+### Users
 
-| Context | Created Path | Mode | Owner | Condition |
-| :--- | :--- | :--- | :--- | :--- |
-| **Root** (`sudo aether setup`) | `/etc/aether/rules` | `0755` (`rwxr-xr-x`) | `root:root` | Created only if does not exist; path restricted to `/etc/aether` |
-| **Non-Root** (`aether setup`) | `~/.config/aether/rules` | `0700` (`rwx------`) | Invoking user | Created only if does not exist |
+Non-root UID 0, duplicate UIDs, empty passwords, obsolete DES/MD5 hashes, system accounts with login shells, and membership of `sudo`, `wheel`, `docker`, or `lxd`.
 
-*(Note: If `--download-rules` is passed, YARA rules `.yar` are written to that directory).*
+- Code: [internal/modules/users/users.go](internal/modules/users/users.go)
+- Tests: [internal/modules/users/users_test.go](internal/modules/users/users_test.go)
 
-### Manual Compilation
+### Network
+
+Inode-to-process mapping for TCP, UDP, and raw sockets, wildcard listeners, loopback listeners, and promiscuous sniffers.
+
+- Code: [internal/modules/network/network.go](internal/modules/network/network.go)
+- Tests: [internal/modules/network/network_test.go](internal/modules/network/network_test.go)
+
+### Kernel
+
+`/proc/modules` compared with `/sys/module`, hidden-module detection, taint-flag decoding, and world-writable or non-standard modprobe rules.
+
+- Code: [internal/modules/kernel/kernel.go](internal/modules/kernel/kernel.go)
+- Tests: [internal/modules/kernel/kernel_test.go](internal/modules/kernel/kernel_test.go)
+
+### Filesystem and scanner
+
+SUID/SGID anomalies, hidden executables in system directories, non-packaged ELF binaries in `/tmp`, `/var/tmp`, and `/dev/shm`, build-tree recognition, world-writable files in `/etc`, and a worker pool with a memory budget.
+
+- Code: [internal/scanner/scanner.go](internal/scanner/scanner.go), [heuristics.go](internal/scanner/heuristics.go), [memory_budget.go](internal/scanner/memory_budget.go)
+- Tests: [internal/scanner/heuristics_test.go](internal/scanner/heuristics_test.go), [fixtures_test.go](internal/scanner/fixtures_test.go)
+
+</details>
+
+<details>
+<summary><strong>Heuristics and YARA-X rules</strong></summary>
+
+Embedded signatures are active in every build. `make build` evaluates them with the pure-Go fallback ([internal/yara/fallback_engine.go](internal/yara/fallback_engine.go)). `make build-yara` and `make build-yara-static` evaluate the same source with YARA-X ([internal/yara/yarax_engine.go](internal/yara/yarax_engine.go)). A parity test ([internal/yara/fallback_parity_test.go](internal/yara/fallback_parity_test.go)) checks that both engines agree. Native regex heuristics always run from [internal/scanner/heuristics.go](internal/scanner/heuristics.go).
+
+Rootkit and known-family rules (`Linux_Rootkit_Diamorphine_Reptile_Strings`, `Linux_Webshell_PHP_Known_Families`, `Linux_Implant_RedTeam_Persistence_Framework`) match strings from known samples. They are not generic kernel-hook detectors.
+
+| Category | Heuristics | Embedded rules |
+| --- | --- | --- |
+| Reverse shells | `Script_Reverse_Shell_Interactive`, `Script_OpenSSL_Reverse_Shell`, `Script_Netcat_Reverse_Shell`, `Script_Socat_Reverse_Shell`, `Script_Reverse_Shell_Inline` | `Linux_Backdoor_Reverse_Shell_OneLiner`, `Linux_Backdoor_Encrypted_Reverse_Shell` |
+| Ransomware and stealers | `Script_Python_Ransomware_Encryptor`, `Script_Data_Exfiltration_Stealer`, `Script_C2_Exfiltration_Server` | `Linux_Ransomware_Python_Locker`, `Linux_Malware_Data_Exfiltration_Client`, `Linux_Malware_Data_Exfiltration_Server` |
+| Web shells | `Webshell_PHP_Generic_Backdoor` | `Linux_Webshell_PHP_Generic_Backdoor`, `Linux_Webshell_PHP_Known_Families`, `Linux_Webshell_JSP_Runtime_Exec` |
+| Implants and rootkits | `Script_RedTeam_Persistence_Framework`, `Script_Process_Hiding_Procfs`, `Script_Download_And_Execute` | `Linux_Implant_RedTeam_Persistence_Framework`, `Linux_Rootkit_LDPRELOAD_Hook_Artifact`, `Linux_Rootkit_Diamorphine_Reptile_Strings`, `Linux_Malware_Cryptominer_Stratum_Pool`, `Linux_Dropper_Remote_Pipe_Shell_Execution` |
+
+Tests: [internal/scanner/heuristics_test.go](internal/scanner/heuristics_test.go), [internal/yara/yarax_integration_test.go](internal/yara/yarax_integration_test.go).
+
+Finding titles, explanations, MITRE techniques, and remediation are registered for the report. Mapped techniques include T1547, T1564.001, T1552.004, T1059.004, T1014, T1486, T1070.004, T1041, T1005, T1071.001, T1573.002, T1105, T1505.003, T1548.001, and T1620. Checked in [internal/report/reporter_test.go](internal/report/reporter_test.go).
+
+</details>
+
+<details>
+<summary><strong>Install, commands, and trust model</strong></summary>
+
+### Install script
+
+[`install.sh`](install.sh) splits build and install.
+
 ```bash
-# 1. Pure Go build (CGO_ENABLED=0, pure Go heuristics and fallback engine)
-make build
-
-# 2. Native YARA-X build (Dynamic linking against libyara_x_capi)
-make build-yara
-
-# 3. Static YARA-X build (Statically links libyara_x_capi.a for portability)
-make build-yara-static
+./install.sh build          # refuses to run as root
+sudo ./install.sh install --sha256 <sha256 of the binary you just built>
 ```
 
----
+The install phase checks that `bin/` is owned by `$SUDO_USER` and is not group- or world-writable, requires the hash you pass to match, and installs `/usr/local/bin/aether` as `root:root` mode `0755`.
 
-## 💻 CLI Usage Guide
+`aether setup` creates a rules directory only when it is missing. Root gets `/etc/aether/rules` (`0755`, `root:root`). An unprivileged user gets `~/.config/aether/rules` (`0700`). Rule files are written there only if you pass `--download-rules`.
 
-**The zero-argument flow** — this is how the tool is meant to be used day to day:
+Manual builds:
 
 ```bash
-sudo aether        # Command Center: pick Quick Scan / Deep Hunt / Target Folder / Setup / Report
+make build                # pure Go
+make build-yara           # dynamic libyara_x_capi
+make build-yara-static    # static libyara_x_capi.a
 ```
 
-Scan semantics by invocation (no flags needed to remember):
+### Commands
 
 | Command | What runs |
-| :--- | :--- |
-| `aether scan --quick` | Full live-module hunt of high-risk locations |
-| `aether scan --quick /some/dir` | **That directory's files only** (filesystem module) |
-| `aether scan /some/dir` | Same — explicit paths always mean filesystem-only |
-| `aether scan --full` | Everything, everywhere |
-| any + `--modules process,persistence,…` | Override the module selection explicitly |
+| --- | --- |
+| `aether` | Command center, when stdout is a terminal |
+| `aether doctor` | Privileges, signatures, package DB, engine self-test |
+| `aether scan --quick` | Live modules against high-risk locations |
+| `aether scan --quick /some/dir` | That directory’s files only |
+| `aether scan /some/dir` | Filesystem-only. An explicit path means files. |
+| `aether scan --full` | Full walk |
+| `aether scan --modules process,persistence` | The modules you name |
+| `aether ack /path --reason "..."` | Pin a benign match by hash. Alert and IOC matches cannot be acked. |
+| `sudo aether update` | Re-download the YARA-Forge core ruleset |
+| `aether intel import /path/to/feed.txt` | Offline indicator import |
 
 ```bash
-# 0. Verify installation health (privileges, signatures, package DB, engine self-test)
-aether doctor
-
-# 1. Open Interactive Command Center (when run with no arguments in a TTY)
-aether
-
-# 2. Fast triage scan of high-risk locations and persistence hooks
-aether scan --quick --plain
-
-# 3. Full deep system scan with self-contained HTML report
-aether scan --full --html-out /tmp/aether-report.html
-
-# 4. Target a specific directory or script (filesystem-only by design)
-aether scan --plain /path/to/target
-
-# 5. Acknowledge a known benign finding (pins file/line hash to suppress alerts)
-aether ack /path/to/file --reason "Approved internal administration script"
-
-# 6. Refresh YARA ruleset and (optionally) a remote intel feed
-sudo aether update                                # re-download YARA-Forge Core ruleset
-sudo aether update --intel-url https://example.com/feeds/hashlist.txt   # HTTPS feeds only
-aether intel import /path/to/local-feed.txt       # offline import path
+sudo ./bin/aether scan --full --html-out /tmp/aether-report.html
+sudo ./bin/aether scan --full --json-out /var/log/aether_audit.json
 ```
 
----
+### File access
 
-## 🔒 Forensic Integrity & File Access Semantics
+Opens go through [`safeopen.OpenRegularReadOnly`](internal/safeopen/safeopen.go) with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOATIME`. If `O_NOATIME` returns `EPERM`, the open falls back without that flag, so an unprivileged scan of someone else’s files can still update `atime` on filesystems mounted with `atime` or `relatime`. Symlink escape is covered in [internal/safeopen/safeopen_test.go](internal/safeopen/safeopen_test.go).
 
-- **Read-Only Invariant**: Aether never writes to, modifies, deletes, or executes inspected files. File modification time (`mtime`) and metadata change time (`ctime`) are **never** altered.
-- **Access Time (`atime`) Behavior**:
-  - File reads are initiated using [`safeopen.OpenRegularReadOnly`](internal/safeopen/safeopen.go) with flags `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOATIME`.
-  - On Linux, the `O_NOATIME` flag requires file ownership or the `CAP_FOWNER` capability (typically root). If `O_NOATIME` returns `EPERM`, `safeopen` falls back to `O_RDONLY | O_NOFOLLOW | O_NONBLOCK`.
-  - Consequently, running scans as an unprivileged user against files owned by other accounts on filesystems mounted with `atime` or `relatime` may result in the kernel updating `atime`, unless the filesystem is mounted with `noatime`.
-- **Symlink Boundary Isolation**: Evaluates paths using `O_NOFOLLOW` and verifies root containment to protect against TOCTOU race conditions and symlink escape attacks. Tested in [`internal/safeopen/safeopen_test.go`](internal/safeopen/safeopen_test.go).
+### Trust
 
----
+- Custom `--rules-dir` paths must be root-owned and not world-writable unless you pass `--trust-rules-dir` ([internal/yara/lib_trust.go](internal/yara/lib_trust.go)).
+- `aether ack` stores a SHA-256 of the matched line. Editing the file voids the acknowledgement. `ALERT` findings cannot be acked ([internal/triage/triage.go](internal/triage/triage.go)).
+- Package ownership is checked for dpkg, rpm (including `/usr/lib/sysimage/rpm`), pacman, and apk ([internal/pkgdb/pkgdb.go](internal/pkgdb/pkgdb.go)).
 
-## 🛡️ Trust Model
+### Tests
 
-1. **Air-Gapped Operation**: Aether performs zero outbound network requests and requires no cloud connectivity or telemetry ingestion.
-2. **YARA Rule Security & Qualification**: Custom rule directories supplied via `--rules-dir` are subjected to strict root-safety qualification ([`internal/yara/lib_trust.go`](internal/yara/lib_trust.go)). Rules located in non-root-owned or world-writable paths are rejected unless `--trust-rules-dir` is explicitly passed. Rule files are also checked to prevent self-detection on rule signature strings. Tested in [`internal/yara/lib_trust_test.go`](internal/yara/lib_trust_test.go).
-3. **Cryptographic False-Positive Pinning**: The `aether ack` triage mechanism ([`internal/triage/triage.go`](internal/triage/triage.go)) records cryptographic SHA-256 hashes of matched lines and targets. If an acknowledged file is modified, the acknowledgment is automatically voided. `ALERT` and explicit IOC matches are non-ackable. Tested in [`internal/triage/triage_test.go`](internal/triage/triage_test.go).
-4. **Package DB Validation**: Integrates with local package manager databases — **dpkg** (Debian/Ubuntu), **pacman** (Arch), **apk** (Alpine), and **rpm** (RHEL/Fedora/SUSE, including the modern `/usr/lib/sysimage/rpm` SQLite/NDB layout and SHA-256 file digests) — via [`internal/pkgdb/pkgdb.go`](internal/pkgdb/pkgdb.go) to verify package file ownership and detect trojaned system binaries (MD5/SHA-256 digest mismatch against the package database).
-
----
-
-## ⚠️ Limitations
-
-1. **Non-Root Coverage Constraints**: When executed as an unprivileged user, Aether cannot read `/etc/shadow`, root-only cron spool files, or other users' private `/proc/<PID>` entries (especially when `hidepid` is active). Coverage limits are reported explicitly in the output summary.
-2. **Static Inspection Scope**: Aether performs static and structural analysis. It does not perform dynamic binary emulation, sandboxing, or unpack runtime-packed executables in memory unless the binary or memory dump is accessible on disk or via `/proc/<PID>/mem`.
-3. **Advanced Kernel Rootkits**: Kernel module inspection verifies `/proc/modules` against `/sys/module` sysfs structures. Rootkits utilizing direct kernel object manipulation (DKOM) that unlink module objects from both lists without sysfs residue require live memory dump analysis or hypervisor-level introspection.
-4. **File Size Bounds**: Files exceeding `max-filesize` (default 50MB, configurable via `--max-filesize`) are not hashed or scanned with YARA to avoid memory exhaustion, though their metadata and presence are recorded.
-
----
-
-## 🧪 Tested On
-
-- **Verified Environment**:
-  - Kali Linux, kernel `7.1.5+kali`, `amd64` (x86_64)
-
-- **Cross-Distro Test Matrix**: the full suite runs inside containers on Debian 12, Ubuntu 24.04, Fedora 41 (rpm userspace — validates the RPM backend against a real rpmdb), Arch Linux (pacman), and Alpine (apk, musl). Run locally with `make test-cross` or `scripts/cross-distro.sh [--distro <name>]`; the same matrix runs in CI as container jobs.
-
-- **Not Yet Tested**:
-  - `arm64` (aarch64) containers locally (CI covers aarch64 via `ubuntu-24.04-arm`), Linux kernels 5.x / 6.x
-
----
-
-## 🤖 Development & AI Guidelines
-
-Instructions for autonomous AI agents, language models, and developers maintaining or extending this codebase are located in [**`AGENTS.md`**](AGENTS.md).
-
----
-
-## 🔬 Test Suite Execution
-
-Run all automated test suites across the repository:
+Verified locally on Kali Linux, kernel `7.1.5+kali`, `amd64`. The suite also runs in containers for Debian 12, Ubuntu 24.04, Fedora 41, Arch, and Alpine via `make test-cross`. CI covers `ubuntu-latest`, Ubuntu 24.04, and Ubuntu 24.04 arm.
 
 ```bash
-# Run unit tests across all packages
 make test
-
-# Run tests with the Go race detector
 go test -race -count=1 ./...
-
-# Run tests with YARA-X enabled
 make test-yara
 ```
 
----
+`arm64` images are not part of the local cross script. CI does build `aarch64` on `ubuntu-24.04-arm`. Kernels 5.x and 6.x are not claimed as locally verified here.
 
-## 📜 License
+</details>
 
-Licensed under the **Apache License, Version 2.0** — see [LICENSE](LICENSE) for details.
+## License
+
+[Apache License 2.0](LICENSE).

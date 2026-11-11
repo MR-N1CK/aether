@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="Aether, read-only Linux compromise assessment">
+  <rect width="1280" height="640" fill="#0B1220"/>
+  <rect width="1280" height="4" fill="#22D3EE"/>
+  <circle cx="1080" cy="120" r="220" fill="#0E7490" opacity="0.28"/>
+  <circle cx="980" cy="420" r="180" fill="#22D3EE" opacity="0.08"/>
+  <text x="80" y="168" fill="#22D3EE" font-family="ui-sans-serif, Segoe UI, Helvetica, Arial, sans-serif" font-size="22" letter-spacing="4">LINUX COMPROMISE ASSESSMENT</text>
+  <text x="80" y="292" fill="#F4FBFC" font-family="ui-sans-serif, Segoe UI, Helvetica, Arial, sans-serif" font-size="108" font-weight="650">Aether</text>
+  <text x="80" y="360" fill="#C5D0E6" font-family="ui-sans-serif, Segoe UI, Helvetica, Arial, sans-serif" font-size="32">Read-only threat hunting for Linux hosts.</text>
+  <text x="80" y="468" fill="#94A3B8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20">Process   Persistence   Users   Network   Kernel   Files</text>
+  <text x="80" y="548" fill="#E0FEFF" font-family="ui-sans-serif, Segoe UI, Helvetica, Arial, sans-serif" font-size="22">No execution of samples. No outbound telemetry.</text>
+</svg>

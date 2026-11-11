@@ -1,0 +1,46 @@
+name: Bug report
+description: Aether crashed, skipped a check, or reported something that contradicts its read-only behavior.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe what the scanner did. Do not include live malware, credentials, or private host data. Redact hostnames, usernames, and home paths.
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `aether version`, or the git commit you built.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: "Kali Linux, kernel 7.x, x86_64, pure-Go build"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command you ran
+      render: bash
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted output
+      render: text

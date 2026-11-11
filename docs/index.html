@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aether — Read-only Linux compromise assessment</title>
+  <meta name="description" content="Aether inspects a Linux host without executing files or sending telemetry. It checks processes, persistence, users, network sockets, kernel modules, and files, then explains findings with MITRE ATT&CK.">
+  <meta name="theme-color" content="#0B1220">
+  <meta name="color-scheme" content="dark">
+  <meta property="og:title" content="Aether — Read-only Linux compromise assessment">
+  <meta property="og:description" content="See whether a Linux host is clean. No sample execution. No outbound telemetry.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://mr-n1ck.github.io/aether/">
+  <meta property="og:image" content="https://mr-n1ck.github.io/aether/assets/social-card.png">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230B1220'/%3E%3Cpath d='M8 22 L16 8 L24 22' fill='none' stroke='%2322D3EE' stroke-width='2'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --void: #0b1220;
+      --surface: #101828;
+      --raised: #16203a;
+      --overlay: #1d2a45;
+      --border: #24334f;
+      --ink: #f4fbfc;
+      --body: #d5deee;
+      --muted: #b7c3d6;
+      --faint: #c5d0e6;
+      --teal-deep: #0e7490;
+      --teal: #22d3ee;
+      --ice: #e0feff;
+      --alert: #f43f5e;
+      --warning: #fbbf24;
+      --notice: #38bdf8;
+      --info: #94a3b8;
+      --safe: #34d399;
+      --fast: 120ms;
+      --base: 200ms;
+      --slow: 300ms;
+      --draw: 600ms;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+      --font: "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", menlo, consolas, monospace;
+      --header: 4.5rem;
+      --measure: 68ch;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header) + 12px); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--void);
+      color: var(--body);
+      font-family: var(--font);
+      font-size: 1.0625rem;
+      line-height: 1.6;
+      text-rendering: optimizeLegibility;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(900px 480px at 88% -10%, rgba(14, 116, 144, 0.28), transparent 60%),
+        radial-gradient(700px 420px at 0% 20%, rgba(34, 211, 238, 0.06), transparent 55%);
+      z-index: 0;
+    }
+    img, svg { max-width: 100%; }
+    a { color: var(--ice); text-underline-offset: 0.18em; }
+    a:hover { color: var(--teal); }
+    :focus { outline: none; }
+    :focus-visible {
+      outline: 2px solid var(--ice);
+      outline-offset: 3px;
+    }
+    .skip {
+      position: absolute;
+      left: max(16px, env(safe-area-inset-left));
+      top: 0;
+      transform: translateY(-120%);
+      background: var(--teal);
+      color: var(--void);
+      padding: 0.75rem 1rem;
+      z-index: 20;
+      font-weight: 650;
+      text-decoration: none;
+    }
+    .skip:focus { transform: none; top: 12px; }
+
+    .wrap {
+      width: min(1120px, calc(100% - 2.5rem));
+      margin-inline: auto;
+    }
+    header.site {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      height: var(--header);
+      display: flex;
+      align-items: center;
+      background: rgba(11, 18, 32, 0.9);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(14px);
+    }
+    .bar {
+      width: min(1120px, calc(100% - max(2.5rem, env(safe-area-inset-left) + env(safe-area-inset-right))));
+      margin-inline: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.65rem;
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 680;
+      letter-spacing: 0.08em;
+      min-height: 44px;
+    }
+    .brand svg { display: block; }
+    nav ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 0.35rem;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      justify-content: flex-end;
+    }
+    nav a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 0 0.75rem;
+      color: var(--muted);
+      text-decoration: none;
+      border-radius: 8px;
+    }
+    nav a:hover { color: var(--ink); background: var(--raised); }
+
+    main { position: relative; z-index: 1; }
+    .hero {
+      display: grid;
+      min-width: 0;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+      gap: 3rem;
+      align-items: center;
+      padding: 4.5rem 0 3.5rem;
+    }
+    .kicker {
+      margin: 0 0 0.9rem;
+      color: var(--teal);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(2.5rem, 5.4vw, 4.35rem);
+      line-height: 1.02;
+      letter-spacing: -0.035em;
+      font-weight: 640;
+      text-wrap: balance;
+    }
+    h1 em {
+      font-style: normal;
+      background: linear-gradient(100deg, var(--teal-deep), var(--teal) 45%, var(--ice));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .lede {
+      max-width: var(--measure);
+      margin: 1.25rem 0 0;
+      font-size: 1.125rem;
+      color: var(--body);
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.75rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0 1.15rem;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      font: inherit;
+      font-weight: 650;
+      text-decoration: none;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: background var(--base) var(--ease), border-color var(--base) var(--ease), color var(--fast) var(--ease);
+    }
+    .btn-primary { background: var(--teal); color: #062028; }
+    .btn-primary:hover { background: var(--ice); color: #062028; }
+    .btn-primary:active { background: #9aebf2; }
+    .btn-ghost {
+      background: transparent;
+      color: var(--ink);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover { border-color: var(--teal); background: var(--raised); }
+    .btn-ghost:active { background: var(--overlay); }
+    .facts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 1.5rem 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .facts li {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      background: rgba(16, 24, 40, 0.8);
+      border-radius: 999px;
+      padding: 0.35rem 0.7rem;
+    }
+
+    .instrument {
+      min-width: 0;
+      background: linear-gradient(180deg, rgba(22, 32, 58, 0.95), rgba(16, 24, 40, 0.96));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+      overflow: hidden;
+    }
+    .instrument header, .instrument footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.85rem 1rem;
+    }
+    .instrument header {
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .rail {
+      height: 3px;
+      background: var(--overlay);
+      position: relative;
+      overflow: hidden;
+    }
+    .rail span {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 35%;
+      background: linear-gradient(90deg, transparent, var(--teal), var(--ice));
+      transform: translateX(-120%);
+    }
+    .instrument.is-playing .rail span {
+      animation: sweep 1.1s var(--ease) infinite;
+    }
+    @keyframes sweep {
+      to { transform: translateX(320%); }
+    }
+    .mods {
+      list-style: none;
+      margin: 0;
+      padding: 0.4rem 0;
+    }
+    .mod {
+      display: grid;
+      grid-template-columns: 1.4rem 1fr auto;
+      gap: 0.75rem;
+      align-items: center;
+      min-height: 48px;
+      padding: 0.35rem 1rem;
+    }
+    .mod .mark { color: var(--faint); display: grid; place-items: center; }
+    .mod strong { color: var(--ink); font-weight: 600; }
+    .state {
+      min-width: 6.5rem;
+      text-align: right;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--info);
+    }
+    .mod.is-run .state { color: var(--teal); }
+    .mod.is-clear .state { color: var(--safe); }
+    .mod.is-alert .state { color: var(--alert); }
+    .mod.is-notice .state { color: var(--notice); }
+    .instrument footer {
+      border-top: 1px solid var(--border);
+      align-items: flex-end;
+    }
+    .verdict-kicker {
+      margin: 0;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--faint);
+    }
+    #verdict {
+      margin: 0.15rem 0 0;
+      color: var(--ink);
+      font-size: 1.05rem;
+    }
+    .transport { display: flex; gap: 0.5rem; }
+    .transport .btn { min-height: 44px; padding-inline: 0.85rem; font-size: 0.92rem; }
+
+    section { padding: 1rem 0 3.5rem; min-width: 0; }
+    code { overflow-wrap: anywhere; }
+    .section-label {
+      margin: 0 0 0.4rem;
+      color: var(--teal);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    h2 {
+      margin: 0 0 0.75rem;
+      color: var(--ink);
+      font-size: clamp(1.7rem, 3vw, 2.2rem);
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+      font-weight: 640;
+      text-wrap: balance;
+    }
+    .intro { max-width: var(--measure); margin-top: 0; }
+
+    .deck { list-style: none; margin: 1.5rem 0 0; padding: 0; border-top: 1px solid var(--border); }
+    .deck li {
+      display: grid;
+      min-width: 0;
+      grid-template-columns: 4.5rem 11rem minmax(0, 1fr);
+      gap: 1rem;
+      align-items: baseline;
+      padding: 1.15rem 0.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .deck .idx {
+      font-family: var(--mono);
+      color: var(--teal);
+      font-size: 0.85rem;
+    }
+    .deck h3 { margin: 0; color: var(--ink); font-size: 1.15rem; font-weight: 640; }
+    .deck p { margin: 0; }
+
+    .steps {
+      display: grid;
+      min-width: 0;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+    .step {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.25rem 1.2rem 1.35rem;
+      min-height: 100%;
+    }
+    .step span {
+      font-family: var(--mono);
+      color: var(--teal);
+      font-size: 0.78rem;
+      letter-spacing: 0.12em;
+    }
+    .step h3 { margin: 0.55rem 0 0.4rem; color: var(--ink); font-size: 1.25rem; }
+    .step p { margin: 0; }
+    .step code, .dossier code, pre {
+      font-family: var(--mono);
+      font-size: 0.86em;
+    }
+
+    .split {
+      display: grid;
+      min-width: 0;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+    .dossier {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.25rem 1.25rem 1.1rem;
+    }
+    .dossier-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: center;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 0 0.7rem;
+      border-radius: 999px;
+      border: 1px solid rgba(244, 63, 94, 0.45);
+      color: #fecdd6;
+      background: rgba(244, 63, 94, 0.12);
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+    }
+    .dossier h3 { margin: 0.8rem 0 0.35rem; color: var(--ink); font-size: 1.35rem; letter-spacing: -0.02em; }
+    .meta { color: var(--faint); font-family: var(--mono); font-size: 0.82rem; margin: 0; }
+    .why { margin: 0.9rem 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0; padding: 0; list-style: none; }
+    .chips li {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.3rem 0.5rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .dossier ol { margin: 0.8rem 0 0; padding-left: 1.15rem; }
+    .dossier li + li { margin-top: 0.35rem; }
+    .note { color: var(--faint); font-size: 0.92rem; }
+
+    .reports {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-top: 1.25rem;
+    }
+    .reports article {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1rem;
+      background: var(--raised);
+    }
+    .reports h3 { margin: 0 0 0.35rem; color: var(--ink); font-size: 1rem; }
+    .reports p { margin: 0; font-size: 0.95rem; }
+
+    pre.cmd {
+      margin: 1.25rem 0 0;
+      max-width: 100%;
+      min-width: 0;
+      padding: 1.1rem 1.15rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow-x: auto;
+      color: var(--ice);
+      line-height: 1.7;
+    }
+    pre.cmd code { overflow-wrap: normal; }
+    .limits { margin: 1rem 0 0; padding-left: 1.15rem; max-width: var(--measure); }
+    .limits li + li { margin-top: 0.45rem; }
+
+    footer.site {
+      position: relative;
+      z-index: 1;
+      border-top: 1px solid var(--border);
+      padding: 1.5rem 0 calc(1.75rem + env(safe-area-inset-bottom));
+      color: var(--faint);
+    }
+    footer.site .wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.5rem;
+      justify-content: space-between;
+      align-items: center;
+    }
+    footer nav { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; }
+    footer a { color: var(--muted); min-height: 44px; display: inline-flex; align-items: center; }
+
+    .reveal { opacity: 0; transform: translateY(12px); animation: rise var(--slow) var(--ease) forwards; }
+    .reveal:nth-child(2) { animation-delay: 40ms; }
+    @keyframes rise { to { opacity: 1; transform: none; } }
+
+      @media (max-width: 900px) {
+      .hero, .split, .steps { grid-template-columns: 1fr; }
+      .deck li { grid-template-columns: 3rem 1fr; }
+      .deck h3 { grid-column: 2; }
+      .deck p { grid-column: 1 / -1; }
+    }
+    @media (max-width: 720px) {
+      header.site { height: auto; min-height: var(--header); }
+      .bar { flex-wrap: wrap; padding: 0.4rem 0; }
+      nav ul { justify-content: flex-start; }
+      .hero { padding-top: 2.4rem; gap: 1.75rem; }
+      .reports { grid-template-columns: 1fr; }
+      .actions { flex-direction: column; align-items: stretch; }
+      .instrument footer { flex-direction: column; align-items: stretch; }
+      .transport { width: 100%; }
+      .transport .btn { flex: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .reveal { opacity: 1; transform: none; animation: none; }
+      .rail span, .instrument.is-playing .rail span { animation: none; transform: none; opacity: 0; }
+      .btn { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="site">
+    <div class="bar">
+      <a class="brand" href="#content">
+        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 18 L12 4 L20 18" fill="none" stroke="#22D3EE" stroke-width="1.8"/>
+          <path d="M8 18 H16" stroke="#E0FEFF" stroke-width="1.8"/>
+        </svg>
+        AETHER
+      </a>
+      <nav aria-label="Page">
+        <ul>
+          <li><a href="#coverage">Coverage</a></li>
+          <li><a href="#scan">Scan</a></li>
+          <li><a href="#report">Report</a></li>
+          <li><a href="#start">Start</a></li>
+          <li><a href="https://github.com/MR-N1CK/aether">Source</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="content">
+    <div class="wrap">
+      <section class="hero" aria-labelledby="title">
+        <div>
+          <p class="kicker">Linux threat hunting</p>
+          <h1 id="title">Know if the host is <em>clean</em>.</h1>
+          <p class="lede">Aether is a read-only compromise assessment for Linux. It inspects the live host, explains what it found in plain language, and never executes the files it reads.</p>
+          <div class="actions">
+            <a class="btn btn-primary" href="#start">Run a first scan</a>
+            <a class="btn btn-ghost" href="https://github.com/MR-N1CK/aether">Read the source</a>
+          </div>
+          <ul class="facts">
+            <li>Read-only opens</li>
+            <li>No outbound telemetry</li>
+            <li>MITRE ATT&amp;CK on findings</li>
+          </ul>
+        </div>
+
+        <article class="instrument is-playing" id="sample" aria-labelledby="sample-title">
+          <header>
+            <span id="sample-title">Illustrative sample</span>
+            <span>Not this machine</span>
+          </header>
+          <div class="rail" aria-hidden="true"><span></span></div>
+          <ol class="mods">
+            <li class="mod is-wait" data-module="process">
+              <span class="mark" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="6" y="6" width="12" height="12"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>
+              </span>
+              <strong>Process</strong>
+              <span class="state">Waiting</span>
+            </li>
+            <li class="mod is-wait" data-module="persistence">
+              <span class="mark" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="14" r="3"/><path d="M11 14h8l2-2 2 2-2 2h-2"/></svg>
+              </span>
+              <strong>Persistence</strong>
+              <span class="state">Waiting</span>
+            </li>
+            <li class="mod is-wait" data-module="users">
+              <span class="mark" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3"/><path d="M5 19c1.5-3 3.8-4.5 7-4.5S17.5 16 19 19"/></svg>
+              </span>
+              <strong>Users</strong>
+              <span class="state">Waiting</span>
+            </li>
+            <li class="mod is-wait" data-module="network">
+              <span class="mark" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="12" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="18" cy="17" r="2"/><path d="M8 12h8M16.2 8.4 8.8 11M16.2 15.6 8.8 13"/></svg>
+              </span>
+              <strong>Network</strong>
+              <span class="state">Waiting</span>
+            </li>
+            <li class="mod is-wait" data-module="kernel">
+              <span class="mark" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h16M4 12h16M4 16h16"/><path d="M8 4v16"/></svg>
+              </span>
+              <strong>Kernel</strong>
+              <span class="state">Waiting</span>
+            </li>
+          </ol>
+          <footer>
+            <div>
+              <p class="verdict-kicker">Sample verdict</p>
+              <p id="verdict">Ready</p>
+            </div>
+            <div class="transport">
+              <button class="btn btn-ghost" type="button" id="pause" aria-pressed="false">Pause</button>
+              <button class="btn btn-primary" type="button" id="replay">Replay</button>
+            </div>
+            <noscript><p class="note">With animation off: persistence is an alert, network is a notice, and the other areas are clear.</p></noscript>
+          </footer>
+        </article>
+      </section>
+
+      <section id="coverage" aria-labelledby="coverage-title">
+        <p class="section-label">Coverage</p>
+        <h2 id="coverage-title">Six places an intrusion hides.</h2>
+        <p class="intro">Each pass is structural. Aether reads metadata, configuration, and file contents. It does not launch the file to see what it would do.</p>
+        <ol class="deck">
+          <li>
+            <span class="idx">01</span>
+            <h3>Process</h3>
+            <p>Memory-only binaries, deleted executables still running, name masquerading, and hidden PIDs.</p>
+          </li>
+          <li>
+            <span class="idx">02</span>
+            <h3>Persistence</h3>
+            <p>systemd units, cron and at jobs, sudoers, shell profiles, and SSH authorized keys.</p>
+          </li>
+          <li>
+            <span class="idx">03</span>
+            <h3>Users</h3>
+            <p>Extra UID 0 accounts, duplicate UIDs, empty or obsolete password hashes, and privileged groups.</p>
+          </li>
+          <li>
+            <span class="idx">04</span>
+            <h3>Network</h3>
+            <p>Listeners mapped back to a process, raw sockets, and interfaces left in promiscuous mode.</p>
+          </li>
+          <li>
+            <span class="idx">05</span>
+            <h3>Kernel</h3>
+            <p>Loaded modules compared with sysfs, taint flags, and unexpected modprobe configuration.</p>
+          </li>
+          <li>
+            <span class="idx">06</span>
+            <h3>Files</h3>
+            <p>Unexpected SUID binaries, world-writable configuration, and scripts matched by heuristics or YARA-X.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="scan" aria-labelledby="scan-title">
+        <p class="section-label">A scan</p>
+        <h2 id="scan-title">Read, decide, explain.</h2>
+        <div class="steps">
+          <article class="step">
+            <span>01</span>
+            <h3>Read</h3>
+            <p>Files open with <code>O_RDONLY</code>, <code>O_NOFOLLOW</code>, <code>O_NONBLOCK</code>, and <code>O_NOATIME</code> when the kernel allows it. The scanner does not update mtime or ctime.</p>
+          </article>
+          <article class="step">
+            <span>02</span>
+            <h3>Decide</h3>
+            <p>Pure-Go heuristics run in every build. The same embedded rules can be evaluated with YARA-X when you link it. Package databases catch replaced system binaries.</p>
+          </article>
+          <article class="step">
+            <span>03</span>
+            <h3>Explain</h3>
+            <p>Each finding carries a title, why it matters, MITRE ATT&amp;CK techniques, and containment steps. You can read that in the terminal, in JSON, or in one offline HTML file.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="report" aria-labelledby="report-title">
+        <p class="section-label">What you get</p>
+        <h2 id="report-title">A dossier, not a raw log line.</h2>
+        <div class="split">
+          <div>
+            <p class="intro">This card uses the real copy registered for <code>Linux_Backdoor_Reverse_Shell_OneLiner</code>. The path is invented so the page can show the shape of a finding without pointing at a live host.</p>
+            <div class="reports" aria-label="Report formats">
+              <article>
+                <h3>TUI</h3>
+                <p>Command center when you run <code>aether</code> in a terminal.</p>
+              </article>
+              <article>
+                <h3>Plain</h3>
+                <p>High-contrast text for SSH sessions and CI with <code>--plain</code>.</p>
+              </article>
+              <article>
+                <h3>JSON</h3>
+                <p>One stream for a SIEM via <code>--json-out</code>.</p>
+              </article>
+              <article>
+                <h3>HTML</h3>
+                <p>A single offline file. No CDN. A strict content-security policy.</p>
+              </article>
+            </div>
+          </div>
+          <article class="dossier">
+            <div class="dossier-top">
+              <p class="meta">filesystem · sample</p>
+              <span class="pill">Alert</span>
+            </div>
+            <h3>Reverse shell one-liner backdoor</h3>
+            <p class="meta">/tmp/sample/rev.sh</p>
+            <p class="why">YARA rule matched a reverse shell one-liner backdoor.</p>
+            <ul class="chips">
+              <li>Execution · T1059.004 · Unix Shell</li>
+              <li>Confidence high</li>
+            </ul>
+            <ol>
+              <li>Quarantine the script and inspect network connections for the C2 endpoint.</li>
+            </ol>
+            <p class="note">Illustrative sample from the embedded rule catalog. Not a scan of this computer.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="start" aria-labelledby="start-title">
+        <p class="section-label">Start</p>
+        <h2 id="start-title">Three commands, then look.</h2>
+        <p class="intro">Build the pure-Go binary, check the engine, then open the command center. A full scan that writes an HTML report is the next line when you want a file you can hand to someone else.</p>
+        <pre class="cmd"><code>git clone https://github.com/MR-N1CK/aether.git
+cd aether
+make build
+./bin/aether doctor
+sudo ./bin/aether
+sudo ./bin/aether scan --quick --plain --html-out report.html</code></pre>
+      </section>
+
+      <section id="limits" aria-labelledby="limits-title">
+        <p class="section-label">Limits</p>
+        <h2 id="limits-title">What a clean run does not prove.</h2>
+        <ul class="limits">
+          <li>Without root, Aether cannot read <code>/etc/shadow</code>, root cron spools, or other users’ <code>/proc</code> entries. The report says so.</li>
+          <li>Analysis is static. Packed binaries are not emulated.</li>
+          <li>A rootkit that unlinks itself from both <code>/proc/modules</code> and sysfs needs a memory image, not this scanner.</li>
+          <li>Files larger than 50 MB are recorded and skipped for hashing and YARA, unless you raise <code>--max-filesize</code>.</li>
+          <li>Rule updates and an intel URL are the only networked actions, and only when you ask for them.</li>
+        </ul>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site">
+    <div class="wrap">
+      <p>Aether · Apache-2.0 · Built to be read before it is run.</p>
+      <nav aria-label="Repository">
+        <a href="https://github.com/MR-N1CK/aether">Repository</a>
+        <a href="https://github.com/MR-N1CK/aether/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/MR-N1CK/aether/blob/main/CONTRIBUTING.md">Contributing</a>
+        <a href="https://github.com/MR-N1CK/aether/blob/main/DESIGN.md">Design system</a>
+      </nav>
+    </div>
+  </footer>
+  <p id="live" aria-live="polite" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></p>
+
+  <script>
+    (function () {
+      var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var panel = document.getElementById("sample");
+      var verdict = document.getElementById("verdict");
+      var live = document.getElementById("live");
+      var pauseBtn = document.getElementById("pause");
+      var replayBtn = document.getElementById("replay");
+      var rows = Array.prototype.slice.call(panel.querySelectorAll("[data-module]"));
+      var steps = [
+        ["process", "run", "Scanning"],
+        ["process", "clear", "Clear"],
+        ["persistence", "run", "Scanning"],
+        ["persistence", "alert", "Alert"],
+        ["users", "run", "Scanning"],
+        ["users", "clear", "Clear"],
+        ["network", "run", "Scanning"],
+        ["network", "notice", "Notice"],
+        ["kernel", "run", "Scanning"],
+        ["kernel", "clear", "Clear"]
+      ];
+      var timer = null;
+      var index = 0;
+      var paused = false;
+      var finished = false;
+
+      function setRow(name, kind, label) {
+        rows.forEach(function (row) {
+          if (row.getAttribute("data-module") !== name) return;
+          row.className = "mod is-" + kind;
+          row.querySelector(".state").textContent = label;
+        });
+      }
+
+      function reset() {
+        rows.forEach(function (row) {
+          row.className = "mod is-wait";
+          row.querySelector(".state").textContent = "Waiting";
+        });
+        verdict.textContent = "Reading the sample host";
+        panel.classList.add("is-playing");
+        index = 0;
+        finished = false;
+      }
+
+      function finish() {
+        finished = true;
+        panel.classList.remove("is-playing");
+        verdict.textContent = "Attention. One alert, one notice.";
+        live.textContent = "Sample finished. Persistence has an alert. Network has a notice.";
+        window.clearInterval(timer);
+        timer = null;
+      }
+
+      function tick() {
+        if (paused || finished) return;
+        if (index >= steps.length) {
+          finish();
+          return;
+        }
+        var step = steps[index];
+        setRow(step[0], step[1], step[2]);
+        index += 1;
+        if (index >= steps.length) finish();
+      }
+
+      function play() {
+        if (reduced) {
+          showFinal();
+          return;
+        }
+        window.clearInterval(timer);
+        paused = false;
+        pauseBtn.setAttribute("aria-pressed", "false");
+        pauseBtn.textContent = "Pause";
+        reset();
+        timer = window.setInterval(tick, 650);
+      }
+
+      function showFinal() {
+        setRow("process", "clear", "Clear");
+        setRow("persistence", "alert", "Alert");
+        setRow("users", "clear", "Clear");
+        setRow("network", "notice", "Notice");
+        setRow("kernel", "clear", "Clear");
+        verdict.textContent = "Attention. One alert, one notice.";
+        panel.classList.remove("is-playing");
+        finished = true;
+      }
+
+      function stop() {
+        paused = true;
+        pauseBtn.setAttribute("aria-pressed", "true");
+        pauseBtn.textContent = "Resume";
+        panel.classList.remove("is-playing");
+        window.clearInterval(timer);
+        timer = null;
+      }
+
+      pauseBtn.addEventListener("click", function () {
+        if (finished) return;
+        if (paused) {
+          if (reduced) return;
+          paused = false;
+          pauseBtn.setAttribute("aria-pressed", "false");
+          pauseBtn.textContent = "Pause";
+          panel.classList.add("is-playing");
+          timer = window.setInterval(tick, 650);
+          return;
+        }
+        stop();
+      });
+      replayBtn.addEventListener("click", play);
+      panel.addEventListener("keyup", function (event) {
+        if (event.key === "Tab" && !finished) stop();
+      });
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden && !finished) stop();
+      });
+
+      if (reduced) {
+        showFinal();
+        pauseBtn.hidden = true;
+        replayBtn.hidden = true;
+      } else {
+        play();
+      }
+    }());
+  </script>
+</body>
+</html>

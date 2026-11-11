@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"aether/internal/config"
 	"aether/internal/pkgdb"
@@ -466,7 +467,19 @@ func DecodeAndRescanWithYARA(
 	const maxCandidatesLimit = 50
 	const maxMatchesLimit = 20
 
+	// Per-file decode budget: depth 5 with branch-per-candidate BFS is
+	// unbounded on fixtures with many encodable runs — the suite's 163s
+	// became a 600s test timeout (2026-11-09). A wall-clock budget keeps the
+	// depth-5 power for the files that need it while bounding the cost per
+	// file. The budget is generous: real staged payloads decode in
+	// milliseconds; only pathological multi-branch fixtures hit it.
+	decodeStart := time.Now()
+	const maxDecodeWallTime = 400 * time.Millisecond
+
 	for len(queue) > 0 && totalCandidatesEvaluated < maxCandidatesLimit && len(allMatches) < maxMatchesLimit {
+		if time.Since(decodeStart) > maxDecodeWallTime {
+			break
+		}
 		select {
 		case <-ctx.Done():
 			return allMatches, allLayers, allYaraMatches

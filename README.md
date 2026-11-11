@@ -1,26 +1,21 @@
 <p align="center">
-  <img src="docs/assets/social-card.svg" alt="Aether: Read-Only Linux Compromise Assessment & Incident Response Scanner" width="880">
-</p>
-
-<h1 align="center">✦ A E T H E R</h1>
-
-<p align="center">
-  <strong>Read-only Linux threat hunting & endpoint compromise assessment engine.</strong><br>
-  Find out whether a host is clean, then inspect why — with zero sample execution, zero timestamp mutation, and zero outbound telemetry.
+  <img src="docs/assets/hero-banner.svg" alt="Aether — Read-only Linux threat hunting: zero sample execution, zero timestamp mutation, zero outbound telemetry" width="880">
 </p>
 
 <p align="center">
-  <a href="https://mr-n1ck.github.io/aether/"><strong>Interactive Web Overview</strong></a>
+  <a href="https://mr-n1ck.github.io/aether/"><strong>Web Overview</strong></a>
   &nbsp;•&nbsp;
   <a href="#quickstart">Quickstart</a>
   &nbsp;•&nbsp;
   <a href="#why-aether">Why Aether?</a>
   &nbsp;•&nbsp;
-  <a href="#comparison-matrix">Comparison Matrix</a>
+  <a href="#comparison-matrix">Comparison</a>
   &nbsp;•&nbsp;
   <a href="#surface-inspection">What it Inspects</a>
   &nbsp;•&nbsp;
-  <a href="#technical-reference">Technical Reference</a>
+  <a href="#deep-dives">Deep Dives</a>
+  &nbsp;•&nbsp;
+  <a href="#technical-reference">Reference</a>
 </p>
 
 <p align="center">
@@ -47,25 +42,28 @@ Aether is purpose-built for incident responders, detection engineers, and securi
 
 <p align="center"><sub><i>Live capture: Command Center → simulated hunt with streaming findings → forensic dossier. Record yourself: <code>sudo aether</code>.</i></sub></p>
 
-### Core Architecture Pillars
-
-1. 🛡️ **Forensic Safety & Read-Only Invariant**:
-   - All host inspection uses `safeopen.OpenRegularReadOnly` with flags `O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOATIME`.
-   - Protects against symlink traversal attacks, FIFO pipe blocking, and never touches file timestamps (`mtime`/`ctime`).
-   - Statically inspects target binaries and scripts — **never executes untrusted code**.
-
-2. ⚡ **Dual-Engine Architecture (Zero-Dependency Pure-Go + YARA-X)**:
-   - Statically compiles to a single pure-Go binary (`CGO_ENABLED=0`) with zero libc or external package dependencies.
-   - Evaluates native Go multi-signal heuristics alongside embedded YARA-X rules via pure-Go fallback interpretation.
-   - When built with CGO (`make build-yara`), executes via native Rust-compiled `libyara_x_capi` with 100% verdict parity.
-
-3. 🔍 **Static ELF Behavioral & Anti-Evasion Analysis**:
-   - Inspects compiled ELF binaries for weaponized syscall combinations (e.g. `socket + connect + dup2 + execve`), $W \oplus X$ segment violations, UPX packer headers, corrupted section offsets, and `.text` Shannon entropy.
-   - Recursive de-obfuscation unpacks base64, hex, rot13, shell de-quoting (`ba''sh`, `b\ash`), and inline Python execution (`exec(__import__('base64').b64decode(...))`).
-
-4. 📦 **Multi-Distribution Package Grounding**:
-   - Zero-dependency pure-Go database readers for **Alpine APK** (`/lib/apk/db/installed`), **Debian/Ubuntu dpkg** (`/var/lib/dpkg/info`), **Arch Pacman** (`/var/lib/pacman/local`), and **RPM**.
-   - Correlates hashes and suppress false positive alerts on legitimate system binaries (`/usr/bin/curl`, `/usr/bin/ssh`).
+<table>
+<tr>
+<td width="50" valign="middle"><b>◆</b></td>
+<td valign="top"><b>Forensic Safety & Read-Only Invariant</b><br>
+All host inspection uses <code>safeopen.OpenRegularReadOnly</code> with <code>O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOATIME</code> — symlink-traversal proof, FIFO-proof, and never touches <code>mtime</code>/<code>ctime</code>. Targets are statically inspected; <b>untrusted code is never executed</b>.</td>
+</tr>
+<tr>
+<td width="50" valign="middle"><b>▲</b></td>
+<td valign="top"><b>Dual-Engine Architecture (Zero-Dependency Pure-Go + YARA-X)</b><br>
+One static pure-Go binary (<code>CGO_ENABLED=0</code>), zero libc. Native multi-signal heuristics plus embedded YARA-X rules via pure-Go fallback interpretation — and when built with CGO (<code>make build-yara</code>), native Rust-compiled <code>libyara_x_capi</code> with 100% verdict parity.</td>
+</tr>
+<tr>
+<td width="50" valign="middle"><b>◇</b></td>
+<td valign="top"><b>Static ELF Behavioral & Anti-Evasion Analysis</b><br>
+Weaponized syscall combinations (<code>socket + connect + dup2 + execve</code>), W⊕X segment violations, UPX packer headers, corrupted section offsets, <code>.text</code> Shannon entropy. Recursive de-obfuscation: base64, hex, rot13, shell de-quoting (<code>ba''sh</code>), inline Python execution.</td>
+</tr>
+<tr>
+<td width="50" valign="middle"><b>▣</b></td>
+<td valign="top"><b>Multi-Distribution Package Grounding</b><br>
+Zero-dependency pure-Go readers for <b>Alpine APK</b>, <b>Debian/Ubuntu dpkg</b>, <b>Arch Pacman</b>, and <b>RPM</b> — correlating hashes to suppress false positives on legitimate system binaries (<code>/usr/bin/curl</code>, <code>/usr/bin/ssh</code>).</td>
+</tr>
+</table>
 
 ---
 

@@ -116,27 +116,27 @@ sudo ./bin/aether scan --quick --plain --json-out /var/log/aether_findings.json
 
 ```mermaid
 flowchart TD
-  Target[Linux Endpoint] --> safeopen[Safeopen: O_RDONLY | O_NOFOLLOW | O_NOATIME]
-  
-  subgraph Triage [Live Triage Modules]
-    safeopen --> M1[Process Hunter: /memfd, hidden PIDs, masquerading]
-    safeopen --> M2[Persistence: systemd, cron, at, sudoers, pam, SSH]
-    safeopen --> M3[Privilege: UID 0 clones, duplicate UIDs, shadow hashes]
-    safeopen --> M4[Network: Inode-to-PID correlation, raw sockets, sniffers]
-    safeopen --> M5[Kernel: /proc/modules vs sysfs, rootkits, taint flags]
+  Target["Linux Endpoint"] --> safeopen["Safeopen: O_RDONLY · O_NOFOLLOW · O_NOATIME"]
+
+  subgraph Triage ["Live Triage Modules"]
+    safeopen --> M1["Process Hunter: /memfd, hidden PIDs, masquerading"]
+    safeopen --> M2["Persistence: systemd, cron, at, sudoers, PAM, SSH"]
+    safeopen --> M3["Privilege: UID 0 clones, duplicate UIDs, shadow hashes"]
+    safeopen --> M4["Network: Inode-to-PID correlation, raw sockets, sniffers"]
+    safeopen --> M5["Kernel: /proc/modules vs sysfs, rootkits, taint flags"]
   end
 
-  subgraph Engine [Dual Threat Inspection]
-    Triage --> Heuristics[Native Go Heuristics: Anti-evasion & Shell Dequoting]
-    Triage --> YARAX[Static YARA-X Engine: Embedded Rules & Family Signatures]
-    Triage --> ELF[Static ELF Behavioral: Imports, W⊕X, Entropy, UPX]
-    PkgDB[(Package Grounding: apk, deb, rpm, pacman)] -.-> Engine
+  subgraph Engine ["Dual Threat Inspection"]
+    Triage --> Heuristics["Native Go Heuristics: anti-evasion & shell dequoting"]
+    Triage --> YARAX["Static YARA-X Engine: embedded rules & family signatures"]
+    Triage --> ELF["Static ELF Behavioral: imports, W⊕X, entropy, UPX"]
+    PkgDB[("Package Grounding: apk, deb, rpm, pacman")] -.-> Engine
   end
 
-  subgraph Presentation [Executive Output]
-    Engine --> TUI[Flight Deck TUI: 60 FPS Bubbletea HUD]
-    Engine --> HTML[Self-Contained HTML: Air-Gapped SVG Dossier]
-    Engine --> JSON[Streaming NDJSON: SIEM Ingestion]
+  subgraph Presentation ["Executive Output"]
+    Engine --> TUI["Flight Deck TUI: 60 FPS Bubbletea HUD"]
+    Engine --> HTML["Self-Contained HTML: air-gapped SVG dossier"]
+    Engine --> JSON["Streaming NDJSON: SIEM ingestion"]
   end
 ```
 

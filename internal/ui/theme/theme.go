@@ -60,23 +60,24 @@ var ASCIIBorder = lipgloss.Border{
 	BottomRight: "+",
 }
 
-// Palette definitions — Deep Ocean Teal: deep navy surfaces, electric teal
-// accents, ice-white text. Mission-control dark with high readability.
+// Palette definitions — Aurora Obsidian: deep space canvas (#050811), obsidian
+// surfaces (#0A0F1D, #10182B, #17223B), electric cyan accents (#38BDF8),
+// and high-contrast typography. Mission-control dark with maximum readability.
 var (
-	ColorObsidian   = lipgloss.Color("#0B1220") // Tier 0 root void canvas (deep navy)
-	ColorVoid       = lipgloss.Color("#0B1220") // Deepest void obsidian (tier 0 root container)
-	ColorSurface    = lipgloss.Color("#101828") // Tier 1: Panels and standard card background
-	ColorRaised     = lipgloss.Color("#16203A") // Tier 2: Focused panels, headers, floating cards
-	ColorOverlay    = lipgloss.Color("#1D2A45") // Tier 3: Modals, active selections, dropdowns
-	ColorBorder     = lipgloss.Color("#24334F") // Subtle navy hairline border
-	ColorBorderLit  = lipgloss.Color("#22D3EE") // Focused electric teal border & luminous rail
-	ColorActiveRail = lipgloss.Color("#22D3EE") // Luminous active pane rail
-	ColorTextPrim   = lipgloss.Color("#E6EDF7") // Ice white text
-	ColorTextSec    = lipgloss.Color("#C9D6E8") // Soft titanium text
-	ColorTextMute   = lipgloss.Color("#8CA0B8") // Muted slate (WCAG AA on navy)
-	ColorAccent     = lipgloss.Color("#0E7490") // Deep steel teal
+	ColorObsidian   = lipgloss.Color("#050811") // Tier 0 root void canvas
+	ColorVoid       = lipgloss.Color("#050811") // Deepest void obsidian (tier 0 root container)
+	ColorSurface    = lipgloss.Color("#0A0F1D") // Tier 1: Panels and standard card background
+	ColorRaised     = lipgloss.Color("#10182B") // Tier 2: Focused panels, headers, floating cards
+	ColorOverlay    = lipgloss.Color("#17223B") // Tier 3: Modals, active selections, dropdowns
+	ColorBorder     = lipgloss.Color("#1E293B") // Subtle hairline border
+	ColorBorderLit  = lipgloss.Color("#38BDF8") // Focused electric cyan border & luminous rail
+	ColorActiveRail = lipgloss.Color("#38BDF8") // Luminous active pane rail
+	ColorTextPrim   = lipgloss.Color("#F8FAFC") // Glacier white text
+	ColorTextSec    = lipgloss.Color("#CBD5E1") // Soft slate text
+	ColorTextMute   = lipgloss.Color("#7888A3") // Muted high-contrast slate (> 6.2:1 against void)
+	ColorAccent     = lipgloss.Color("#0284C7") // Deep electric cyan
 	ColorIndigo     = lipgloss.Color("#818CF8") // Electric indigo
-	ColorCyan       = lipgloss.Color("#22D3EE") // Telemetry teal
+	ColorCyan       = lipgloss.Color("#38BDF8") // Telemetry cyan
 
 	// Executive severity colors - restrained, distinct, high-contrast.
 	// Canonical tokens live in internal/report/palette.go and are shared by

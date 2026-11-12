@@ -674,8 +674,15 @@ func (m Model) renderBrandHeader(width int, statusText string) string {
 	if m.theme.ASCII {
 		brandPrefix = "* "
 	}
-	gradientLogo := m.theme.RenderGradientText(brandPrefix+"A E T H E R", "#0E7490", "#22D3EE", "#E6EDF7")
+	gradientLogo := m.theme.RenderGradientText(brandPrefix+"A E T H E R", "#0284C7", "#38BDF8", "#F8FAFC")
 	title := gradientLogo + "  " + m.theme.BrandTagline.Render(":: DEFENSIVE LINUX THREAT HUNTING ENGINE")
+
+	// Dynamic radar telemetry indicator during active scanning
+	if !m.scanFinished && !m.noAnim && !m.theme.ASCII && !m.theme.NoColor {
+		radarGlyphs := []string{"◐", "◓", "◑", "◒"}
+		radarGlyph := radarGlyphs[(m.animFrame/6)%len(radarGlyphs)]
+		statusText = m.theme.ActiveRail.Render(radarGlyph+" ") + statusText
+	}
 
 	targetPath := "Root Filesystem (/)"
 	if len(m.paths) > 0 {
@@ -795,6 +802,10 @@ func (m Model) renderSparkline(samples []float64) string {
 		return "      "
 	}
 	blocks := []rune{' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+	colors := []string{
+		"#1E293B", "#0E7490", "#0284C7", "#0099CC",
+		"#0EA5E9", "#38BDF8", "#7DD3FC", "#F0FDFF",
+	}
 	max := 1.0
 	for _, v := range samples {
 		if v > max {
@@ -809,9 +820,13 @@ func (m Model) renderSparkline(samples []float64) string {
 		} else if idx > 7 {
 			idx = 7
 		}
-		b.WriteRune(blocks[idx])
+		if m.theme.NoColor || m.theme.ASCII {
+			b.WriteRune(blocks[idx])
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colors[idx])).Render(string(blocks[idx])))
+		}
 	}
-	return m.theme.KeyHint.Render(b.String())
+	return b.String()
 }
 
 func (m Model) renderDonutChart(alerts, warnings, notices, safe int) string {
